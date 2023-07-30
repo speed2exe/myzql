@@ -65,24 +65,27 @@ const Conn = struct {
             return conn.handleErrorPacket(packet);
         }
         if (packet[0] < mysql_const.min_protocol_version) {
-            std.log.err("unsupported protocol version: {d}, expected at least {d}\n", packet[0], mysql_const.min_protocol_version);
+            std.log.err(
+                "unsupported protocol version: {d}, expected at least {d}\n",
+                .{ packet[0], mysql_const.min_protocol_version },
+            );
             return error.UnsupportedProtocolVersion;
         }
 
         // Server version: Null-terminated string
         var pos = std.mem.indexOfScalarPos(u8, packet, 1, 0);
         const server_version = packet[1 .. pos - 1];
-        std.log.info("server version: {s}\n", server_version);
+        std.log.info("server version: {s}\n", .{server_version});
 
         // Connection id: 4 bytes
         const connection_id = std.mem.readIntSliceLittle(u32, packet[pos .. pos + 4]);
-        std.log.info("connection id: {d}\n", connection_id);
+        std.log.info("connection id: {d}\n", .{connection_id});
         pos += 4 + 1; // +1 for filler
 
         // Auth plugin data part 1: 8 bytes
         const auth_data1: *[8]u8 = packet[pos .. pos + 8];
         pos += 8 + 1; // +1 for filler
-        std.log.info("auth data: {x}\n", auth_data1);
+        std.log.info("auth data: {x}\n", .{auth_data1});
 
         // Capabilities: 2 bytes
         conn.flags = std.mem.readIntSliceLittle(u16, packet[pos .. pos + 2]);
@@ -210,10 +213,8 @@ const Conn = struct {
         // 	return nil, ErrUnknownPlugin
     }
 
-    fn scrambleSHA256Password(scramble: []u8, password: []u8) []u8 {
-        _ = password;
-        _ = scramble;
-    }
+    // TODO: test
+    // XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))
 
     fn readPacket(conn: Conn, allocator: std.mem.Allocator) ![]u8 {
         errdefer conn.close();
@@ -251,12 +252,12 @@ const Conn = struct {
 
     fn handleErrorPacket(conn: Conn, packet: []const u8) !void {
         if (packet[0] != mysql_const.i_err) {
-            std.log.err("expected error packet, got %x\n", packet[0]);
+            std.log.err("expected error packet, got %x\n", .{packet[0]});
             return error.MalformedPacket;
         }
 
         const err_number = std.mem.readIntSliceLittle(u16, packet[1..3]);
-        std.log.err("error number: %d\n", err_number);
+        std.log.err("error number: %d\n", .{err_number});
 
         // 1792: ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION
         // 1290: ER_OPTION_PREVENTS_STATEMENT (returned by Aurora during failover)
@@ -277,10 +278,57 @@ const Conn = struct {
 
         // SQL State [optional: # + 5bytes string]
         if (packet[3] == 0x23) {
-            std.log.err("sql state: {d}\n", packet[4..9]);
-            std.log.err("error message: {s}\n", packet[9..]);
+            std.log.err("sql state: {d}\n", .{packet[4..9]});
+            std.log.err("error message: {s}\n", .{packet[9..]});
         } else {
-            std.log.err("error message: {s}\n", packet[3..]);
+            std.log.err("error message: {s}\n", .{packet[3..]});
         }
     }
 };
+
+fn scrambleSHA256Password(scramble: []const u8, password: []const u8) [32]u8 {
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+
+    var message1 = blk: {
+        var hasher = Sha256.init(.{});
+        hasher.update(password);
+        break :blk hasher.finalResult();
+    };
+    const message2 = blk: {
+        var hasher = Sha256.init(.{});
+        hasher.update(&message1);
+        var temp = hasher.finalResult();
+
+        hasher = Sha256.init(.{});
+        hasher.update(&temp);
+        hasher.update(scramble);
+        hasher.final(&temp);
+        break :blk temp;
+    };
+    for (&message1, message2) |*m1, m2| {
+        m1.* ^= m2;
+    }
+    return message1;
+}
+
+test "scrambleSHA256Password" {
+    const scramble = [_]u8{ 10, 47, 74, 111, 75, 73, 34, 48, 88, 76, 114, 74, 37, 13, 3, 80, 82, 2, 23, 21 };
+    const tests = [_]struct {
+        password: []const u8,
+        expected: [32]u8,
+    }{
+        .{
+            .password = "secret",
+            .expected = .{ 244, 144, 231, 111, 102, 217, 216, 102, 101, 206, 84, 217, 140, 120, 208, 172, 254, 47, 176, 176, 139, 66, 61, 168, 7, 20, 72, 115, 211, 11, 49, 44 },
+        },
+        .{
+            .password = "secret2",
+            .expected = .{ 171, 195, 147, 74, 1, 44, 243, 66, 232, 118, 7, 28, 142, 226, 2, 222, 81, 120, 91, 67, 2, 88, 167, 160, 19, 139, 199, 156, 77, 128, 11, 198 },
+        },
+    };
+
+    for (tests) |t| {
+        const actual = scrambleSHA256Password(&scramble, t.password);
+        try std.testing.expectEqual(t.expected, actual);
+    }
+}
