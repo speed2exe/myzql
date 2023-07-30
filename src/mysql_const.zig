@@ -1,3 +1,5 @@
+const default_auth_plugin = "mysql_native_password";
+
 // MySQL constants documentation:
 // http://dev.mysql.com/doc/internals/en/client-server-protocol.html
 
