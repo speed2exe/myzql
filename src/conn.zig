@@ -3,23 +3,29 @@ const mysql_const = @import("./mysql_const.zig");
 const Config = @import("./config.zig").Config;
 
 const maxPacketSize = 1 << 24 - 1;
+const buffer_size = 4096;
 
 const Conn = struct {
-    const buffer_size = 4096;
     const Buffer = std.io.BufferedReader(buffer_size, std.net.Stream);
+    const PacketBuffer = struct {
+        length: u32,
+        sequence_id: u8,
+        payload: [maxPacketSize]u8,
+    };
+    const Connected = struct {
+        stream: std.net.Stream,
+        buffer: Buffer,
+        packet_buffer: ?PacketBuffer,
+    };
     const State = union(enum) {
-        Disconnected,
-        Connected: struct {
-            stream: std.net.Stream,
-            buffer: Buffer,
-        },
+        disconnected,
+        connected: Connected,
     };
 
     host: []const u8,
     port: u16,
     config: Config,
-    state: State = .Disconnected,
-    sequence: u8 = 0, // TODO: Not sure what this does, check
+    state: State = .disconnected,
     flags: u32 = 0, // TODO: Not sure what this does, check
 
     pub fn init(host: []const u8, port: u16, config: Config) Conn {
@@ -33,7 +39,7 @@ const Conn = struct {
     pub fn close(conn: Conn) void {
         switch (conn.State) {
             .Connected => {
-                conn.state.Connected.stream.close();
+                conn.state.connected.stream.close();
                 conn.state = .Disconnected;
             },
             .Disconnected => {},
@@ -46,8 +52,8 @@ const Conn = struct {
 
     fn connectIfDisconnected(conn: Conn) !void {
         switch (conn.state) {
-            .Connected => {},
-            .Disconnected => try conn.connect(),
+            .connected => {},
+            .disconnected => try conn.connect(),
         }
     }
 
@@ -55,7 +61,11 @@ const Conn = struct {
         // dial
         var stream = try std.net.tcpConnectToHost(conn.allocator, conn.host, conn.port);
         const buffer = std.io.bufferedReader(stream.reader());
-        conn.state = .Connected{ .stream = stream, .buffer = buffer };
+        conn.state = .connected{
+            .stream = stream,
+            .buffer = buffer,
+            .packet_buffer = null,
+        };
         errdefer conn.close();
 
         const packet = try conn.readPacket(allocator);
@@ -151,24 +161,21 @@ const Conn = struct {
         try conn.auth(auth_data, auth_plugin);
     }
 
-    fn auth(conn: Conn, auth_data: []u8, auth_plugin: []const u8) !void {
+    fn auth(conn: Conn, auth_data: []u8, auth_plugin: []const u8) ![32]u8 {
         if (std.mem.eql(u8, auth_plugin, "caching_sha2_password")) {
-            scrambleSHA256Password(auth_data, conn.config.password);
-            // 	return authResp, nil
+            return scrambleSHA256Password(auth_data, conn.config.password);
+        } else if (std.mem.eql(u8, auth_plugin, "mysql_old_password")) {
+            if (!conn.config.allow_old_password) {
+                std.log.err("MySQL server requested old password authentication, but it is disabled, you can enable in config");
+                return error.OldPasswordDisabled;
+            }
+            if (conn.config.pasword.len == 0) {}
+            // Note: there are edge cases where this should work but doesn't;
+            // this is currently "wontfix":
+            // https://github.com/go-sql-driver/mysql/issues/184
+            // authResp := append(scrambleOldPassword(authData[:8], mc.cfg.Passwd), 0)
+            // return authResp, nil
         }
-
-        // case "mysql_old_password":
-        // 	if !mc.cfg.AllowOldPasswords {
-        // 		return nil, ErrOldPassword
-        // 	}
-        // 	if len(mc.cfg.Passwd) == 0 {
-        // 		return nil, nil
-        // 	}
-        // 	// Note: there are edge cases where this should work but doesn't;
-        // 	// this is currently "wontfix":
-        // 	// https://github.com/go-sql-driver/mysql/issues/184
-        // 	authResp := append(scrambleOldPassword(authData[:8], mc.cfg.Passwd), 0)
-        // 	return authResp, nil
 
         // case "mysql_clear_password":
         // 	if !mc.cfg.AllowCleartextPasswords {
@@ -213,16 +220,38 @@ const Conn = struct {
         // 	return nil, ErrUnknownPlugin
     }
 
-    // TODO: test
-    // XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))
+    // http://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Protocol::AuthSwitchResponse
+    // func (mc *mysqlConn) writeAuthSwitchPacket(authData []byte) error {
+    // 	pktLen := 4 + len(authData)
+    // 	data, err := mc.buf.takeSmallBuffer(pktLen)
+    // 	if err != nil {
+    // 		// cannot take the buffer. Something must be wrong with the connection
+    // 		mc.cfg.Logger.Print(err)
+    // 		return errBadConnNoWrite
+    // 	}
+    //
+    // 	// Add the auth data [EOF]
+    // 	copy(data[4:], authData)
+    // 	return mc.writePacket(data)
+    // }
+    fn auth_send(conn: Conn, auth_data: []const u8) !void {
+        const pkt_len = 4 + auth_data.len;
+        const data = try conn.writePacket(pkt_len);
+        data[0] = pkt_len & 0xFF;
+        data[1] = pkt_len >> 8 & 0xFF;
+        data[2] = pkt_len >> 16 & 0xFF;
+        data[3] = conn.sequence;
+        conn.sequence += 1;
+        @memcpy(data[4..], auth_data);
+    }
 
-    fn readPacket(conn: Conn, allocator: std.mem.Allocator) ![]u8 {
+    fn readPacket(conn: Conn, allocator: std.mem.Allocator) ![]const u8 {
         errdefer conn.close();
 
         var accumulator = std.ArrayList(u8).init(allocator);
         errdefer accumulator.deinit();
 
-        const reader = conn.state.Connected.buffer.reader();
+        const reader = conn.state.connected.buffer.reader();
 
         while (true) {
             const header = try reader.readBytesNoEof(4);
@@ -286,6 +315,7 @@ const Conn = struct {
     }
 };
 
+// XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))
 fn scrambleSHA256Password(scramble: []const u8, password: []const u8) [32]u8 {
     const Sha256 = std.crypto.hash.sha2.Sha256;
 

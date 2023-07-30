@@ -1,6 +1,7 @@
 pub const Config = struct {
     password: []const u8,
     reject_read_only: bool = false,
+    allow_old_password: bool = false,
 
     // TODO: Add TLS Config
     tls: bool = false,
