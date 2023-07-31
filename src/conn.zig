@@ -380,5 +380,4 @@ test "connFirstPacket" {
     try conn.dial();
     const packet = try conn.readPacket(std.testing.allocator);
     defer packet.deinit(std.testing.allocator);
-    std.log.info("packet: {any}\n", .{packet});
 }
