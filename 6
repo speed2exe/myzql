@@ -2,21 +2,15 @@ const std = @import("std");
 const mysql_const = @import("./mysql_const.zig");
 const Config = @import("./config.zig").Config;
 
-const max_packet_size = 1 << 24 - 1;
+const maxPacketSize = 1 << 24 - 1;
 const buffer_size = 4096;
 
 const Conn = struct {
-    const Buffer = std.io.BufferedReader(buffer_size, std.io.Reader(
-        std.net.Stream,
-        std.net.Stream.ReadError,
-        std.net.Stream.read,
-    ));
+    const Buffer = std.io.BufferedReader(buffer_size, std.net.Stream);
     const Packet = struct {
+        length: u32,
         sequence_id: u8,
-        payload: []u8,
-        fn deinit(packet: Packet, allocator: std.mem.Allocator) void {
-            allocator.free(packet.payload);
-        }
+        payload: [maxPacketSize]u8,
     };
     const Connected = struct {
         stream: std.net.Stream,
@@ -49,21 +43,13 @@ const Conn = struct {
         try conn.connectIfDisconnected(conn.host, conn.port);
     }
 
-    fn dial(conn: *Conn) !void {
-        switch (conn.state) {
-            .connected => {
-                std.log.err("cannot dial while already connected, close first\n", .{});
-                return error.AlreadyConnected;
-            },
-            .disconnected => {
-                const stream = try std.net.tcpConnectToAddress(conn.config.address);
-                const buffer = std.io.bufferedReader(stream.reader());
-                conn.state = .{ .connected = .{
-                    .stream = stream,
-                    .buffer = buffer,
-                } };
-            },
-        }
+    fn dial(conn: Conn) !void {
+        const stream = try std.net.tcpConnectToAddress(conn.config.address);
+        const buffer = std.io.bufferedReader(stream.reader());
+        conn.state = .connected{
+            .stream = stream,
+            .buffer = buffer,
+        };
     }
 
     fn connectIfDisconnected(conn: Conn) !void {
@@ -261,34 +247,22 @@ const Conn = struct {
         @memcpy(data[4..], auth_data);
     }
 
-    inline fn readPacket(conn: Conn, allocator: std.mem.Allocator) !Packet {
-        var reader = blk: {
+    fn readPacket(conn: Conn) !Packet {
+        const reader = blk: {
             switch (conn.state) {
-                .connected => |c| {
-                    var b = c.buffer;
-                    break :blk b.reader();
-                },
+                .connected => break :blk conn.state.connected.buffer.reader(),
                 .disconnected => {
-                    std.log.err("attempt to read packet while disconnected", .{});
+                    std.log.err("attempt to read packet while disconnected");
                     return error.Disconnected;
                 },
             }
         };
 
+        var pkt: Packet = undefined;
         const header = try reader.readBytesNoEof(4);
-        const length = @as(u32, header[0]) | @as(u32, header[1]) << 8 | @as(u32, header[2]) << 16;
-        const sequence_id = header[3];
-
-        var payload = try allocator.alloc(u8, length);
-        const n = try reader.readAll(payload);
-        if (n != length) {
-            std.log.err("expected {d} bytes, got {d}\n", .{ length, n });
-            return error.MalformedPacket;
-        }
-        return .{
-            .sequence_id = sequence_id,
-            .payload = payload,
-        };
+        pkt.length = header[0] | header[1] << 8 | header[2] << 16;
+        pkt.sequence_id = header[3];
+        try reader.readAll(pkt.paylod[0..pkt.length]);
     }
 
     fn handleErrorPacket(conn: Conn, packet: []const u8) !void {
@@ -376,9 +350,8 @@ test "scrambleSHA256Password" {
 }
 
 test "connFirstPacket" {
-    var conn = Conn.init(.{});
+    const conn = Conn.init(.{});
     try conn.dial();
-    const packet = try conn.readPacket(std.testing.allocator);
-    defer packet.deinit(std.testing.allocator);
+    const packet = conn.readPacket();
     std.log.info("packet: {any}\n", .{packet});
 }
