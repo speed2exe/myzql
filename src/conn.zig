@@ -362,5 +362,16 @@ test "connFirstPacket" {
     var conn = Conn.init(.{});
     try conn.dial();
     const packet = try conn.readPacket(std.testing.allocator);
-    defer packet.deinit(std.testing.allocator);
+    std.log.warn("packet: {any}\n", .{packet});
+    defer packet.deinit();
+}
+
+test "get handshake packet" {
+    var conn = Conn.init(.{});
+    try conn.dial();
+    const packet = try conn.readPacket(std.testing.allocator);
+    defer packet.deinit();
+    const handshake = protocol.HandshakeV10.initFromPacket(packet);
+    try std.io.getStdOut().writeAll("hello!!!");
+    try protocol.HandshakeV10.dump(handshake, std.io.getStdOut().writer());
 }
