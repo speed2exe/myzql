@@ -4,6 +4,8 @@ const mysql_const = @import("./mysql_const.zig");
 const Config = @import("./config.zig").Config;
 
 const max_packet_size = 1 << 24 - 1;
+
+// TODO: make this adjustable during compile time
 const buffer_size = 4096;
 
 const Conn = struct {
@@ -21,12 +23,11 @@ const Conn = struct {
         connected: Connected,
     };
 
-    config: Config,
     state: State = .disconnected,
     flags: u32 = 0, // TODO: Not sure what this does, check
 
-    pub fn init(config: Config) Conn {
-        return .{ .config = config };
+    pub fn init() Conn {
+        return .{};
     }
 
     pub fn close(conn: Conn) void {
@@ -43,14 +44,14 @@ const Conn = struct {
         try conn.connectIfDisconnected(conn.host, conn.port);
     }
 
-    fn dial(conn: *Conn) !void {
+    fn dial(conn: *Conn, address: std.net.Address) !void {
         switch (conn.state) {
             .connected => {
                 std.log.err("cannot dial while already connected, close first\n", .{});
                 return error.AlreadyConnected;
             },
             .disconnected => {
-                const stream = try std.net.tcpConnectToAddress(conn.config.address);
+                const stream = try std.net.tcpConnectToAddress(address);
                 const buffer = std.io.bufferedReader(stream.reader());
                 conn.state = .{ .connected = .{
                     .stream = stream,
@@ -60,22 +61,8 @@ const Conn = struct {
         }
     }
 
-    fn connectIfDisconnected(conn: Conn) !void {
-        switch (conn.state) {
-            .connected => {},
-            .disconnected => try conn.connect(),
-        }
-    }
-
-    fn connect(conn: Conn, allocator: std.mem.Allocator) !void {
-        // dial
-        var stream = try std.net.tcpConnectToHost(conn.allocator, conn.host, conn.port);
-        const buffer = std.io.bufferedReader(stream.reader());
-        conn.state = .connected{
-            .stream = stream,
-            .buffer = buffer,
-            .packet_buffer = null,
-        };
+    pub fn connect(conn: Conn, allocator: std.mem.Allocator, address: std.net.Address) !void {
+        try conn.dial(address);
         errdefer conn.close();
 
         const packet = try conn.readPacket(allocator);
@@ -257,6 +244,18 @@ const Conn = struct {
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_handshake_v10.html
     fn readProtocolHandShakeV10() void {}
+
+    fn reader(conn: Conn) !Buffer {
+        switch (conn.state) {
+            .connected => return conn.state.connected.buffer,
+            .disconnected => return error.Disconnected,
+        }
+    }
+
+    fn readerBuffered(conn: Conn) !StreamReader {
+        const r = try conn.reader();
+        return std.io.bufferedReader(r);
+    }
 
     fn readPacket(conn: Conn, allocator: std.mem.Allocator) !protocol.Packet {
         var reader = blk: {

@@ -13,12 +13,26 @@ pub const Client = struct {
         };
     }
 
-    pub fn ping(client: Client) void {
-        _ = client;
-        std.debug.print("ping\n");
+    pub fn ping(client: Client) !void {
+        try client.connectIfNotConnected();
+        try client.conn.ping();
     }
 
     pub fn query(_: Client) void {
         std.debug.print("query\n");
     }
+
+    fn connectIfNotConnected(c: Client) !void {
+        switch (c.conn.state) {
+            .connected => {},
+            .disconnected => {
+                try c.conn.connect(c.config.address);
+            },
+        }
+    }
 };
+
+test Client {
+    const c = Client.init(.{});
+    try c.ping();
+}
