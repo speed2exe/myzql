@@ -15,7 +15,7 @@ pub const Client = struct {
         };
     }
 
-    pub fn ping(client: Client) !void {
+    pub fn ping(client: *Client) !void {
         try client.connectIfNotConnected();
         try client.conn.ping();
     }
@@ -24,17 +24,17 @@ pub const Client = struct {
         std.debug.print("query\n");
     }
 
-    fn connectIfNotConnected(c: Client) !void {
+    fn connectIfNotConnected(c: *Client) !void {
         switch (c.conn.state) {
             .connected => {},
             .disconnected => {
-                try c.conn.connect(c.config.address);
+                try c.conn.connect(c.allocator, c.config.address);
             },
         }
     }
 };
 
 test "ping" {
-    const c = Client.init(.{}, std.testing.allocator);
+    var c = Client.init(.{}, std.testing.allocator);
     try c.ping();
 }

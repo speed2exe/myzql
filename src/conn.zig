@@ -9,7 +9,14 @@ const max_packet_size = 1 << 24 - 1;
 const buffer_size: usize = 4096;
 
 pub const Conn = struct {
-    const StreamBufferedReader = std.io.BufferedReader(buffer_size, std.net.Stream);
+    const StreamBufferedReader = std.io.BufferedReader(
+        buffer_size,
+        std.io.Reader(
+            std.net.Stream,
+            std.net.Stream.ReadError,
+            std.net.Stream.read,
+        ),
+    );
     const Connected = struct {
         stream: std.net.Stream,
         buffer: StreamBufferedReader,
@@ -23,7 +30,7 @@ pub const Conn = struct {
     flags: u32 = 0, // TODO: Not sure what this does, check
 
     pub fn close(conn: Conn) void {
-        switch (conn.State) {
+        switch (conn.state) {
             .Connected => {
                 conn.state.connected.stream.close();
                 conn.state = .Disconnected;
@@ -40,7 +47,7 @@ pub const Conn = struct {
             },
             .disconnected => {
                 const stream = try std.net.tcpConnectToAddress(address);
-                const buffer = std.io.bufferedReader(stream.reader());
+                const buffer = std.io.bufferedReaderSize(buffer_size, stream.reader());
                 conn.state = .{ .connected = .{
                     .stream = stream,
                     .buffer = buffer,
@@ -49,7 +56,7 @@ pub const Conn = struct {
         }
     }
 
-    pub fn connect(conn: Conn, allocator: std.mem.Allocator, address: std.net.Address) !void {
+    pub fn connect(conn: *Conn, allocator: std.mem.Allocator, address: std.net.Address) !void {
         try conn.dial(address);
         errdefer conn.close();
 
@@ -233,7 +240,7 @@ pub const Conn = struct {
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_handshake_v10.html
     fn readProtocolHandShakeV10() void {}
 
-    fn reader(conn: Conn) !std.io.BufferedReader(std.net.Stream) {
+    fn streamBufferedReader(conn: Conn) !StreamBufferedReader {
         switch (conn.state) {
             .connected => return conn.state.connected.buffer,
             .disconnected => return error.Disconnected,
@@ -241,8 +248,8 @@ pub const Conn = struct {
     }
 
     fn readPacket(conn: Conn, allocator: std.mem.Allocator) !protocol.Packet {
-        const r = try conn.reader();
-        return protocol.Packet.initFromReader(allocator, r);
+        var sbr = try conn.streamBufferedReader();
+        return protocol.Packet.initFromReader(allocator, sbr.reader());
     }
 
     fn handleErrorPacket(conn: Conn, packet: []const u8) !void {
@@ -329,17 +336,19 @@ test "scrambleSHA256Password" {
     }
 }
 
+const default_config: Config = .{};
+
 test "connFirstPacket" {
-    var conn = Conn.init(.{});
-    try conn.dial();
+    var conn: Conn = .{};
+    try conn.dial(default_config.address);
     const packet = try conn.readPacket(std.testing.allocator);
     std.log.warn("packet: {any}\n", .{packet});
     defer packet.deinit();
 }
 
 test "get handshake packet" {
-    var conn = Conn.init(.{});
-    try conn.dial();
+    var conn: Conn = .{};
+    try conn.dial(default_config.address);
     const packet = try conn.readPacket(std.testing.allocator);
     defer packet.deinit();
     const handshake = protocol.HandshakeV10.initFromPacket(packet);

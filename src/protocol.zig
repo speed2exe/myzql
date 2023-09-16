@@ -1,10 +1,10 @@
 const std = @import("std");
 
 pub const Packet = struct {
-    allocator: std.mem.Allocator,
     sequence_id: u8,
     payload: []const u8,
 
+    // TODO: should return enum of either Packet or ErrorPacket
     pub fn initFromReader(allocator: std.mem.Allocator, std_io_reader: anytype) !Packet {
         const header = try std_io_reader.readBytesNoEof(4);
         const length = @as(u32, header[0]) | @as(u32, header[1]) << 8 | @as(u32, header[2]) << 16;
@@ -17,15 +17,52 @@ pub const Packet = struct {
             return error.MalformedPacket;
         }
         return .{
-            .allocator = allocator,
             .sequence_id = sequence_id,
             .payload = payload,
         };
     }
 
-    pub fn deinit(packet: Packet) void {
-        packet.allocator.free(packet.payload);
+    pub fn deinit(packet: Packet, allocator: std.mem.Allocator) void {
+        allocator.free(packet.payload);
     }
+};
+
+pub const ErrorPacket = struct {
+
+    // fn handleErrorPacket(conn: Conn, packet: []const u8) !void {
+    //     if (packet[0] != mysql_const.i_err) {
+    //         std.log.err("expected error packet, got %x\n", .{packet[0]});
+    //         return error.MalformedPacket;
+    //     }
+
+    //     const err_number = std.mem.readIntSliceLittle(u16, packet[1..3]);
+    //     std.log.err("error number: %d\n", .{err_number});
+
+    //     // 1792: ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION
+    //     // 1290: ER_OPTION_PREVENTS_STATEMENT (returned by Aurora during failover)
+    //     if ((err_number == 1792 or err_number == 1290) and conn.config.reject_read_only) {
+    //         // Oops; we are connected to a read-only connection, and won't be able
+    //         // to issue any write statements. Since RejectReadOnly is configured,
+    //         // we throw away this connection hoping this one would have write
+    //         // permission. This is specifically for a possible race condition
+    //         // during failover (e.g. on AWS Aurora). See README.md for more.
+    //         //
+    //         // We explicitly close the connection before returning
+    //         // driver.ErrBadConn to ensure that `database/sql` purges this
+    //         // connection and initiates a new one for next statement next time.
+    //         conn.close();
+    //         std.log.err("rejecting read-only connection\n");
+    //         return error.DriverBadConnection;
+    //     }
+
+    //     // SQL State [optional: # + 5bytes string]
+    //     if (packet[3] == 0x23) {
+    //         std.log.err("sql state: {d}\n", .{packet[4..9]});
+    //         std.log.err("error message: {s}\n", .{packet[9..]});
+    //     } else {
+    //         std.log.err("error message: {s}\n", .{packet[3..]});
+    //     }
+    // }
 };
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_handshake_v10.html
