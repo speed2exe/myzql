@@ -6,12 +6,13 @@ const Config = @import("./config.zig").Config;
 const max_packet_size = 1 << 24 - 1;
 
 // TODO: make this adjustable during compile time
-const buffer_size = 4096;
+const buffer_size: usize = 4096;
 
-const Conn = struct {
+pub const Conn = struct {
+    const StreamBufferedReader = std.io.BufferedReader(buffer_size, std.net.Stream);
     const Connected = struct {
         stream: std.net.Stream,
-        buffer: std.io.BufferedReader(std.net.Stream), // bufferedReader for stream
+        buffer: StreamBufferedReader,
     };
     const State = union(enum) {
         disconnected,
@@ -20,10 +21,6 @@ const Conn = struct {
 
     state: State = .disconnected,
     flags: u32 = 0, // TODO: Not sure what this does, check
-
-    pub fn init() Conn {
-        return .{};
-    }
 
     pub fn close(conn: Conn) void {
         switch (conn.State) {

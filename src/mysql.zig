@@ -5,11 +5,13 @@ const Conn = @import("./conn.zig").Conn;
 pub const Client = struct {
     config: Config,
     conn: Conn,
+    allocator: std.mem.Allocator,
 
-    pub fn init(config: Config) Client {
+    pub fn init(config: Config, allocator: std.mem.Allocator) Client {
         return .{
             .config = config,
-            .conn = Conn.init(config),
+            .conn = .{},
+            .allocator = allocator,
         };
     }
 
@@ -33,6 +35,6 @@ pub const Client = struct {
 };
 
 test "ping" {
-    const c = Client.init(.{});
+    const c = Client.init(.{}, std.testing.allocator);
     try c.ping();
 }
