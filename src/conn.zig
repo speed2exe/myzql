@@ -9,14 +9,9 @@ const max_packet_size = 1 << 24 - 1;
 const buffer_size = 4096;
 
 const Conn = struct {
-    const Buffer = std.io.BufferedReader(buffer_size, std.io.Reader(
-        std.net.Stream,
-        std.net.Stream.ReadError,
-        std.net.Stream.read,
-    ));
     const Connected = struct {
         stream: std.net.Stream,
-        buffer: Buffer,
+        buffer: std.io.BufferedReader(std.net.Stream), // bufferedReader for stream
     };
     const State = union(enum) {
         disconnected,
@@ -38,10 +33,6 @@ const Conn = struct {
             },
             .Disconnected => {},
         }
-    }
-
-    pub fn ping(conn: Conn) !void {
-        try conn.connectIfDisconnected(conn.host, conn.port);
     }
 
     fn dial(conn: *Conn, address: std.net.Address) !void {
@@ -245,32 +236,16 @@ const Conn = struct {
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_handshake_v10.html
     fn readProtocolHandShakeV10() void {}
 
-    fn reader(conn: Conn) !Buffer {
+    fn reader(conn: Conn) !std.io.BufferedReader(std.net.Stream) {
         switch (conn.state) {
             .connected => return conn.state.connected.buffer,
             .disconnected => return error.Disconnected,
         }
     }
 
-    fn readerBuffered(conn: Conn) !StreamReader {
-        const r = try conn.reader();
-        return std.io.bufferedReader(r);
-    }
-
     fn readPacket(conn: Conn, allocator: std.mem.Allocator) !protocol.Packet {
-        var reader = blk: {
-            switch (conn.state) {
-                .connected => |c| {
-                    var b = c.buffer;
-                    break :blk b.reader();
-                },
-                .disconnected => {
-                    std.log.err("attempt to read packet while disconnected", .{});
-                    return error.Disconnected;
-                },
-            }
-        };
-        return protocol.Packet.initFromReader(allocator, reader);
+        const r = try conn.reader();
+        return protocol.Packet.initFromReader(allocator, r);
     }
 
     fn handleErrorPacket(conn: Conn, packet: []const u8) !void {

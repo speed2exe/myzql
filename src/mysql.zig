@@ -32,7 +32,7 @@ pub const Client = struct {
     }
 };
 
-test Client {
+test "ping" {
     const c = Client.init(.{});
     try c.ping();
 }
