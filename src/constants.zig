@@ -4,6 +4,7 @@ const default_auth_plugin = "mysql_native_password";
 const OK: u8 = 0x00;
 const EOF: u8 = 0xFE;
 const ERR: u8 = 0xFF;
+const HANDSHAKE_V10: u8 = 0x0A;
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/group__group__cs__capabilities__flags.html
 const CLIENT_LONG_PASSWORD: u32 = 1;
