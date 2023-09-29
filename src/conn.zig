@@ -1,5 +1,4 @@
 const std = @import("std");
-const protocol = @import("./protocol.zig");
 const Config = @import("./config.zig").Config;
 const constants = @import("./constants.zig");
 

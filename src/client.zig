@@ -1,13 +1,12 @@
 const std = @import("std");
-const Config = @import("./config.zig").Config;
-const Conn = @import("./conn.zig").Conn;
+const myzql = @import("myzql");
 
 pub const Client = struct {
-    config: Config,
-    conn: Conn,
+    config: myzql.Config,
+    conn: myzql.Conn,
     allocator: std.mem.Allocator,
 
-    pub fn init(config: Config, allocator: std.mem.Allocator) Client {
+    pub fn init(config: myzql.Config, allocator: std.mem.Allocator) Client {
         return .{
             .config = config,
             .conn = .{},
