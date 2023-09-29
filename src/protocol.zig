@@ -27,7 +27,7 @@ pub const Packet = struct {
         allocator.free(packet.payload);
     }
 
-    pub fn realize(packet: Packet, capabilities: u32, comptime is_first_packet: bool) !PacketRealized {
+    pub fn realize(packet: Packet, capabilities: u32, comptime is_first_packet: bool) PacketRealized {
         const first_byte = packet.payload[0];
         return switch (first_byte) {
             constants.OK => .{ .ok_packet = OkPacket.initFromPacket(packet, capabilities) },
@@ -36,7 +36,7 @@ pub const Packet = struct {
             constants.HANDSHAKE_V10 => .{ .handshake_v10 = HandshakeV10.initFromPacket(packet, capabilities) },
             else => |x| {
                 std.log.err("unexpected packet type: {any}\n", .{x});
-                return error.UnexpectedPacket;
+                unreachable;
             },
         };
     }
@@ -174,7 +174,7 @@ pub const HandshakeV10 = struct {
     status_flags: u16,
     capability_flags_2: u16,
     auth_plugin_data_len: ?u8,
-    auth_plugin_data_part_2: []const u8,
+    auth_plugin_data_part_2: [:0]const u8,
     auth_plugin_name: ?[:0]const u8,
 
     fn initFromPacket(packet: Packet, capabilities: u32) HandshakeV10 {
@@ -195,9 +195,9 @@ pub const HandshakeV10 = struct {
         const reserved = reader.readFixed(10);
         std.debug.assert(std.mem.eql(u8, reserved, &[10]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
 
-        // length = max(13, auth_plugin_data_len - 8);
-        const remain_auth_data_length = auth_plugin_data_len - 13;
-        const auth_plugin_data_part_2 = reader.readFixedRuntime(remain_auth_data_length);
+        // This part is not clear in the docs, but it seems like null terminated string works
+        // TODO: investigate server code to confirm
+        const auth_plugin_data_part_2 = reader.readNullTerminatedString();
 
         var auth_plugin_name: ?[:0]const u8 = null;
         if (capabilities & constants.CLIENT_PLUGIN_AUTH > 0) {

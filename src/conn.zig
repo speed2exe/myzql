@@ -27,7 +27,6 @@ pub const Conn = struct {
     };
 
     state: State = .disconnected,
-    flags: u32 = 0, // TODO: Not sure what this does, check
 
     pub fn close(conn: Conn) void {
         switch (conn.state) {
@@ -51,7 +50,7 @@ pub const Conn = struct {
         const packet = try conn.readPacket(allocator);
         defer packet.deinit(allocator);
 
-        const realized_packet = try packet.realize(constants.MAX_CAPABILITIES, true);
+        const realized_packet = packet.realize(constants.MAX_CAPABILITIES, true);
         const handshake_v10 = switch (realized_packet) {
             .handshake_v10 => realized_packet.handshake_v10,
             else => |x| {
