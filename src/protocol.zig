@@ -190,7 +190,7 @@ pub const HandshakeV10 = struct {
         const auth_plugin_data_len = reader.readByte();
 
         const reserved = reader.readFixed(10);
-        std.debug.assert(reserved == &[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
+        std.debug.assert(std.mem.eql(u8, reserved, &[10]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
 
         // length = max(13, auth_plugin_data_len - 8);
         const remain_auth_data_length = auth_plugin_data_len - 13;
