@@ -181,6 +181,7 @@ pub const HandshakeV10 = struct {
         const server_version = reader.readNullTerminatedString();
         const thread_id = reader.readUInt32();
         const auth_plugin_data_part_1 = reader.readFixed(8);
+        _ = reader.readByte(); // filler
         const capability_flags_1 = reader.readUInt16();
         const character_set = reader.readByte();
         const status_flags = reader.readUInt16();
