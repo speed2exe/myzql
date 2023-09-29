@@ -1,4 +1,5 @@
 // zig fmt: off
+const std = @import("std");
 
 pub const default_auth_plugin = "mysql_native_password";
 
@@ -55,18 +56,4 @@ pub const CTOR_AUTHENTICATION:                   u32 = 1 << 28;
 pub const CLIENT_CAPABILITY_EXTENSION:           u32 = 1 << 29;
 pub const CLIENT_SSL_VERIFY_SERVER_CERT:         u32 = 1 << 30;
 
-// Current Capabilities
-// add more if we support more
-pub const DRIVER_CAPABILITIES: u32 = CLIENT_LONG_PASSWORD
-                                   | CLIENT_LONG_FLAG
-                                   | CLIENT_CONNECT_WITH_DB
-                                   | CLIENT_PROTOCOL_41
-                                   | CLIENT_TRANSACTIONS
-                                   | CLIENT_MULTI_RESULTS
-                                   | CLIENT_PLUGIN_AUTH
-                                   | CLIENT_CONNECT_ATTRS
-                                   | CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
-                                   | CLIENT_SESSION_TRACK
-                                   | CLIENT_DEPRECATE_EOF
-                                   | CLIENT_OPTIONAL_RESULTSET_METADATA
-                                   | CLIENT_SSL_VERIFY_SERVER_CERT;
+pub const MAX_CAPABILITIES: u32 = std.math.maxInt(u32);

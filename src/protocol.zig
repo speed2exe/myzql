@@ -124,6 +124,7 @@ pub const OkPacket = struct {
             info = reader.readRestOfPacketString();
         }
 
+        std.debug.assert(reader.finished());
         return .{
             .header = header,
             .affected_rows = affected_rows,
@@ -153,6 +154,8 @@ pub const EofPacket = struct {
             status_flags = reader.readUInt16();
             warnings = reader.readUInt16();
         }
+
+        std.debug.assert(reader.finished());
         return .{
             .header = header,
             .status_flags = status_flags,
@@ -201,6 +204,7 @@ pub const HandshakeV10 = struct {
             auth_plugin_name = reader.readNullTerminatedString();
         }
 
+        std.debug.assert(reader.finished());
         return .{
             .protocol_version = protocol_version,
             .server_version = server_version,
@@ -268,9 +272,10 @@ const PacketReader = struct {
     }
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_eof
-    fn readRestOfPacketString(packet_reader: PacketReader) []const u8 {
-        return packet_reader.payload[packet_reader.pos..];
-        // technically we should read set length to be the end, but it's not needed, since there's no more data
+    fn readRestOfPacketString(packet_reader: *PacketReader) []const u8 {
+        const bytes = packet_reader.payload[packet_reader.pos..];
+        packet_reader.pos += packet_reader.payload.len;
+        return bytes;
     }
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_integers.html#sect_protocol_basic_dt_int_le
@@ -305,5 +310,9 @@ const PacketReader = struct {
         const res: [:0]const u8 = @ptrCast(packet_reader.payload[packet_reader.pos..i]);
         packet_reader.pos = i + 1;
         return res;
+    }
+
+    fn finished(packet_reader: *PacketReader) bool {
+        return packet_reader.pos == packet_reader.payload.len;
     }
 };

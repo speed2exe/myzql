@@ -51,7 +51,7 @@ pub const Conn = struct {
         const packet = try conn.readPacket(allocator);
         defer packet.deinit(allocator);
 
-        const realized_packet = try packet.realize(constants.DRIVER_CAPABILITIES, true);
+        const realized_packet = try packet.realize(constants.MAX_CAPABILITIES, true);
         const handshake_v10 = switch (realized_packet) {
             .handshake_v10 => realized_packet.handshake_v10,
             else => |x| {
