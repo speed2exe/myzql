@@ -1,7 +1,7 @@
 const std = @import("std");
 const protocol = @import("./protocol.zig");
-const mysql_const = @import("./mysql_const.zig");
 const Config = @import("./config.zig").Config;
+const constants = @import("./constants.zig");
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -19,7 +19,7 @@ pub const Conn = struct {
     );
     const Connected = struct {
         stream: std.net.Stream,
-        buffer: StreamBufferedReader,
+        buffered_reader: StreamBufferedReader,
     };
     const State = union(enum) {
         disconnected,
@@ -39,118 +39,27 @@ pub const Conn = struct {
         }
     }
 
-    fn dial(conn: *Conn, address: std.net.Address) !void {
-        switch (conn.state) {
-            .connected => {
-                std.log.err("cannot dial while already connected, close first\n", .{});
-                return error.AlreadyConnected;
-            },
-            .disconnected => {
-                const stream = try std.net.tcpConnectToAddress(address);
-                const buffer = std.io.bufferedReaderSize(buffer_size, stream.reader());
-                conn.state = .{ .connected = .{
-                    .stream = stream,
-                    .buffer = buffer,
-                } };
-            },
-        }
-    }
-
+    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, address: std.net.Address) !void {
-        try conn.dial(address);
-        errdefer conn.close();
+        const stream = try std.net.tcpConnectToAddress(address);
+        const buffered_reader = std.io.bufferedReaderSize(buffer_size, stream.reader());
+        conn.state = .{ .connected = .{
+            .stream = stream,
+            .buffered_reader = buffered_reader,
+        } };
 
         const packet = try conn.readPacket(allocator);
-        defer conn.allocator.free(packet);
+        defer packet.deinit(allocator);
 
-        if (packet[0] == mysql_const.i_err) {
-            return conn.handleErrorPacket(packet);
-        }
-        if (packet[0] < mysql_const.min_protocol_version) {
-            std.log.err(
-                "unsupported protocol version: {d}, expected at least {d}\n",
-                .{ packet[0], mysql_const.min_protocol_version },
-            );
-            return error.UnsupportedProtocolVersion;
-        }
-
-        // Server version: Null-terminated string
-        var pos = std.mem.indexOfScalarPos(u8, packet, 1, 0);
-        const server_version = packet[1 .. pos - 1];
-        std.log.info("server version: {s}\n", .{server_version});
-
-        // Connection id: 4 bytes
-        const connection_id = std.mem.readIntSliceLittle(u32, packet[pos .. pos + 4]);
-        std.log.info("connection id: {d}\n", .{connection_id});
-        pos += 4 + 1; // +1 for filler
-
-        // Auth plugin data part 1: 8 bytes
-        const auth_data1: *[8]u8 = packet[pos .. pos + 8];
-        pos += 8 + 1; // +1 for filler
-        std.log.info("auth data: {x}\n", .{auth_data1});
-
-        // Capabilities: 2 bytes
-        conn.flags = std.mem.readIntSliceLittle(u16, packet[pos .. pos + 2]);
-        pos += 2;
-        if (conn.flags & mysql_const.client_protocol_41 == 0) {
-            std.log.err("MySQL server does not support required protocol 41+");
-            return error.OldProtocol;
-        }
-        if (conn.flags & mysql_const.client_ssl == 0 and conn.config.tls) { // TODO: support TLS
-            if (conn.config.allow_fallback_to_plaintext) {
-                conn.config.tls = false;
-            } else {
-                std.log.err("MySQL server does not support SSL");
-                return error.SSLUnsupported;
-            }
-        }
-
-        var auth_plugin: []u8 = undefined;
-        var auth_data2: ?*[12]u8 = null;
-        if (packet.len > pos) {
-            // character set [1 byte]
-            // status flags [2 bytes]
-            // capability flags (upper 2 bytes) [2 bytes]
-            // length of auth-plugin-data [1 byte]
-            // reserved (all [00]) [10 bytes]
-            pos += 1 + 2 + 2 + 1 + 10;
-
-            // second part of the password cipher [mininum 13 bytes],
-            // where len=MAX(13, length of auth-plugin-data - 8)
-            //
-            // The web documentation is ambiguous about the length. However,
-            // according to mysql-5.7/sql/auth/sql_authentication.cc line 538,
-            // the 13th byte is "\0 byte, terminating the second part of
-            // a scramble". So the second part of the password cipher is
-            // a NULL terminated string that's at least 13 bytes with the
-            // last byte being NULL.
-            //
-            // The official Python library uses the fixed length 12
-            // which seems to work but technically could have a hidden bug.
-            auth_data2 = packet[pos .. pos + 12];
-            pos += 12 + 1; // +1 for filler
-
-            if (std.mem.indexOfScalarPos(u8, packet, pos, 0)) |end| {
-                auth_plugin = packet[pos..end];
-            } else {
-                auth_plugin = packet[pos..];
-            }
-        } else {
-            auth_plugin = mysql_const.default_auth_plugin;
-        }
-
-        const auth_data: []u8 = blk: {
-            var full: [20]u8 = undefined;
-            @memcpy(&full, auth_data1);
-            if (auth_data2) {
-                @memcpy(full[8..], auth_data2);
-                break :blk &full;
-            } else {
-                break :blk full[0..8];
-            }
+        const realized_packet = try packet.realize(constants.DRIVER_CAPABILITIES, true);
+        const handshake_v10 = switch (realized_packet) {
+            .handshake_v10 => realized_packet.handshake_v10,
+            else => |x| {
+                std.log.err("Unexpected packet: {any}\n", .{x});
+                return error.UnexpectedPacket;
+            },
         };
-
-        try conn.auth(auth_data, auth_plugin);
+        try std.io.getStdOut().writer().print("v10: {any}", .{handshake_v10});
     }
 
     fn auth(conn: Conn, auth_data: []u8, auth_plugin: []const u8) ![32]u8 {
@@ -161,71 +70,9 @@ pub const Conn = struct {
                 std.log.err("MySQL server requested old password authentication, but it is disabled, you can enable in config");
                 return error.OldPasswordDisabled;
             }
-            if (conn.config.pasword.len == 0) {}
-            // Note: there are edge cases where this should work but doesn't;
-            // this is currently "wontfix":
-            // https://github.com/go-sql-driver/mysql/issues/184
-            // authResp := append(scrambleOldPassword(authData[:8], mc.cfg.Passwd), 0)
-            // return authResp, nil
         }
-
-        // case "mysql_clear_password":
-        // 	if !mc.cfg.AllowCleartextPasswords {
-        // 		return nil, ErrCleartextPassword
-        // 	}
-        // 	// http://dev.mysql.com/doc/refman/5.7/en/cleartext-authentication-plugin.html
-        // 	// http://dev.mysql.com/doc/refman/5.7/en/pam-authentication-plugin.html
-        // 	return append([]byte(mc.cfg.Passwd), 0), nil
-
-        // case "mysql_native_password":
-        // 	if !mc.cfg.AllowNativePasswords {
-        // 		return nil, ErrNativePassword
-        // 	}
-        // 	// https://dev.mysql.com/doc/internals/en/secure-password-authentication.html
-        // 	// Native password authentication only need and will need 20-byte challenge.
-        // 	authResp := scramblePassword(authData[:20], mc.cfg.Passwd)
-        // 	return authResp, nil
-
-        // case "sha256_password":
-        // 	if len(mc.cfg.Passwd) == 0 {
-        // 		return []byte{0}, nil
-        // 	}
-        // 	// unlike caching_sha2_password, sha256_password does not accept
-        // 	// cleartext password on unix transport.
-        // 	if mc.cfg.TLS != nil {
-        // 		// write cleartext auth packet
-        // 		return append([]byte(mc.cfg.Passwd), 0), nil
-        // 	}
-
-        // 	pubKey := mc.cfg.pubKey
-        // 	if pubKey == nil {
-        // 		// request public key from server
-        // 		return []byte{1}, nil
-        // 	}
-
-        // 	// encrypted password
-        // 	enc, err := encryptPassword(mc.cfg.Passwd, authData, pubKey)
-        // 	return enc, err
-
-        // default:
-        // 	mc.cfg.Logger.Print("unknown auth plugin:", plugin)
-        // 	return nil, ErrUnknownPlugin
     }
 
-    // http://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Protocol::AuthSwitchResponse
-    // func (mc *mysqlConn) writeAuthSwitchPacket(authData []byte) error {
-    // 	pktLen := 4 + len(authData)
-    // 	data, err := mc.buf.takeSmallBuffer(pktLen)
-    // 	if err != nil {
-    // 		// cannot take the buffer. Something must be wrong with the connection
-    // 		mc.cfg.Logger.Print(err)
-    // 		return errBadConnNoWrite
-    // 	}
-    //
-    // 	// Add the auth data [EOF]
-    // 	copy(data[4:], authData)
-    // 	return mc.writePacket(data)
-    // }
     fn auth_send(conn: Conn, auth_data: []const u8) !void {
         const pkt_len = 4 + auth_data.len;
         const data = try conn.writePacket(pkt_len);
@@ -242,7 +89,7 @@ pub const Conn = struct {
 
     fn streamBufferedReader(conn: Conn) !StreamBufferedReader {
         switch (conn.state) {
-            .connected => return conn.state.connected.buffer,
+            .connected => return conn.state.connected.buffered_reader,
             .disconnected => return error.Disconnected,
         }
     }
@@ -250,41 +97,6 @@ pub const Conn = struct {
     fn readPacket(conn: Conn, allocator: std.mem.Allocator) !protocol.Packet {
         var sbr = try conn.streamBufferedReader();
         return protocol.Packet.initFromReader(allocator, sbr.reader());
-    }
-
-    fn handleErrorPacket(conn: Conn, packet: []const u8) !void {
-        if (packet[0] != mysql_const.i_err) {
-            std.log.err("expected error packet, got %x\n", .{packet[0]});
-            return error.MalformedPacket;
-        }
-
-        const err_number = std.mem.readIntSliceLittle(u16, packet[1..3]);
-        std.log.err("error number: %d\n", .{err_number});
-
-        // 1792: ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION
-        // 1290: ER_OPTION_PREVENTS_STATEMENT (returned by Aurora during failover)
-        if ((err_number == 1792 or err_number == 1290) and conn.config.reject_read_only) {
-            // Oops; we are connected to a read-only connection, and won't be able
-            // to issue any write statements. Since RejectReadOnly is configured,
-            // we throw away this connection hoping this one would have write
-            // permission. This is specifically for a possible race condition
-            // during failover (e.g. on AWS Aurora). See README.md for more.
-            //
-            // We explicitly close the connection before returning
-            // driver.ErrBadConn to ensure that `database/sql` purges this
-            // connection and initiates a new one for next statement next time.
-            conn.close();
-            std.log.err("rejecting read-only connection\n");
-            return error.DriverBadConnection;
-        }
-
-        // SQL State [optional: # + 5bytes string]
-        if (packet[3] == 0x23) {
-            std.log.err("sql state: {d}\n", .{packet[4..9]});
-            std.log.err("error message: {s}\n", .{packet[9..]});
-        } else {
-            std.log.err("error message: {s}\n", .{packet[3..]});
-        }
     }
 };
 
@@ -346,12 +158,13 @@ test "connFirstPacket" {
     defer packet.deinit();
 }
 
-test "get handshake packet" {
+test "plain handshake" {
     var conn: Conn = .{};
-    try conn.dial(default_config.address);
-    const packet = try conn.readPacket(std.testing.allocator);
-    defer packet.deinit();
-    const handshake = protocol.HandshakeV10.initFromPacket(packet);
-    try std.io.getStdOut().writeAll("hello!!!");
-    try protocol.HandshakeV10.dump(handshake, std.io.getStdOut().writer());
+    try conn.connect(std.testing.allocator, std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306));
+    // try conn.dial(default_config.address);
+    // const packet = try conn.readPacket(std.testing.allocator);
+    // defer packet.deinit();
+    // const handshake = protocol.HandshakeV10.initFromPacket(packet);
+    // try std.io.getStdOut().writeAll("hello!!!");
+    // try protocol.HandshakeV10.dump(handshake, std.io.getStdOut().writer());
 }
