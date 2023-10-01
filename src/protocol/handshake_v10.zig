@@ -1,4 +1,7 @@
 const std = @import("std");
+const Packet = @import("./packet.zig").Packet;
+const PacketReader = @import("./packet_reader.zig").PacketReader;
+const constants = @import("../constants.zig");
 
 pub const HandshakeV10 = struct {
     protocol_version: u8,
@@ -13,7 +16,7 @@ pub const HandshakeV10 = struct {
     auth_plugin_data_part_2: [:0]const u8,
     auth_plugin_name: ?[:0]const u8,
 
-    fn initFromPacket(packet: Packet, capabilities: u32) HandshakeV10 {
+    pub fn initFromPacket(packet: Packet, capabilities: u32) HandshakeV10 {
         var reader = PacketReader.initFromPacket(packet);
         const protocol_version = reader.readByte();
         std.debug.assert(protocol_version == constants.HANDSHAKE_V10);

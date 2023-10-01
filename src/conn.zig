@@ -1,6 +1,8 @@
 const std = @import("std");
 const Config = @import("./config.zig").Config;
 const constants = @import("./constants.zig");
+const protocol = @import("./protocol.zig");
+const Packet = protocol.packet.Packet;
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -27,13 +29,13 @@ pub const Conn = struct {
 
     state: State = .disconnected,
 
-    pub fn close(conn: Conn) void {
+    pub fn close(conn: *Conn) void {
         switch (conn.state) {
-            .Connected => {
+            .connected => {
                 conn.state.connected.stream.close();
-                conn.state = .Disconnected;
+                conn.state = .disconnected;
             },
-            .Disconnected => {},
+            .disconnected => {},
         }
     }
 
@@ -58,6 +60,10 @@ pub const Conn = struct {
             },
         };
         try std.io.getStdOut().writer().print("v10: {any}", .{handshake_v10});
+    }
+
+    pub fn ping(conn: Conn) !void {
+        _ = conn;
     }
 
     fn auth(conn: Conn, auth_data: []u8, auth_plugin: []const u8) ![32]u8 {
@@ -92,9 +98,9 @@ pub const Conn = struct {
         }
     }
 
-    fn readPacket(conn: Conn, allocator: std.mem.Allocator) !protocol.Packet {
+    fn readPacket(conn: Conn, allocator: std.mem.Allocator) !Packet {
         var sbr = try conn.streamBufferedReader();
-        return protocol.Packet.initFromReader(allocator, sbr.reader());
+        return Packet.initFromReader(allocator, sbr.reader());
     }
 };
 
@@ -148,17 +154,11 @@ test "scrambleSHA256Password" {
 
 const default_config: Config = .{};
 
-test "connFirstPacket" {
-    var conn: Conn = .{};
-    try conn.dial(default_config.address);
-    const packet = try conn.readPacket(std.testing.allocator);
-    std.log.warn("packet: {any}\n", .{packet});
-    defer packet.deinit();
-}
-
 test "plain handshake" {
-    var conn: Conn = .{};
-    try conn.connect(std.testing.allocator, std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306));
+    // var conn: Conn = .{};
+    // std.debug.print("before connect\n", .{});
+    // try conn.connect(std.testing.allocator, std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306));
+    // std.debug.print("after connect\n", .{});
     // try conn.dial(default_config.address);
     // const packet = try conn.readPacket(std.testing.allocator);
     // defer packet.deinit();

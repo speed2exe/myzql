@@ -1,9 +1,9 @@
 const std = @import("std");
 const constants = @import("../constants.zig");
-const PacketReader = @import("./packet_reader.zig").PacketReader;
-const ErrorPacket = @import("./generic_response.zig").ErrorPacket;
 const OkPacket = @import("./generic_response.zig").OkPacket;
+const ErrorPacket = @import("./generic_response.zig").ErrorPacket;
 const EofPacket = @import("./generic_response.zig").EofPacket;
+const HandshakeV10 = @import("./handshake_v10.zig").HandshakeV10;
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html#sect_protocol_basic_packets_packet
 pub const Packet = struct {

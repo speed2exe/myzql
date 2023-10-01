@@ -11,7 +11,7 @@ pub const ErrorPacket = struct {
     sql_state: ?*const [5]u8,
     error_message: []const u8,
 
-    fn initFromPacket(comptime is_first_packet: bool, packet: Packet, capabilities: u32) ErrorPacket {
+    pub fn initFromPacket(comptime is_first_packet: bool, packet: Packet, capabilities: u32) ErrorPacket {
         var reader = PacketReader.initFromPacket(packet);
         const header = reader.readByte();
         std.debug.assert(header == constants.ERR);
@@ -45,7 +45,7 @@ pub const OkPacket = struct {
     info: ?[]const u8,
     session_state_info: ?[]const u8,
 
-    fn initFromPacket(packet: Packet, capabilities: u32) OkPacket {
+    pub fn initFromPacket(packet: Packet, capabilities: u32) OkPacket {
         std.debug.assert(packet.payload.len > 7);
 
         var reader = PacketReader.initFromPacket(packet);
@@ -97,7 +97,7 @@ pub const EofPacket = struct {
     status_flags: ?u16,
     warnings: ?u16,
 
-    fn initFromPacket(packet: Packet, capabilities: u32) EofPacket {
+    pub fn initFromPacket(packet: Packet, capabilities: u32) EofPacket {
         std.debug.assert(packet.payload.len < 9);
         var reader = PacketReader.initFromPacket(packet);
         const header = reader.readByte();

@@ -1,7 +1,7 @@
 const std = @import("std");
 const Packet = @import("./packet.zig").Packet;
 
-const PacketReader = struct {
+pub const PacketReader = struct {
     payload: []const u8,
     pos: usize,
 
@@ -9,7 +9,7 @@ const PacketReader = struct {
         return .{ .payload = packet.payload, .pos = 0 };
     }
 
-    fn readFixed(packet_reader: *PacketReader, comptime n: usize) *const [n]u8 {
+    pub fn readFixed(packet_reader: *PacketReader, comptime n: usize) *const [n]u8 {
         const bytes = packet_reader.payload[packet_reader.pos..][0..n];
         packet_reader.pos += n;
         return bytes;
@@ -21,13 +21,13 @@ const PacketReader = struct {
         return bytes;
     }
 
-    fn readByte(packet_reader: *PacketReader) u8 {
+    pub fn readByte(packet_reader: *PacketReader) u8 {
         const byte = packet_reader.payload[packet_reader.pos];
         packet_reader.pos += 1;
         return byte;
     }
 
-    fn readUInt16(packet_reader: *PacketReader) u16 {
+    pub fn readUInt16(packet_reader: *PacketReader) u16 {
         const bytes = packet_reader.payload[packet_reader.pos..][0..2];
         packet_reader.pos += 2;
         return std.mem.readIntLittle(u16, bytes);
@@ -39,7 +39,7 @@ const PacketReader = struct {
         return std.mem.readIntLittle(u24, bytes);
     }
 
-    fn readUInt32(packet_reader: *PacketReader) u32 {
+    pub fn readUInt32(packet_reader: *PacketReader) u32 {
         const bytes = packet_reader.payload[packet_reader.pos..][0..4];
         packet_reader.pos += 4;
         return std.mem.readIntLittle(u32, bytes);
@@ -52,7 +52,7 @@ const PacketReader = struct {
     }
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_eof
-    fn readRestOfPacketString(packet_reader: *PacketReader) []const u8 {
+    pub fn readRestOfPacketString(packet_reader: *PacketReader) []const u8 {
         const bytes = packet_reader.payload[packet_reader.pos..];
         packet_reader.pos += packet_reader.payload.len;
         return bytes;
@@ -60,7 +60,7 @@ const PacketReader = struct {
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_integers.html#sect_protocol_basic_dt_int_le
     // max possible value is 2^64 - 1, so return type is u64
-    fn readLengthEncodedInteger(packet_reader: *PacketReader) u64 {
+    pub fn readLengthEncodedInteger(packet_reader: *PacketReader) u64 {
         const first_byte = packet_reader.readByte();
         switch (first_byte) {
             0xFC => return packet_reader.readUInt16(),
@@ -71,13 +71,13 @@ const PacketReader = struct {
     }
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_le
-    fn readLengthEncodedString(packet_reader: *PacketReader) []const u8 {
+    pub fn readLengthEncodedString(packet_reader: *PacketReader) []const u8 {
         const length = packet_reader.readLengthEncodedInteger();
         return packet_reader.readFixedRuntime(@as(usize, length));
     }
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_null
-    fn readNullTerminatedString(packet_reader: *PacketReader) [:0]const u8 {
+    pub fn readNullTerminatedString(packet_reader: *PacketReader) [:0]const u8 {
         const start = packet_reader.pos;
         const i = std.mem.indexOfScalarPos(u8, packet_reader.payload, start, 0) orelse {
             std.log.err("null terminated string not found\n, pos: {any}, payload: {any}", .{
@@ -92,7 +92,7 @@ const PacketReader = struct {
         return res;
     }
 
-    fn finished(packet_reader: *PacketReader) bool {
+    pub fn finished(packet_reader: *PacketReader) bool {
         return packet_reader.pos == packet_reader.payload.len;
     }
 };
