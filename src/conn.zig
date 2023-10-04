@@ -59,7 +59,9 @@ pub const Conn = struct {
                 return error.UnexpectedPacket;
             },
         };
-        try std.io.getStdOut().writer().print("v10: {any}", .{handshake_v10});
+
+        try std.io.getStdErr().writer().print("v10: {any}", .{handshake_v10});
+        // TODO: continue
     }
 
     pub fn ping(conn: Conn) !void {
@@ -155,10 +157,8 @@ test "scrambleSHA256Password" {
 const default_config: Config = .{};
 
 test "plain handshake" {
-    // var conn: Conn = .{};
-    // std.debug.print("before connect\n", .{});
-    // try conn.connect(std.testing.allocator, std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306));
-    // std.debug.print("after connect\n", .{});
+    var conn: Conn = .{};
+    try conn.connect(std.testing.allocator, std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306));
     // try conn.dial(default_config.address);
     // const packet = try conn.readPacket(std.testing.allocator);
     // defer packet.deinit();
