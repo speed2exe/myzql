@@ -8,7 +8,7 @@ pub const HandshakeResponse320 = struct {
     client_flags: u16,
     max_packet_size: u24,
     username: [:0]const u8,
-    auth_response: ?[:0]const u8,
+    auth_response: [:0]const u8,
     database: ?[:0]const u8,
 
     pub fn write(h: HandshakeResponse320, writer: anytype, capabilities: u32) !void {
@@ -16,10 +16,11 @@ pub const HandshakeResponse320 = struct {
         try packer_writer.writeUInt24(writer, h.max_packet_size);
         try packer_writer.writeNullTerminatedString(writer, h.username);
         if ((capabilities & constants.CLIENT_CONNECT_WITH_DB) > 0) {
-            try writer.writeByte(0);
-            try writer.write(h.database);
+            try packer_writer.writeNullTerminatedString(writer, h.auth_response);
+            try packer_writer.writeNullTerminatedString(writer, h.database);
+        } else {
+            try writer.write(h.auth_response);
         }
-        // TODO: continue
     }
 };
 
@@ -36,4 +37,36 @@ pub const HandshakeResponse41 = struct {
     length_of_all_key_values: ?u64,
     key_values: ?[]const [2][]const u8,
     zstd_compression_level: ?u8,
+
+    pub fn write(h: HandshakeResponse41, writer: anytype, capabilities: u32) !void {
+        try packer_writer.writeUInt32(writer, h.client_flags);
+        try packer_writer.writeUInt24(writer, h.max_packet_size);
+        try packer_writer.writeUInt8(writer, h.character_set);
+        _ = try writer.write(h.filler);
+        try packer_writer.writeNullTerminatedString(writer, h.username);
+
+        if ((capabilities & constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) > 0) {
+            try packer_writer.writeLengthEncodedString(writer, h.auth_response);
+        } else {
+            try packer_writer.writeUInt8(writer, h.auth_response_length);
+            _ = try writer.write(h.auth_response);
+        }
+
+        if ((capabilities & constants.CLIENT_CONNECT_WITH_DB) > 0) {
+            try packer_writer.writeNullTerminatedString(writer, h.database);
+        }
+        if ((capabilities & constants.CLIENT_PLUGIN_AUTH) > 0) {
+            try packer_writer.writeNullTerminatedString(writer, h.client_plugin_name);
+        }
+        if ((capabilities & constants.CLIENT_CONNECT_ATTRS) > 0) {
+            if (h.key_values) |key_values| {
+                try packer_writer.writeLengthEncodedInteger(writer, key_values.len);
+                @panic("pause here");
+            } else {
+                try packer_writer.writeLengthEncodedInteger(writer, 0);
+            }
+        }
+
+        @panic("not done");
+    }
 };
