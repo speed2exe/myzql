@@ -11,16 +11,21 @@ const buffer_size: usize = 4096;
 
 pub const Conn = struct {
     const StreamBufferedReader = std.io.BufferedReader(
-        buffer_size,
+        buffer_size, // should just use stream directly instead of wrapping with io.reader
         std.io.Reader(
             std.net.Stream,
             std.net.Stream.ReadError,
             std.net.Stream.read,
         ),
     );
+    const StreamBufferedWriter = std.io.BufferedWriter(
+        buffer_size,
+        std.net.Stream,
+    );
     const Connected = struct {
         stream: std.net.Stream,
         buffered_reader: StreamBufferedReader,
+        buffered_writer: StreamBufferedWriter,
     };
     const State = union(enum) {
         disconnected,
@@ -43,10 +48,15 @@ pub const Conn = struct {
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, address: std.net.Address) !void {
         const stream = try std.net.tcpConnectToAddress(address);
         const buffered_reader = std.io.bufferedReaderSize(buffer_size, stream.reader());
-        conn.state = .{ .connected = .{
-            .stream = stream,
-            .buffered_reader = buffered_reader,
-        } };
+
+        const buffered_writer = std.io.bufferedWriter(stream);
+        conn.state = .{
+            .connected = .{
+                .stream = stream,
+                .buffered_reader = buffered_reader,
+                .buffered_writer = buffered_writer,
+            },
+        };
 
         const packet = try conn.readPacket(allocator);
         defer packet.deinit(allocator);
@@ -60,12 +70,34 @@ pub const Conn = struct {
             },
         };
 
+        // debugging
         try std.io.getStdErr().writer().print("v10: {any}", .{handshake_v10});
-        // TODO: continue
+
+        // TODO: TLS handshake if enabled
+
+        // send handshake response
+
+        // Server ack
+        // const packet2 = try conn.readPacket(allocator);
+        // defer packet2.deinit(allocator);
+
+        // const realized_packet2 = packet.realize(constants.MAX_CAPABILITIES, false);
+        // switch (realized_packet2) {
+        //     .ok_packet => {},
+        //     else => |x| {
+        //         std.log.err("Unexpected packet: {any}\n", .{x});
+        //         return error.DidNotReceiveOkPacket;
+        //     },
+        // }
+    }
+
+    fn makeHandshakeResponse(conn: Conn) ![32]u8 {
+        _ = conn;
     }
 
     pub fn ping(conn: Conn) !void {
         _ = conn;
+        @panic("not implemented");
     }
 
     fn auth(conn: Conn, auth_data: []u8, auth_plugin: []const u8) ![32]u8 {
