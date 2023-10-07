@@ -28,7 +28,7 @@ pub const Client = struct {
         switch (c.conn.state) {
             .connected => {},
             .disconnected => {
-                try c.conn.connect(c.allocator, c.config);
+                try c.conn.connect(c.allocator, &c.config);
             },
         }
     }

@@ -67,7 +67,7 @@ pub const Conn = struct {
     }
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
-    pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: Config) !void {
+    pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
         try conn.dial(config.address);
         var auth_plugin_name: FixedString(32) = .{};
         {
@@ -147,7 +147,7 @@ pub const Conn = struct {
         conn: *Conn,
         plugin_name: []const u8,
         plugin_data: []const u8,
-        config: Config,
+        config: *const Config,
     ) !void {
         const password_resp = try auth_data_resp(plugin_name, plugin_data, config.password);
         var writer = conn.writer;
@@ -157,7 +157,7 @@ pub const Conn = struct {
         try writer.flush();
     }
 
-    fn sendHandshakeResponse41(conn: *Conn, handshake_v10: HandshakeV10, config: Config) !void {
+    fn sendHandshakeResponse41(conn: *Conn, handshake_v10: HandshakeV10, config: *const Config) !void {
         const password_resp = try auth_data_resp(
             handshake_v10.get_auth_plugin_name(),
             &handshake_v10.get_auth_data(),
@@ -190,7 +190,7 @@ fn auth_data_resp(auth_plugin_name: []const u8, auth_data: []const u8, password:
         return scrambleSHA256Password(auth_data, password);
     } else {
         // TODO: support more
-        std.log.err("Unsupported auth plugin: {s}(contribution are welcome!)\n", .{auth_plugin_name});
+        std.log.err("Unsupported auth plugin: |{s}|(contribution are welcome!)\n", .{auth_plugin_name});
         return error.UnsupportedAuthPlugin;
     }
 }
@@ -226,15 +226,18 @@ fn FixedString(comptime max: usize) type {
         buf: [max]u8 = undefined,
         len: usize = 0,
 
-        fn get(self: FixedString(max)) []const u8 {
+        fn get(self: *const FixedString(max)) []const u8 {
             return self.buf[0..self.len];
         }
         fn set(self: *FixedString(max), s: []const u8) !void {
             if (s.len > max) {
                 return error.SourceTooLarge;
             }
-            const n = @min(s.len, max);
-            @memcpy(self.buf[0..n], s);
+            self.len = 0;
+            for (s) |c| {
+                self.buf[self.len] = c;
+                self.len += 1;
+            }
         }
     };
 }
@@ -265,7 +268,7 @@ const default_config: Config = .{};
 
 test "plain handshake" {
     var conn: Conn = .{};
-    try conn.connect(std.testing.allocator, default_config);
+    try conn.connect(std.testing.allocator, &default_config);
     // try conn.dial(default_config.address);
     // const packet = try conn.readPacket(std.testing.allocator);
     // defer packet.deinit();
