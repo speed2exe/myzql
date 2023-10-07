@@ -37,6 +37,7 @@ pub const Packet = struct {
             constants.HANDSHAKE_V10 => .{ .handshake_v10 = HandshakeV10.initFromPacket(packet, capabilities) },
             else => |x| {
                 std.log.err("unexpected packet type: {any}\n", .{x});
+                std.log.err("packet: {any}\n", .{packet});
                 unreachable;
             },
         };

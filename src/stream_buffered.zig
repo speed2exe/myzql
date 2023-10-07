@@ -15,7 +15,9 @@ pub const Reader = struct {
             if (s.empty()) {
                 try s.fill();
             }
-            already_read += copy(buffer[already_read..], s.buf[s.pos..s.len]);
+            const n = copy(buffer[already_read..], s.buf[s.pos..s.len]);
+            s.pos += n;
+            already_read += n;
         }
     }
 
