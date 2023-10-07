@@ -10,6 +10,8 @@ pub const Reader = struct {
 
     // read all behavior
     pub fn read(s: *Reader, buffer: []u8) !void {
+        std.log.err("in read func pos: {d}\n", .{s.pos});
+        std.log.err("in read func len: {d}\n", .{s.len});
         var already_read: usize = 0;
         while (buffer.len > already_read) {
             if (s.empty()) {
@@ -22,7 +24,12 @@ pub const Reader = struct {
     }
 
     inline fn fill(s: *Reader) !void {
+        std.log.err("filling\n", .{});
         s.len = try s.stream.read(&s.buf);
+        s.pos = 0;
+        std.log.err("filled\n", .{});
+        std.log.err("pos: {d}\n", .{s.pos});
+        std.log.err("len: {d}\n", .{s.len});
     }
 
     inline fn empty(s: *Reader) bool {

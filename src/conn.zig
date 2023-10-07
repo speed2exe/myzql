@@ -13,40 +13,37 @@ const max_packet_size = 1 << 24 - 1;
 const buffer_size: usize = 4096;
 
 pub const Conn = struct {
-    const Connected = struct {
-        stream: std.net.Stream,
-        reader: stream_buffered.Reader,
-        writer: stream_buffered.Writer,
-    };
     const State = union(enum) {
         disconnected,
-        connected: Connected,
+        connected,
     };
-
     state: State = .disconnected,
+    stream: std.net.Stream = undefined,
+    reader: stream_buffered.Reader = undefined,
+    writer: stream_buffered.Writer = undefined,
 
     pub fn close(conn: *Conn) void {
         switch (conn.state) {
             .connected => {
-                conn.state.connected.stream.close();
+                conn.stream.close();
                 conn.state = .disconnected;
             },
             .disconnected => {},
         }
     }
 
+    fn dial(conn: *Conn, address: std.net.Address) !void {
+        const stream = try std.net.tcpConnectToAddress(address);
+        conn.reader = stream_buffered.reader(stream);
+        conn.writer = stream_buffered.writer(stream);
+        conn.state = .connected;
+    }
+
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: Config) !void {
-        const stream = try std.net.tcpConnectToAddress(config.address);
-        conn.state = .{
-            .connected = .{
-                .stream = stream,
-                .reader = stream_buffered.reader(stream),
-                .writer = stream_buffered.writer(stream),
-            },
-        };
+        try conn.dial(config.address);
 
-        const packet = try conn.readPacket(allocator);
+        const packet = try Packet.initFromReader(allocator, &conn.reader);
         defer packet.deinit(allocator);
 
         const realized_packet = packet.realize(constants.MAX_CAPABILITIES, true);
@@ -70,10 +67,10 @@ pub const Conn = struct {
         }
 
         // Server ack
-        const packet2 = try conn.readPacket(allocator);
+        const packet2 = try Packet.initFromReader(allocator, &conn.reader);
         defer packet2.deinit(allocator);
 
-        const realized_packet2 = packet.realize(constants.MAX_CAPABILITIES, false);
+        const realized_packet2 = packet2.realize(constants.MAX_CAPABILITIES, false);
         switch (realized_packet2) {
             .ok_packet => {},
             else => |x| {
@@ -103,39 +100,20 @@ pub const Conn = struct {
             resp_cap_flag |= constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
         }
 
-        var writer = try conn.streamBufferedWriter();
         const response: HandshakeResponse41 = .{
             .client_flags = resp_cap_flag,
             .character_set = config.collation,
             .username = config.username,
             .auth_response = password_resp,
         };
-        try response.write(&writer, 0);
+        var writer = conn.writer;
+        try response.write(&writer, resp_cap_flag);
         try writer.flush();
     }
 
     pub fn ping(conn: Conn) !void {
         _ = conn;
         @panic("not implemented");
-    }
-
-    fn streamBufferedReader(conn: Conn) !stream_buffered.Reader {
-        switch (conn.state) {
-            .connected => return conn.state.connected.reader,
-            .disconnected => return error.Disconnected,
-        }
-    }
-
-    fn streamBufferedWriter(conn: Conn) !stream_buffered.Writer {
-        switch (conn.state) {
-            .connected => return conn.state.connected.writer,
-            .disconnected => return error.Disconnected,
-        }
-    }
-
-    fn readPacket(conn: Conn, allocator: std.mem.Allocator) !Packet {
-        var sbr = try conn.streamBufferedReader();
-        return Packet.initFromReader(allocator, &sbr);
     }
 };
 

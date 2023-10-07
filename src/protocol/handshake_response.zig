@@ -2,6 +2,7 @@
 const packer_writer = @import("./packet_writer.zig");
 const std = @import("std");
 const constants = @import("../constants.zig");
+const stream_buffered = @import("../stream_buffered.zig");
 
 pub const HandshakeResponse320 = struct {
     client_flags: u16,
@@ -10,7 +11,7 @@ pub const HandshakeResponse320 = struct {
     auth_response: [:0]const u8,
     database: [:0]const u8 = "",
 
-    pub fn write(h: HandshakeResponse320, writer: anytype, capabilities: u32) !void {
+    pub fn write(h: HandshakeResponse320, writer: *stream_buffered.Writer, capabilities: u32) !void {
         try packer_writer.writeUInt16(writer, h.client_flags);
         try packer_writer.writeUInt24(writer, h.max_packet_size);
         try packer_writer.writeNullTerminatedString(writer, h.username);
@@ -34,7 +35,7 @@ pub const HandshakeResponse41 = struct {
     key_values: []const [2][]const u8 = &.{},
     zstd_compression_level: u8 = 0,
 
-    pub fn write(h: HandshakeResponse41, writer: anytype, capabilities: u32) !void {
+    pub fn write(h: HandshakeResponse41, writer: *stream_buffered.Writer, capabilities: u32) !void {
         try packer_writer.writeUInt32(writer, h.client_flags);
         try packer_writer.writeUInt24(writer, h.max_packet_size);
         try packer_writer.writeUInt8(writer, h.character_set);
