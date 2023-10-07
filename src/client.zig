@@ -7,7 +7,7 @@ pub const Client = struct {
     conn: Conn,
     allocator: std.mem.Allocator,
 
-    pub fn init(config: Config, allocator: std.mem.Allocator) Client {
+    pub fn init(config: *const Config, allocator: std.mem.Allocator) Client {
         return .{
             .config = config,
             .conn = .{},

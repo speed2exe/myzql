@@ -24,7 +24,7 @@ pub const Packet = struct {
         };
     }
 
-    pub fn deinit(packet: Packet, allocator: std.mem.Allocator) void {
+    pub fn deinit(packet: *const Packet, allocator: std.mem.Allocator) void {
         allocator.free(packet.payload);
     }
 };

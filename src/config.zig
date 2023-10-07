@@ -14,7 +14,7 @@ pub const Config = struct {
     tls: bool = false,
     multi_statements: bool = false,
 
-    pub fn capability_flags(config: Config) u32 {
+    pub fn capability_flags(config: *const Config) u32 {
         // zig fmt: off
         var flags: u32 = constants.CLIENT_PROTOCOL_41
                        | constants.CLIENT_LONG_PASSWORD

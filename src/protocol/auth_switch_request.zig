@@ -9,7 +9,7 @@ pub const AuthSwitchRequest = struct {
     plugin_name: [:0]const u8,
     plugin_data: []const u8,
 
-    pub fn initFromPacket(packet: Packet) AuthSwitchRequest {
+    pub fn initFromPacket(packet: *const Packet) AuthSwitchRequest {
         var reader = PacketReader.initFromPacket(packet);
         const header = reader.readByte();
         std.debug.assert(header == constants.AUTH_SWITCH);

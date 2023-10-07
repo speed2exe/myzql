@@ -16,7 +16,7 @@ pub const HandshakeV10 = struct {
     auth_plugin_data_part_2: [:0]const u8,
     auth_plugin_name: ?[:0]const u8,
 
-    pub fn initFromPacket(packet: Packet, capabilities: u32) HandshakeV10 {
+    pub fn initFromPacket(packet: *const Packet, capabilities: u32) HandshakeV10 {
         var reader = PacketReader.initFromPacket(packet);
         const protocol_version = reader.readByte();
         std.debug.assert(protocol_version == constants.HANDSHAKE_V10);
@@ -59,18 +59,18 @@ pub const HandshakeV10 = struct {
         };
     }
 
-    pub fn capability_flags(h: HandshakeV10) u32 {
+    pub fn capability_flags(h: *const HandshakeV10) u32 {
         var f: u32 = h.capability_flags_2;
         f <<= 16;
         f |= h.capability_flags_1;
         return f;
     }
 
-    pub fn get_auth_plugin_name(h: HandshakeV10) []const u8 {
+    pub fn get_auth_plugin_name(h: *const HandshakeV10) []const u8 {
         return h.auth_plugin_name orelse "mysql_native_password";
     }
 
-    pub fn get_auth_data(h: HandshakeV10) [20]u8 {
+    pub fn get_auth_data(h: *const HandshakeV10) [20]u8 {
         const length = h.auth_plugin_data_part_1.len + h.auth_plugin_data_part_2.len;
         std.debug.assert(length <= 20);
         var auth_data: [20]u8 = undefined;
