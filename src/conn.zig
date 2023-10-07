@@ -20,6 +20,11 @@ pub const Conn = struct {
             std.net.Stream.read,
         ),
     );
+    const StdStreamBufferedReader = std.io.Reader(
+        StreamBufferedReader,
+        StreamBufferedReader.Reader.Error,
+        StreamBufferedReader.read,
+    );
     const StreamBufferedWriter = std.io.BufferedWriter(
         buffer_size,
         std.io.Writer(
@@ -27,6 +32,11 @@ pub const Conn = struct {
             std.net.Stream.WriteError,
             std.net.Stream.write,
         ),
+    );
+    const StdStreamBufferedWriter = std.io.Writer(
+        StreamBufferedWriter,
+        StreamBufferedWriter.Writer.Error,
+        StreamBufferedWriter.write,
     );
     const Connected = struct {
         stream: std.net.Stream,
@@ -53,8 +63,8 @@ pub const Conn = struct {
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: Config) !void {
         const stream = try std.net.tcpConnectToAddress(config.address);
-        const buffered_reader = std.io.bufferedReaderSize(buffer_size, stream.reader());
-        const buffered_writer = std.io.bufferedWriter(stream.writer());
+        const buffered_reader = std.io.bufferedReaderSize(buffer_size, stream.reader()).reader();
+        const buffered_writer = std.io.bufferedWriter(stream.writer()).writer();
         conn.state = .{
             .connected = .{
                 .stream = stream,
@@ -102,7 +112,7 @@ pub const Conn = struct {
 
     fn sendHandshakeResponse41(conn: Conn, handshake_v10: HandshakeV10, config: Config) !void {
         // debugging
-        // try std.io.getStdErr().writer().print("v10: {any}\n", .{incoming});
+        try std.io.getStdErr().writer().print("v10: {any}\n", .{handshake_v10});
         // const auth_plugin_name = incoming.auth_plugin_name orelse return error.AuthPluginNameMissing;
         // try std.io.getStdErr().writer().print("auth_plugin_name: |{s}|\n", .{auth_plugin_name});
         // const auth_plugin_data = incoming.auth_plugin_data_part_1;
@@ -110,12 +120,12 @@ pub const Conn = struct {
         // const auth_plugin_data_2 = incoming.auth_plugin_data_part_2;
         // try std.io.getStdErr().writer().print("auth_plugin_data_2: |{s}|{d}|{d}|\n", .{ auth_plugin_data_2, auth_plugin_data_2.len, auth_plugin_data_2 });
         //
-        const password_resp = auth_data_resp(
+        const password_resp = try auth_data_resp(
             handshake_v10.get_auth_plugin_name(),
             handshake_v10.get_auth_data(),
             config.password,
         );
-        const resp_cap_flag = config.generate_capabilities_flag(handshake_v10.capability_flags());
+        var resp_cap_flag = config.generate_capabilities_flags(handshake_v10.capability_flags());
         if (password_resp.len > 250) {
             resp_cap_flag |= constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
         }
@@ -136,36 +146,14 @@ pub const Conn = struct {
         @panic("not implemented");
     }
 
-    fn auth(conn: Conn, auth_data: []u8, auth_plugin: []const u8) ![32]u8 {
-        if (std.mem.eql(u8, auth_plugin, "caching_sha2_password")) {
-            return scrambleSHA256Password(auth_data, conn.config.password);
-        } else if (std.mem.eql(u8, auth_plugin, "mysql_old_password")) {
-            if (!conn.config.allow_old_password) {
-                std.log.err("MySQL server requested old password authentication, but it is disabled, you can enable in config");
-                return error.OldPasswordDisabled;
-            }
-        }
-    }
-
-    fn auth_send(conn: Conn, auth_data: []const u8) !void {
-        const pkt_len = 4 + auth_data.len;
-        const data = try conn.writePacket(pkt_len);
-        data[0] = pkt_len & 0xFF;
-        data[1] = pkt_len >> 8 & 0xFF;
-        data[2] = pkt_len >> 16 & 0xFF;
-        data[3] = conn.sequence;
-        conn.sequence += 1;
-        @memcpy(data[4..], auth_data);
-    }
-
-    fn streamBufferedReader(conn: Conn) !StreamBufferedReader {
+    fn streamBufferedReader(conn: Conn) !StdStreamBufferedReader {
         switch (conn.state) {
             .connected => return conn.state.connected.buffered_reader,
             .disconnected => return error.Disconnected,
         }
     }
 
-    fn streamBufferedWriter(conn: Conn) !StreamBufferedWriter {
+    fn streamBufferedWriter(conn: Conn) !StdStreamBufferedWriter {
         switch (conn.state) {
             .connected => return conn.state.connected.buffered_writer,
             .disconnected => return error.Disconnected,
@@ -178,12 +166,13 @@ pub const Conn = struct {
     }
 };
 
-inline fn auth_data_resp(auth_plugin_name: []const u8, auth_data: []const u8, password: []const u8) !void {
+inline fn auth_data_resp(auth_plugin_name: []const u8, auth_data: []const u8, password: []const u8) ![]const u8 {
     if (std.mem.eql(u8, auth_plugin_name, "caching_sha2_password")) {
-        scrambleSHA256Password(auth_data, password);
+        return &scrambleSHA256Password(auth_data, password);
     } else {
         // TODO: support more
         std.log.err("Unsupported auth plugin: {s}(contribution are welcome!)\n", .{auth_plugin_name});
+        return error.UnsupportedAuthPlugin;
     }
 }
 
@@ -239,7 +228,7 @@ const default_config: Config = .{};
 
 test "plain handshake" {
     var conn: Conn = .{};
-    try conn.connect(std.testing.allocator, std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306));
+    try conn.connect(std.testing.allocator, default_config);
     // try conn.dial(default_config.address);
     // const packet = try conn.readPacket(std.testing.allocator);
     // defer packet.deinit();
