@@ -1,5 +1,6 @@
 const std = @import("std");
 const constants = @import("../constants.zig");
+const buffered_stream = @import("../stream_buffered.zig");
 const OkPacket = @import("./generic_response.zig").OkPacket;
 const ErrorPacket = @import("./generic_response.zig").ErrorPacket;
 const EofPacket = @import("./generic_response.zig").EofPacket;
@@ -11,15 +12,11 @@ pub const Packet = struct {
     sequence_id: u8,
     payload: []const u8,
 
-    pub fn initFromReader(allocator: std.mem.Allocator, std_io_reader: anytype) !Packet {
-        const payload_length = try std_io_reader.readIntLittle(u24);
-        const sequence_id = try std_io_reader.readByte();
+    pub fn initFromReader(allocator: std.mem.Allocator, sbr: *buffered_stream.Reader) !Packet {
+        const payload_length = try readUInt24(sbr);
+        const sequence_id = try readUInt8(sbr);
         var payload = try allocator.alloc(u8, @as(usize, payload_length));
-        const n = try std_io_reader.readAll(payload);
-        if (n != payload_length) {
-            std.log.err("expected {d} bytes, got {d}\n", .{ payload_length, n });
-            return error.ExpectedMorePayload;
-        }
+        try sbr.read(payload);
         return .{
             .payload_length = payload_length,
             .sequence_id = sequence_id,
@@ -52,3 +49,15 @@ pub const PacketRealized = union(enum) {
     eof_packet: EofPacket,
     handshake_v10: HandshakeV10,
 };
+
+fn readUInt24(reader: *buffered_stream.Reader) !u24 {
+    var bytes: [3]u8 = undefined;
+    try reader.read(&bytes);
+    return std.mem.readIntLittle(u24, &bytes);
+}
+
+fn readUInt8(reader: *buffered_stream.Reader) !u8 {
+    var bytes: [1]u8 = undefined;
+    try reader.read(&bytes);
+    return bytes[0];
+}

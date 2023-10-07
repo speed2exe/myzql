@@ -5,6 +5,7 @@ const protocol = @import("./protocol.zig");
 const HandshakeV10 = protocol.handshake_v10.HandshakeV10;
 const HandshakeResponse41 = protocol.handshake_response.HandshakeResponse41;
 const Packet = protocol.packet.Packet;
+const stream_buffered = @import("./stream_buffered.zig");
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -12,36 +13,10 @@ const max_packet_size = 1 << 24 - 1;
 const buffer_size: usize = 4096;
 
 pub const Conn = struct {
-    const StreamBufferedReader = std.io.BufferedReader(
-        buffer_size, // should just use stream directly instead of wrapping with io.reader
-        std.io.Reader(
-            std.net.Stream,
-            std.net.Stream.ReadError,
-            std.net.Stream.read,
-        ),
-    );
-    const StdStreamBufferedReader = std.io.Reader(
-        StreamBufferedReader,
-        StreamBufferedReader.Reader.Error,
-        StreamBufferedReader.read,
-    );
-    const StreamBufferedWriter = std.io.BufferedWriter(
-        buffer_size,
-        std.io.Writer(
-            std.net.Stream,
-            std.net.Stream.WriteError,
-            std.net.Stream.write,
-        ),
-    );
-    const StdStreamBufferedWriter = std.io.Writer(
-        StreamBufferedWriter,
-        StreamBufferedWriter.Writer.Error,
-        StreamBufferedWriter.write,
-    );
     const Connected = struct {
         stream: std.net.Stream,
-        buffered_reader: StreamBufferedReader,
-        buffered_writer: StreamBufferedWriter,
+        reader: stream_buffered.Reader,
+        writer: stream_buffered.Writer,
     };
     const State = union(enum) {
         disconnected,
@@ -63,13 +38,11 @@ pub const Conn = struct {
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: Config) !void {
         const stream = try std.net.tcpConnectToAddress(config.address);
-        const buffered_reader = std.io.bufferedReaderSize(buffer_size, stream.reader()).reader();
-        const buffered_writer = std.io.bufferedWriter(stream.writer()).writer();
         conn.state = .{
             .connected = .{
                 .stream = stream,
-                .buffered_reader = buffered_reader,
-                .buffered_writer = buffered_writer,
+                .reader = stream_buffered.reader(stream),
+                .writer = stream_buffered.writer(stream),
             },
         };
 
@@ -146,23 +119,23 @@ pub const Conn = struct {
         @panic("not implemented");
     }
 
-    fn streamBufferedReader(conn: Conn) !StdStreamBufferedReader {
+    fn streamBufferedReader(conn: Conn) !stream_buffered.Reader {
         switch (conn.state) {
-            .connected => return conn.state.connected.buffered_reader,
+            .connected => return conn.state.connected.reader,
             .disconnected => return error.Disconnected,
         }
     }
 
-    fn streamBufferedWriter(conn: Conn) !StdStreamBufferedWriter {
+    fn streamBufferedWriter(conn: Conn) !stream_buffered.Writer {
         switch (conn.state) {
-            .connected => return conn.state.connected.buffered_writer,
+            .connected => return conn.state.connected.writer,
             .disconnected => return error.Disconnected,
         }
     }
 
     fn readPacket(conn: Conn, allocator: std.mem.Allocator) !Packet {
         var sbr = try conn.streamBufferedReader();
-        return Packet.initFromReader(allocator, sbr.reader());
+        return Packet.initFromReader(allocator, &sbr);
     }
 };
 

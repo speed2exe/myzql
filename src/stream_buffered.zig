@@ -2,46 +2,44 @@ const std = @import("std");
 
 const BUFFER_SIZE = 4096;
 
-pub const StreamBufferedReader = struct {
+pub const Reader = struct {
     buf: [4096]u8 = undefined,
     pos: usize = 0,
     len: usize = 0,
     stream: std.net.Stream,
 
     // read all behavior
-    pub fn read(s: *StreamBufferedReader, buffer: []u8) !void {
-        var already_read = 0;
+    pub fn read(s: *Reader, buffer: []u8) !void {
+        var already_read: usize = 0;
         while (buffer.len > already_read) {
-            if (s.emtpy()) {
+            if (s.empty()) {
                 try s.fill();
             }
             already_read += copy(buffer[already_read..], s.buf[s.pos..s.len]);
         }
     }
 
-    inline fn fill(s: *StreamBufferedReader) !void {
-        s.len = try s.stream.read(s.buf);
+    inline fn fill(s: *Reader) !void {
+        s.len = try s.stream.read(&s.buf);
     }
 
-    inline fn empty(s: *StreamBufferedReader) bool {
+    inline fn empty(s: *Reader) bool {
         return s.pos == s.len;
     }
 };
 
-pub fn streamBufferedReader(stream: std.net.Stream) StreamBufferedReader {
-    return StreamBufferedReader{
-        .stream = stream,
-    };
+pub fn reader(stream: std.net.Stream) Reader {
+    return .{ .stream = stream };
 }
 
-pub const StreamBufferedWriter = struct {
+pub const Writer = struct {
     buf: [4096]u8 = undefined,
     len: usize = 0,
     stream: std.net.Stream,
 
     // write all behavior
-    pub fn write(s: *StreamBufferedWriter, buffer: []u8) !void {
-        var already_written = 0;
+    pub fn write(s: *Writer, buffer: []const u8) !void {
+        var already_written: usize = 0;
         while (buffer.len > already_written) {
             if (s.full()) {
                 try s.flush();
@@ -52,19 +50,17 @@ pub const StreamBufferedWriter = struct {
         }
     }
 
-    inline fn full(s: *StreamBufferedWriter) bool {
+    inline fn full(s: *Writer) bool {
         return s.len == s.buf.len;
     }
 
-    pub inline fn flush(s: *StreamBufferedWriter) !void {
+    pub inline fn flush(s: *Writer) !void {
         try s.stream.writeAll(s.buf[0..s.len]);
     }
 };
 
-pub fn streamBufferedWriter(stream: std.net.Stream) StreamBufferedReader {
-    return StreamBufferedWriter{
-        .stream = stream,
-    };
+pub fn writer(stream: std.net.Stream) Writer {
+    return .{ .stream = stream };
 }
 
 fn copy(dest: []u8, src: []const u8) usize {
