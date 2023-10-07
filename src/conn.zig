@@ -7,6 +7,7 @@ const ErrorPacket = protocol.generic_response.ErrorPacket;
 const OkPacket = protocol.generic_response.OkPacket;
 const HandshakeResponse41 = protocol.handshake_response.HandshakeResponse41;
 const AuthSwitchRequest = protocol.auth_switch_request.AuthSwitchRequest;
+const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
 
@@ -25,6 +26,7 @@ pub const Conn = struct {
     reader: stream_buffered.Reader = undefined,
     writer: stream_buffered.Writer = undefined,
     server_capabilities: u32 = 0,
+    current_sequence_id: u8 = 0,
 
     pub fn close(conn: *Conn) void {
         switch (conn.state) {
@@ -47,6 +49,23 @@ pub const Conn = struct {
         return conn.server_capabilities & capability > 0;
     }
 
+    fn updateSequenceId(conn: *Conn, packet: Packet) !void {
+        if (packet.sequence_id != conn.current_sequence_id) {
+            std.log.err(
+                "Unexpected sequence id: Conn:{d} != Packet: {d}\n",
+                .{ packet.sequence_id, conn.current_sequence_id },
+            );
+            return error.UnexpectedPacket;
+        }
+        conn.current_sequence_id += 1;
+    }
+
+    fn generateSequenceId(conn: *Conn) u8 {
+        const id = conn.current_sequence_id;
+        conn.current_sequence_id += 1;
+        return id;
+    }
+
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: Config) !void {
         try conn.dial(config.address);
@@ -54,6 +73,7 @@ pub const Conn = struct {
         {
             const packet = try Packet.initFromReader(allocator, &conn.reader);
             defer packet.deinit(allocator);
+            try conn.updateSequenceId(packet);
 
             const handshake_v10 = switch (packet.payload[0]) {
                 constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(packet, config.capability_flags()),
@@ -78,16 +98,21 @@ pub const Conn = struct {
                 @panic("not implemented");
             }
         }
-        {
+
+        while (true) {
             const packet = try Packet.initFromReader(allocator, &conn.reader);
             defer packet.deinit(allocator);
+            try conn.updateSequenceId(packet);
 
             switch (packet.payload[0]) {
-                constants.OK => _ = OkPacket.initFromPacket(packet, config.capability_flags()),
+                constants.OK => {
+                    _ = OkPacket.initFromPacket(packet, config.capability_flags());
+                    return;
+                },
                 constants.AUTH_SWITCH => {
                     const auth_switch = AuthSwitchRequest.initFromPacket(packet);
                     std.log.err("auth_switch: {any}\n", .{auth_switch});
-                    return error.UnexpectedPacket;
+                    try conn.sendAuthSwitchResponse(auth_switch, config);
                 },
                 constants.ERR => {
                     ErrorPacket.initFromPacket(true, packet, 0).print();
@@ -103,16 +128,20 @@ pub const Conn = struct {
         // Server ack
     }
 
-    fn sendHandshakeResponse41(conn: Conn, handshake_v10: HandshakeV10, config: Config) !void {
-        // debugging
-        // try std.io.getStdErr().writer().print("v10: {any}\n", .{handshake_v10});
-        // const auth_plugin_name = incoming.auth_plugin_name orelse return error.AuthPluginNameMissing;
-        // try std.io.getStdErr().writer().print("auth_plugin_name: |{s}|\n", .{auth_plugin_name});
-        // const auth_plugin_data = incoming.auth_plugin_data_part_1;
-        // try std.io.getStdErr().writer().print("auth_plugin_data: |{s}|{d}||{d}|\n", .{ auth_plugin_data, auth_plugin_data.len, auth_plugin_data.* });
-        // const auth_plugin_data_2 = incoming.auth_plugin_data_part_2;
-        // try std.io.getStdErr().writer().print("auth_plugin_data_2: |{s}|{d}|{d}|\n", .{ auth_plugin_data_2, auth_plugin_data_2.len, auth_plugin_data_2 });
-        //
+    fn sendAuthSwitchResponse(conn: *Conn, auth_switch: AuthSwitchRequest, config: Config) !void {
+        const password_resp = try auth_data_resp(
+            auth_switch.plugin_name,
+            auth_switch.plugin_data,
+            config.password,
+        );
+        var writer = conn.writer;
+        try packet_writer.writeUInt24(&writer, @truncate(password_resp.len));
+        try packet_writer.writeUInt8(&writer, conn.generateSequenceId());
+        try writer.write(password_resp);
+        try writer.flush();
+    }
+
+    fn sendHandshakeResponse41(conn: *Conn, handshake_v10: HandshakeV10, config: Config) !void {
         const password_resp = try auth_data_resp(
             handshake_v10.get_auth_plugin_name(),
             handshake_v10.get_auth_data(),
@@ -130,7 +159,7 @@ pub const Conn = struct {
             .auth_response = password_resp,
         };
         var writer = conn.writer;
-        try response.write_as_packet(&writer);
+        try response.write_as_packet(&writer, conn.generateSequenceId());
         try writer.flush();
     }
 

@@ -35,11 +35,11 @@ pub const HandshakeResponse41 = struct {
     key_values: []const [2][]const u8 = &.{},
     zstd_compression_level: u8 = 0,
 
-    pub fn write_as_packet(h: HandshakeResponse41, writer: *stream_buffered.Writer) !void {
+    pub fn write_as_packet(h: HandshakeResponse41, writer: *stream_buffered.Writer, seq_id: u8) !void {
         // Packet header
         const packet_size = payload_size(h);
         try packer_writer.writeUInt24(writer, packet_size);
-        try packer_writer.writeUInt8(writer, 1); // sequence_id
+        try packer_writer.writeUInt8(writer, seq_id); // sequence_id
 
         // payload
         try packer_writer.writeUInt32(writer, h.client_flag);
@@ -71,7 +71,6 @@ pub const HandshakeResponse41 = struct {
         if ((h.client_flag & constants.CLIENT_ZSTD_COMPRESSION_ALGORITHM) > 0) {
             try packer_writer.writeUInt8(writer, h.zstd_compression_level);
         }
-        // todo: @panic("need to do auth switch");
     }
 
     pub fn payload_size(h: HandshakeResponse41) u24 {
@@ -85,13 +84,13 @@ pub const HandshakeResponse41 = struct {
         if ((h.client_flag & constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) > 0) {
             length += packer_writer.lengthEncodedStringPayloadSize(h.auth_response.len);
         } else {
-            length += @as(u24, @truncate(h.auth_response.len)) + 1;
+            length += @truncate(h.auth_response.len + 1);
         }
         if ((h.client_flag & constants.CLIENT_CONNECT_WITH_DB) > 0) {
-            length += @as(u24, @truncate(h.database.len)) + 1;
+            length += @truncate(h.database.len + 1);
         }
         if ((h.client_flag & constants.CLIENT_PLUGIN_AUTH) > 0) {
-            length += @as(u24, @truncate(h.client_plugin_name.len)) + 1;
+            length += @truncate(h.client_plugin_name.len + 1);
         }
         if ((h.client_flag & constants.CLIENT_CONNECT_ATTRS) > 0) {
             length += packer_writer.lengthEncodedIntegerPayloadSize(h.key_values.len);
