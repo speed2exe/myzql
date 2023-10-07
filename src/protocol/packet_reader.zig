@@ -5,7 +5,7 @@ pub const PacketReader = struct {
     payload: []const u8,
     pos: usize,
 
-    pub fn initFromPacket(packet: Packet) PacketReader {
+    pub fn initFromPacket(packet: *const Packet) PacketReader {
         return .{ .payload = packet.payload, .pos = 0 };
     }
 

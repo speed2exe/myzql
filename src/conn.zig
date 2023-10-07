@@ -76,9 +76,9 @@ pub const Conn = struct {
             try conn.updateSequenceId(packet);
 
             const handshake_v10 = switch (packet.payload[0]) {
-                constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(packet, config.capability_flags()),
+                constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(&packet, config.capability_flags()),
                 constants.ERR => {
-                    ErrorPacket.initFromPacket(true, packet, 0).print();
+                    ErrorPacket.initFromPacket(true, &packet, 0).print();
                     return error.UnexpectedPacket;
                 },
                 else => {
@@ -109,11 +109,11 @@ pub const Conn = struct {
 
             switch (packet.payload[0]) {
                 constants.OK => {
-                    _ = OkPacket.initFromPacket(packet, config.capability_flags());
+                    _ = OkPacket.initFromPacket(&packet, config.capability_flags());
                     return;
                 },
                 constants.AUTH_SWITCH => {
-                    const auth_switch = AuthSwitchRequest.initFromPacket(packet);
+                    const auth_switch = AuthSwitchRequest.initFromPacket(&packet);
                     try auth_plugin_name.set(auth_switch.plugin_name);
                     try conn.sendAuthSwitchResponse(
                         auth_switch.plugin_name,
@@ -130,7 +130,7 @@ pub const Conn = struct {
                     );
                 },
                 constants.ERR => {
-                    ErrorPacket.initFromPacket(true, packet, 0).print();
+                    ErrorPacket.initFromPacket(true, &packet, 0).print();
                     return error.UnexpectedPacket;
                 },
                 else => {
