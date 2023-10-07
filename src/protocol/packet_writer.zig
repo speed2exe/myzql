@@ -39,7 +39,7 @@ pub fn writeFillers(comptime n: comptime_int, writer: *stream_buffered.Writer) !
 }
 
 pub fn writeLengthEncodedString(writer: *stream_buffered.Writer, s: []const u8) !void {
-    try writeLengthEncodedInteger(writer, @as(u64, s.len));
+    try writeLengthEncodedInteger(writer, s.len);
     try writer.write(s);
 }
 
