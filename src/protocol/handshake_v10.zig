@@ -6,7 +6,7 @@ const constants = @import("../constants.zig");
 pub const HandshakeV10 = struct {
     protocol_version: u8,
     server_version: [:0]const u8,
-    thread_id: u32,
+    connection_id: u32,
     auth_plugin_data_part_1: *const [8]u8,
     capability_flags_1: u16,
     character_set: u8,
@@ -21,7 +21,7 @@ pub const HandshakeV10 = struct {
         const protocol_version = reader.readByte();
         std.debug.assert(protocol_version == constants.HANDSHAKE_V10);
         const server_version = reader.readNullTerminatedString();
-        const thread_id = reader.readUInt32();
+        const connection_id = reader.readUInt32();
         const auth_plugin_data_part_1 = reader.readFixed(8);
         _ = reader.readByte(); // filler
         const capability_flags_1 = reader.readUInt16();
@@ -47,7 +47,7 @@ pub const HandshakeV10 = struct {
         return .{
             .protocol_version = protocol_version,
             .server_version = server_version,
-            .thread_id = thread_id,
+            .connection_id = connection_id,
             .auth_plugin_data_part_1 = auth_plugin_data_part_1,
             .capability_flags_1 = capability_flags_1,
             .character_set = character_set,

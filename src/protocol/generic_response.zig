@@ -110,7 +110,9 @@ pub const EofPacket = struct {
         var warnings: ?u16 = null;
         if (capabilities & constants.CLIENT_PROTOCOL_41 > 0) {
             status_flags = reader.readUInt16();
+            std.log.err("status_flags: {any}", .{status_flags});
             warnings = reader.readUInt16();
+            std.log.err("warnings: {any}", .{warnings});
         }
 
         std.debug.assert(reader.finished());
