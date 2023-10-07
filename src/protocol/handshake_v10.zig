@@ -58,4 +58,11 @@ pub const HandshakeV10 = struct {
             .auth_plugin_name = auth_plugin_name,
         };
     }
+
+    pub fn capability_flags(h: HandshakeV10) u32 {
+        var f: u32 = h.capability_flags_2;
+        f <<= 16;
+        f |= h.capability_flags_1;
+        return f;
+    }
 };

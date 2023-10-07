@@ -2,6 +2,8 @@ const std = @import("std");
 const Config = @import("./config.zig").Config;
 const constants = @import("./constants.zig");
 const protocol = @import("./protocol.zig");
+const HandshakeV10 = protocol.handshake_v10.HandshakeV10;
+const HandshakeResponse41 = protocol.handshake_response.HandshakeResponse41;
 const Packet = protocol.packet.Packet;
 
 const max_packet_size = 1 << 24 - 1;
@@ -20,7 +22,11 @@ pub const Conn = struct {
     );
     const StreamBufferedWriter = std.io.BufferedWriter(
         buffer_size,
-        std.net.Stream,
+        std.io.Writer(
+            std.net.Stream,
+            std.net.Stream.WriteError,
+            std.net.Stream.write,
+        ),
     );
     const Connected = struct {
         stream: std.net.Stream,
@@ -48,8 +54,7 @@ pub const Conn = struct {
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, address: std.net.Address) !void {
         const stream = try std.net.tcpConnectToAddress(address);
         const buffered_reader = std.io.bufferedReaderSize(buffer_size, stream.reader());
-
-        const buffered_writer = std.io.bufferedWriter(stream);
+        const buffered_writer = std.io.bufferedWriter(stream.writer());
         conn.state = .{
             .connected = .{
                 .stream = stream,
@@ -73,26 +78,44 @@ pub const Conn = struct {
         // debugging
         try std.io.getStdErr().writer().print("v10: {any}", .{handshake_v10});
 
+        const server_capabilities = handshake_v10.capability_flags();
+        if (server_capabilities & constants.CLIENT_PROTOCOL_41 > 0) {
+            try conn.sendHandshakeResponse41(handshake_v10);
+        } else {
+            // TODO: handle older protocol
+            @panic("not implemented");
+        }
+
         // TODO: TLS handshake if enabled
 
         // send handshake response
 
         // Server ack
-        // const packet2 = try conn.readPacket(allocator);
-        // defer packet2.deinit(allocator);
+        const packet2 = try conn.readPacket(allocator);
+        defer packet2.deinit(allocator);
 
-        // const realized_packet2 = packet.realize(constants.MAX_CAPABILITIES, false);
-        // switch (realized_packet2) {
-        //     .ok_packet => {},
-        //     else => |x| {
-        //         std.log.err("Unexpected packet: {any}\n", .{x});
-        //         return error.DidNotReceiveOkPacket;
-        //     },
-        // }
+        const realized_packet2 = packet.realize(constants.MAX_CAPABILITIES, false);
+        switch (realized_packet2) {
+            .ok_packet => {},
+            else => |x| {
+                std.log.err("\nUnexpected packet: {any}\n", .{x});
+                return error.DidNotReceiveOkPacket;
+            },
+        }
     }
 
-    fn makeHandshakeResponse(conn: Conn) ![32]u8 {
-        _ = conn;
+    fn sendHandshakeResponse41(conn: Conn, incoming: HandshakeV10) !void {
+        _ = incoming;
+        var writer = try conn.streamBufferedWriter();
+        const response: HandshakeResponse41 = .{
+            .client_flags = 1,
+            .max_packet_size = 1 << 24 - 1,
+            .character_set = 33,
+            .username = "hello",
+            .auth_response = "hhello",
+        };
+        try response.write(&writer, 0);
+        try writer.flush();
     }
 
     pub fn ping(conn: Conn) !void {
@@ -122,12 +145,16 @@ pub const Conn = struct {
         @memcpy(data[4..], auth_data);
     }
 
-    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_handshake_v10.html
-    fn readProtocolHandShakeV10() void {}
-
     fn streamBufferedReader(conn: Conn) !StreamBufferedReader {
         switch (conn.state) {
             .connected => return conn.state.connected.buffered_reader,
+            .disconnected => return error.Disconnected,
+        }
+    }
+
+    fn streamBufferedWriter(conn: Conn) !StreamBufferedWriter {
+        switch (conn.state) {
+            .connected => return conn.state.connected.buffered_writer,
             .disconnected => return error.Disconnected,
         }
     }

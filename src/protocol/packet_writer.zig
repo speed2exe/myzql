@@ -1,30 +1,30 @@
 const std = @import("std");
 
 pub fn writeUInt8(writer: anytype, v: u8) !void {
-    _ = try writer.writeAll(&[_]u8{v});
+    _ = try writer.write(&[_]u8{v});
 }
 
 pub fn writeUInt16(writer: anytype, v: u16) !void {
     var bytes: [2]u8 = undefined;
-    std.mem.writeIntLittle(u16, bytes, v);
+    std.mem.writeIntLittle(u16, &bytes, v);
     _ = try writer.write(&bytes);
 }
 
 pub fn writeUInt24(writer: anytype, v: u24) !void {
     var bytes: [3]u8 = undefined;
-    std.mem.writeIntLittle(u24, bytes, v);
+    std.mem.writeIntLittle(u24, &bytes, v);
     _ = try writer.write(&bytes);
 }
 
 pub fn writeUInt32(writer: anytype, v: u32) !void {
     var bytes: [4]u8 = undefined;
-    std.mem.writeIntLittle(u32, bytes, v);
+    std.mem.writeIntLittle(u32, &bytes, v);
     _ = try writer.write(&bytes);
 }
 
 pub fn writeUInt64(writer: anytype, v: u64) !void {
     var bytes: [8]u8 = undefined;
-    std.mem.writeIntLittle(u64, bytes, v);
+    std.mem.writeIntLittle(u64, &bytes, v);
     _ = try writer.write(&bytes);
 }
 
@@ -38,7 +38,7 @@ pub fn writeFillers(comptime n: comptime_int, writer: anytype) !void {
 }
 
 pub fn writeLengthEncodedString(writer: anytype, s: []const u8) !void {
-    writeLengthEncodedInteger(writer, @as(u64, s.len));
+    try writeLengthEncodedInteger(writer, @as(u64, s.len));
     _ = try writer.write(s);
 }
 
