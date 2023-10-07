@@ -70,6 +70,7 @@ pub const Conn = struct {
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: Config) !void {
         try conn.dial(config.address);
 
+        var auth_plugin_name: ?[:0]const u8 = null;
         {
             const packet = try Packet.initFromReader(allocator, &conn.reader);
             defer packet.deinit(allocator);
@@ -87,6 +88,7 @@ pub const Conn = struct {
                 },
             };
             conn.server_capabilities = handshake_v10.capability_flags();
+            auth_plugin_name = handshake_v10.auth_plugin_name;
 
             // TODO: TLS handshake if enabled
 
@@ -111,8 +113,21 @@ pub const Conn = struct {
                 },
                 constants.AUTH_SWITCH => {
                     const auth_switch = AuthSwitchRequest.initFromPacket(packet);
-                    std.log.err("auth_switch: {any}\n", .{auth_switch});
-                    try conn.sendAuthSwitchResponse(auth_switch, config);
+                    auth_plugin_name = auth_switch.plugin_name;
+                    try conn.sendAuthSwitchResponse(
+                        auth_switch.plugin_name,
+                        auth_switch.plugin_name,
+                        config,
+                    );
+                },
+                constants.AUTH_MORE_DATA => {
+                    const more_data = packet.payload[1..];
+                    const plugin_name = auth_plugin_name orelse return error.NoAuthPluginName;
+                    try conn.sendAuthSwitchResponse(
+                        plugin_name,
+                        more_data,
+                        config,
+                    );
                 },
                 constants.ERR => {
                     ErrorPacket.initFromPacket(true, packet, 0).print();
@@ -128,23 +143,24 @@ pub const Conn = struct {
         // Server ack
     }
 
-    fn sendAuthSwitchResponse(conn: *Conn, auth_switch: AuthSwitchRequest, config: Config) !void {
-        const password_resp = try auth_data_resp(
-            auth_switch.plugin_name,
-            auth_switch.plugin_data,
-            config.password,
-        );
+    fn sendAuthSwitchResponse(
+        conn: *Conn,
+        plugin_name: []const u8,
+        plugin_data: []const u8,
+        config: Config,
+    ) !void {
+        const password_resp = try auth_data_resp(plugin_name, plugin_data, config.password);
         var writer = conn.writer;
         try packet_writer.writeUInt24(&writer, @truncate(password_resp.len));
         try packet_writer.writeUInt8(&writer, conn.generateSequenceId());
-        try writer.write(password_resp);
+        try writer.write(&password_resp);
         try writer.flush();
     }
 
     fn sendHandshakeResponse41(conn: *Conn, handshake_v10: HandshakeV10, config: Config) !void {
         const password_resp = try auth_data_resp(
             handshake_v10.get_auth_plugin_name(),
-            handshake_v10.get_auth_data(),
+            &handshake_v10.get_auth_data(),
             config.password,
         );
         var resp_cap_flag = config.capability_flags();
@@ -156,7 +172,7 @@ pub const Conn = struct {
             .client_flag = resp_cap_flag,
             .character_set = config.collation,
             .username = config.username,
-            .auth_response = password_resp,
+            .auth_response = &password_resp,
         };
         var writer = conn.writer;
         try response.write_as_packet(&writer, conn.generateSequenceId());
@@ -169,9 +185,9 @@ pub const Conn = struct {
     }
 };
 
-inline fn auth_data_resp(auth_plugin_name: []const u8, auth_data: []const u8, password: []const u8) ![]const u8 {
+fn auth_data_resp(auth_plugin_name: []const u8, auth_data: []const u8, password: []const u8) ![32]u8 {
     if (std.mem.eql(u8, auth_plugin_name, "caching_sha2_password")) {
-        return &scrambleSHA256Password(auth_data, password);
+        return scrambleSHA256Password(auth_data, password);
     } else {
         // TODO: support more
         std.log.err("Unsupported auth plugin: {s}(contribution are welcome!)\n", .{auth_plugin_name});

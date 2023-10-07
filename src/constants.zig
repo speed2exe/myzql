@@ -4,11 +4,12 @@ const std = @import("std");
 pub const default_auth_plugin = "mysql_native_password";
 
 // MySQL Packet Header
-pub const OK:            u8 = 0x00;
-pub const EOF:           u8 = 0xFE;
-pub const AUTH_SWITCH:   u8 = 0xFE;
-pub const ERR:           u8 = 0xFF;
-pub const HANDSHAKE_V10: u8 = 0x0A;
+pub const OK:             u8 = 0x00;
+pub const EOF:            u8 = 0xFE;
+pub const AUTH_SWITCH:    u8 = 0xFE;
+pub const AUTH_MORE_DATA: u8 = 0x01;
+pub const ERR:            u8 = 0xFF;
+pub const HANDSHAKE_V10:  u8 = 0x0A;
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/mysql__com_8h.html#a1d854e841086925be1883e4d7b4e8cad
 pub const SERVER_STATUS_IN_TRANS:             u16 = 1 << 0;

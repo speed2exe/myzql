@@ -70,7 +70,7 @@ pub const HandshakeV10 = struct {
         return h.auth_plugin_name orelse "mysql_native_password";
     }
 
-    pub inline fn get_auth_data(h: HandshakeV10) []const u8 {
+    pub fn get_auth_data(h: HandshakeV10) [20]u8 {
         const length = h.auth_plugin_data_part_1.len + h.auth_plugin_data_part_2.len;
         std.debug.assert(length <= 20);
         var auth_data: [20]u8 = undefined;
@@ -78,6 +78,6 @@ pub const HandshakeV10 = struct {
         const part_1_len = h.auth_plugin_data_part_1.len;
         @memcpy(auth_data[0..part_1_len], h.auth_plugin_data_part_1);
         @memcpy(auth_data[part_1_len..], h.auth_plugin_data_part_2);
-        return auth_data[0..length];
+        return auth_data;
     }
 };
