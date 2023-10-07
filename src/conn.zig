@@ -73,6 +73,10 @@ pub const Conn = struct {
         const realized_packet2 = packet2.realize(constants.MAX_CAPABILITIES, false);
         switch (realized_packet2) {
             .ok_packet => {},
+            .error_packet => |x| {
+                x.print();
+                return error.DidNotReceiveOkPacket;
+            },
             else => |x| {
                 std.log.err("\nUnexpected packet: {any}\n", .{x});
                 return error.DidNotReceiveOkPacket;

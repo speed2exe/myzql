@@ -33,6 +33,10 @@ pub const ErrorPacket = struct {
             .error_message = error_message,
         };
     }
+
+    pub fn print(err: ErrorPacket) void {
+        std.log.err("ErrorPacket, code: {d}, message: {s}", .{ err.error_code, err.error_message });
+    }
 };
 
 //https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_ok_packet.html
