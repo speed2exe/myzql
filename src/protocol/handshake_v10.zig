@@ -65,4 +65,18 @@ pub const HandshakeV10 = struct {
         f |= h.capability_flags_1;
         return f;
     }
+
+    pub fn get_auth_plugin_name(h: HandshakeV10) []const u8 {
+        return h.auth_plugin_name orelse "mysql_native_password";
+    }
+
+    pub inline fn get_auth_data(h: HandshakeV10) []const u8 {
+        const length = h.auth_plugin_data_part_1.len + h.auth_plugin_data_part_2.len;
+        std.debug.assert(length <= 20);
+        var auth_data: [20]u8 = undefined;
+
+        @memcpy(auth_data, h.auth_plugin_data_part_1);
+        @memcpy(auth_data, h.auth_plugin_data_part_2);
+        return auth_data[0..length];
+    }
 };

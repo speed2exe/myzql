@@ -25,7 +25,7 @@ pub const HandshakeResponse320 = struct {
 
 pub const HandshakeResponse41 = struct {
     client_flags: u32,
-    max_packet_size: u24,
+    max_packet_size: u24 = 0,
     character_set: u8,
     username: [:0]const u8,
     auth_response: []const u8,

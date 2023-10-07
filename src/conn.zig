@@ -51,8 +51,8 @@ pub const Conn = struct {
     }
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
-    pub fn connect(conn: *Conn, allocator: std.mem.Allocator, address: std.net.Address) !void {
-        const stream = try std.net.tcpConnectToAddress(address);
+    pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: Config) !void {
+        const stream = try std.net.tcpConnectToAddress(config.address);
         const buffered_reader = std.io.bufferedReaderSize(buffer_size, stream.reader());
         const buffered_writer = std.io.bufferedWriter(stream.writer());
         conn.state = .{
@@ -75,20 +75,16 @@ pub const Conn = struct {
             },
         };
 
-        // debugging
-        try std.io.getStdErr().writer().print("v10: {any}", .{handshake_v10});
+        // TODO: TLS handshake if enabled
 
+        // send handshake response to server
         const server_capabilities = handshake_v10.capability_flags();
         if (server_capabilities & constants.CLIENT_PROTOCOL_41 > 0) {
-            try conn.sendHandshakeResponse41(handshake_v10);
+            try conn.sendHandshakeResponse41(handshake_v10, config);
         } else {
             // TODO: handle older protocol
             @panic("not implemented");
         }
-
-        // TODO: TLS handshake if enabled
-
-        // send handshake response
 
         // Server ack
         const packet2 = try conn.readPacket(allocator);
@@ -104,15 +100,32 @@ pub const Conn = struct {
         }
     }
 
-    fn sendHandshakeResponse41(conn: Conn, incoming: HandshakeV10) !void {
-        _ = incoming;
+    fn sendHandshakeResponse41(conn: Conn, handshake_v10: HandshakeV10, config: Config) !void {
+        // debugging
+        // try std.io.getStdErr().writer().print("v10: {any}\n", .{incoming});
+        // const auth_plugin_name = incoming.auth_plugin_name orelse return error.AuthPluginNameMissing;
+        // try std.io.getStdErr().writer().print("auth_plugin_name: |{s}|\n", .{auth_plugin_name});
+        // const auth_plugin_data = incoming.auth_plugin_data_part_1;
+        // try std.io.getStdErr().writer().print("auth_plugin_data: |{s}|{d}||{d}|\n", .{ auth_plugin_data, auth_plugin_data.len, auth_plugin_data.* });
+        // const auth_plugin_data_2 = incoming.auth_plugin_data_part_2;
+        // try std.io.getStdErr().writer().print("auth_plugin_data_2: |{s}|{d}|{d}|\n", .{ auth_plugin_data_2, auth_plugin_data_2.len, auth_plugin_data_2 });
+        //
+        const password_resp = auth_data_resp(
+            handshake_v10.get_auth_plugin_name(),
+            handshake_v10.get_auth_data(),
+            config.password,
+        );
+        const resp_cap_flag = config.generate_capabilities_flag(handshake_v10.capability_flags());
+        if (password_resp.len > 250) {
+            resp_cap_flag |= constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
+        }
+
         var writer = try conn.streamBufferedWriter();
         const response: HandshakeResponse41 = .{
-            .client_flags = 1,
-            .max_packet_size = 1 << 24 - 1,
-            .character_set = 33,
-            .username = "hello",
-            .auth_response = "hhello",
+            .client_flags = resp_cap_flag,
+            .character_set = config.collation,
+            .username = config.username,
+            .auth_response = password_resp,
         };
         try response.write(&writer, 0);
         try writer.flush();
@@ -164,6 +177,15 @@ pub const Conn = struct {
         return Packet.initFromReader(allocator, sbr.reader());
     }
 };
+
+inline fn auth_data_resp(auth_plugin_name: []const u8, auth_data: []const u8, password: []const u8) !void {
+    if (std.mem.eql(u8, auth_plugin_name, "caching_sha2_password")) {
+        scrambleSHA256Password(auth_data, password);
+    } else {
+        // TODO: support more
+        std.log.err("Unsupported auth plugin: {s}(contribution are welcome!)\n", .{auth_plugin_name});
+    }
+}
 
 // XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))
 fn scrambleSHA256Password(scramble: []const u8, password: []const u8) [32]u8 {
