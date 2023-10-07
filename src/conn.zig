@@ -69,8 +69,7 @@ pub const Conn = struct {
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: Config) !void {
         try conn.dial(config.address);
-
-        var auth_plugin_name: ?[:0]const u8 = null;
+        var auth_plugin_name: FixedString(32) = .{};
         {
             const packet = try Packet.initFromReader(allocator, &conn.reader);
             defer packet.deinit(allocator);
@@ -88,7 +87,9 @@ pub const Conn = struct {
                 },
             };
             conn.server_capabilities = handshake_v10.capability_flags();
-            auth_plugin_name = handshake_v10.auth_plugin_name;
+            if (handshake_v10.auth_plugin_name) |p| {
+                try auth_plugin_name.set(p);
+            }
 
             // TODO: TLS handshake if enabled
 
@@ -113,7 +114,7 @@ pub const Conn = struct {
                 },
                 constants.AUTH_SWITCH => {
                     const auth_switch = AuthSwitchRequest.initFromPacket(packet);
-                    auth_plugin_name = auth_switch.plugin_name;
+                    try auth_plugin_name.set(auth_switch.plugin_name);
                     try conn.sendAuthSwitchResponse(
                         auth_switch.plugin_name,
                         auth_switch.plugin_name,
@@ -122,9 +123,8 @@ pub const Conn = struct {
                 },
                 constants.AUTH_MORE_DATA => {
                     const more_data = packet.payload[1..];
-                    const plugin_name = auth_plugin_name orelse return error.NoAuthPluginName;
                     try conn.sendAuthSwitchResponse(
-                        plugin_name,
+                        auth_plugin_name.get(),
                         more_data,
                         config,
                     );
@@ -219,6 +219,24 @@ fn scrambleSHA256Password(scramble: []const u8, password: []const u8) [32]u8 {
         m1.* ^= m2;
     }
     return message1;
+}
+
+fn FixedString(comptime max: usize) type {
+    return struct {
+        buf: [max]u8 = undefined,
+        len: usize = 0,
+
+        fn get(self: FixedString(max)) []const u8 {
+            return self.buf[0..self.len];
+        }
+        fn set(self: *FixedString(max), s: []const u8) !void {
+            if (s.len > max) {
+                return error.SourceTooLarge;
+            }
+            const n = @min(s.len, max);
+            @memcpy(self.buf[0..n], s);
+        }
+    };
 }
 
 test "scrambleSHA256Password" {
