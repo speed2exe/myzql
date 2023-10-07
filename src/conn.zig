@@ -67,10 +67,10 @@ pub const Conn = struct {
         }
 
         // Server ack
-        const packet2 = try Packet.initFromReader(allocator, &conn.reader);
-        defer packet2.deinit(allocator);
+        const ack_packet = try Packet.initFromReader(allocator, &conn.reader);
+        defer ack_packet.deinit(allocator);
 
-        const realized_packet2 = packet2.realize(constants.MAX_CAPABILITIES, false);
+        const realized_packet2 = ack_packet.realize(constants.MAX_CAPABILITIES, false);
         switch (realized_packet2) {
             .ok_packet => {},
             .error_packet => |x| {
@@ -105,13 +105,13 @@ pub const Conn = struct {
         }
 
         const response: HandshakeResponse41 = .{
-            .client_flags = resp_cap_flag,
+            .client_flag = resp_cap_flag,
             .character_set = config.collation,
             .username = config.username,
             .auth_response = password_resp,
         };
         var writer = conn.writer;
-        try response.write(&writer, resp_cap_flag);
+        try response.write(&writer);
         try writer.flush();
     }
 
