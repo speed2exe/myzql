@@ -6,6 +6,7 @@ const HandshakeV10 = protocol.handshake_v10.HandshakeV10;
 const ErrorPacket = protocol.generic_response.ErrorPacket;
 const OkPacket = protocol.generic_response.OkPacket;
 const HandshakeResponse41 = protocol.handshake_response.HandshakeResponse41;
+const AuthSwitchRequest = protocol.auth_switch_request.AuthSwitchRequest;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
 
@@ -50,47 +51,56 @@ pub const Conn = struct {
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: Config) !void {
         try conn.dial(config.address);
 
-        const packet = try Packet.initFromReader(allocator, &conn.reader);
-        defer packet.deinit(allocator);
+        {
+            const packet = try Packet.initFromReader(allocator, &conn.reader);
+            defer packet.deinit(allocator);
 
-        const handshake_v10 = switch (packet.payload[0]) {
-            constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(packet, config.capability_flags()),
-            constants.ERR => {
-                ErrorPacket.initFromPacket(true, packet, 0).print();
-                return error.UnexpectedPacket;
-            },
-            else => {
-                std.log.err("Unexpected packet: {any}\n", .{packet});
-                return error.UnexpectedPacket;
-            },
-        };
-        conn.server_capabilities = handshake_v10.capability_flags();
+            const handshake_v10 = switch (packet.payload[0]) {
+                constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(packet, config.capability_flags()),
+                constants.ERR => {
+                    ErrorPacket.initFromPacket(true, packet, 0).print();
+                    return error.UnexpectedPacket;
+                },
+                else => {
+                    std.log.err("Unexpected packet: {any}\n", .{packet});
+                    return error.UnexpectedPacket;
+                },
+            };
+            conn.server_capabilities = handshake_v10.capability_flags();
 
-        // TODO: TLS handshake if enabled
+            // TODO: TLS handshake if enabled
 
-        // send handshake response to server
-        if (conn.hasCapability(constants.CLIENT_PROTOCOL_41)) {
-            try conn.sendHandshakeResponse41(handshake_v10, config);
-        } else {
-            // TODO: handle older protocol
-            @panic("not implemented");
+            // send handshake response to server
+            if (conn.hasCapability(constants.CLIENT_PROTOCOL_41)) {
+                try conn.sendHandshakeResponse41(handshake_v10, config);
+            } else {
+                // TODO: handle older protocol
+                @panic("not implemented");
+            }
+        }
+        {
+            const packet = try Packet.initFromReader(allocator, &conn.reader);
+            defer packet.deinit(allocator);
+
+            switch (packet.payload[0]) {
+                constants.OK => _ = OkPacket.initFromPacket(packet, config.capability_flags()),
+                constants.AUTH_SWITCH => {
+                    const auth_switch = AuthSwitchRequest.initFromPacket(packet);
+                    std.log.err("auth_switch: {any}\n", .{auth_switch});
+                    return error.UnexpectedPacket;
+                },
+                constants.ERR => {
+                    ErrorPacket.initFromPacket(true, packet, 0).print();
+                    return error.UnexpectedPacket;
+                },
+                else => {
+                    std.log.err("Unexpected packet: {any}\n", .{packet});
+                    return error.UnexpectedPacket;
+                },
+            }
         }
 
         // Server ack
-        const ack_packet = try Packet.initFromReader(allocator, &conn.reader);
-        defer ack_packet.deinit(allocator);
-
-        switch (ack_packet.payload[0]) {
-            constants.OK => _ = OkPacket.initFromPacket(ack_packet, config.capability_flags()),
-            constants.ERR => {
-                ErrorPacket.initFromPacket(true, ack_packet, 0).print();
-                return error.UnexpectedPacket;
-            },
-            else => {
-                std.log.err("Unexpected packet: {any}\n", .{ack_packet});
-                return error.UnexpectedPacket;
-            },
-        }
     }
 
     fn sendHandshakeResponse41(conn: Conn, handshake_v10: HandshakeV10, config: Config) !void {

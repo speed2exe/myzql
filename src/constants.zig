@@ -6,6 +6,7 @@ pub const default_auth_plugin = "mysql_native_password";
 // MySQL Packet Header
 pub const OK:            u8 = 0x00;
 pub const EOF:           u8 = 0xFE;
+pub const AUTH_SWITCH:   u8 = 0xFE;
 pub const ERR:           u8 = 0xFF;
 pub const HANDSHAKE_V10: u8 = 0x0A;
 
