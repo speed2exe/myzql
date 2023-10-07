@@ -3,6 +3,8 @@ const Config = @import("./config.zig").Config;
 const constants = @import("./constants.zig");
 const protocol = @import("./protocol.zig");
 const HandshakeV10 = protocol.handshake_v10.HandshakeV10;
+const ErrorPacket = protocol.generic_response.ErrorPacket;
+const OkPacket = protocol.generic_response.OkPacket;
 const HandshakeResponse41 = protocol.handshake_response.HandshakeResponse41;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
@@ -21,6 +23,7 @@ pub const Conn = struct {
     stream: std.net.Stream = undefined,
     reader: stream_buffered.Reader = undefined,
     writer: stream_buffered.Writer = undefined,
+    server_capabilities: u32 = 0,
 
     pub fn close(conn: *Conn) void {
         switch (conn.state) {
@@ -39,6 +42,10 @@ pub const Conn = struct {
         conn.state = .connected;
     }
 
+    fn hasCapability(conn: *Conn, capability: u32) bool {
+        return conn.server_capabilities & capability > 0;
+    }
+
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: Config) !void {
         try conn.dial(config.address);
@@ -46,20 +53,23 @@ pub const Conn = struct {
         const packet = try Packet.initFromReader(allocator, &conn.reader);
         defer packet.deinit(allocator);
 
-        const realized_packet = packet.realize(constants.MAX_CAPABILITIES, true);
-        const handshake_v10 = switch (realized_packet) {
-            .handshake_v10 => realized_packet.handshake_v10,
-            else => |x| {
-                std.log.err("Unexpected packet: {any}\n", .{x});
+        const handshake_v10 = switch (packet.payload[0]) {
+            constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(packet, config.capability_flags()),
+            constants.ERR => {
+                ErrorPacket.initFromPacket(true, packet, 0).print();
+                return error.UnexpectedPacket;
+            },
+            else => {
+                std.log.err("Unexpected packet: {any}\n", .{packet});
                 return error.UnexpectedPacket;
             },
         };
+        conn.server_capabilities = handshake_v10.capability_flags();
 
         // TODO: TLS handshake if enabled
 
         // send handshake response to server
-        const server_capabilities = handshake_v10.capability_flags();
-        if (server_capabilities & constants.CLIENT_PROTOCOL_41 > 0) {
+        if (conn.hasCapability(constants.CLIENT_PROTOCOL_41)) {
             try conn.sendHandshakeResponse41(handshake_v10, config);
         } else {
             // TODO: handle older protocol
@@ -70,16 +80,15 @@ pub const Conn = struct {
         const ack_packet = try Packet.initFromReader(allocator, &conn.reader);
         defer ack_packet.deinit(allocator);
 
-        const realized_packet2 = ack_packet.realize(constants.MAX_CAPABILITIES, false);
-        switch (realized_packet2) {
-            .ok_packet => {},
-            .error_packet => |x| {
-                x.print();
-                return error.DidNotReceiveOkPacket;
+        switch (ack_packet.payload[0]) {
+            constants.OK => _ = OkPacket.initFromPacket(ack_packet, config.capability_flags()),
+            constants.ERR => {
+                ErrorPacket.initFromPacket(true, ack_packet, 0).print();
+                return error.UnexpectedPacket;
             },
-            else => |x| {
-                std.log.err("\nUnexpected packet: {any}\n", .{x});
-                return error.DidNotReceiveOkPacket;
+            else => {
+                std.log.err("Unexpected packet: {any}\n", .{ack_packet});
+                return error.UnexpectedPacket;
             },
         }
     }
@@ -99,7 +108,7 @@ pub const Conn = struct {
             handshake_v10.get_auth_data(),
             config.password,
         );
-        var resp_cap_flag = config.generate_capabilities_flags(handshake_v10.capability_flags());
+        var resp_cap_flag = config.capability_flags();
         if (password_resp.len > 250) {
             resp_cap_flag |= constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
         }

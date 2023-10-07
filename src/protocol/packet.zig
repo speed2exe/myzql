@@ -27,28 +27,6 @@ pub const Packet = struct {
     pub fn deinit(packet: Packet, allocator: std.mem.Allocator) void {
         allocator.free(packet.payload);
     }
-
-    pub fn realize(packet: Packet, capabilities: u32, comptime is_first_packet: bool) PacketRealized {
-        const first_byte = packet.payload[0];
-        return switch (first_byte) {
-            constants.OK => .{ .ok_packet = OkPacket.initFromPacket(packet, capabilities) },
-            constants.ERR => .{ .error_packet = ErrorPacket.initFromPacket(is_first_packet, packet, capabilities) },
-            constants.EOF => .{ .eof_packet = EofPacket.initFromPacket(packet, capabilities) },
-            constants.HANDSHAKE_V10 => .{ .handshake_v10 = HandshakeV10.initFromPacket(packet, capabilities) },
-            else => |x| {
-                std.log.err("unexpected packet type: {any}\n", .{x});
-                std.log.err("packet: {any}\n", .{packet});
-                unreachable;
-            },
-        };
-    }
-};
-
-pub const PacketRealized = union(enum) {
-    error_packet: ErrorPacket,
-    ok_packet: OkPacket,
-    eof_packet: EofPacket,
-    handshake_v10: HandshakeV10,
 };
 
 fn readUInt24(reader: *buffered_stream.Reader) !u24 {

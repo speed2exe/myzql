@@ -14,7 +14,7 @@ pub const Config = struct {
     tls: bool = false,
     multi_statements: bool = false,
 
-    pub fn generate_capabilities_flags(config: Config, server_capabilities: u32) u32 {
+    pub fn capability_flags(config: Config) u32 {
         // zig fmt: off
         var flags: u32 = constants.CLIENT_PROTOCOL_41
                        | constants.CLIENT_LONG_PASSWORD
@@ -22,7 +22,6 @@ pub const Config = struct {
                        | constants.CLIENT_PLUGIN_AUTH
                        | constants.CLIENT_MULTI_RESULTS
                        | constants.CLIENT_CONNECT_ATTRS
-                       | (server_capabilities & constants.CLIENT_LONG_FLAG)
                        ;
         // zig fmt: on
         if (config.client_found_rows) {
