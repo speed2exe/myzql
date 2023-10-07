@@ -60,3 +60,29 @@ pub fn writeLengthEncodedInteger(writer: *stream_buffered.Writer, v: u64) !void 
         return error.InvalidLengthEncodedInteger;
     }
 }
+
+pub fn lengthEncodedStringPayloadSize(str_len: usize) u24 {
+    var str_len_24: u24 = @truncate(str_len);
+    if (str_len < 251) {
+        str_len_24 += 1;
+    } else if (str_len < 1 << 16) {
+        str_len_24 += 3;
+    } else if (str_len < 1 << 24) {
+        str_len_24 += 4;
+    } else if (str_len < 1 << 64) {
+        str_len_24 += 9;
+    } else unreachable;
+    return str_len_24;
+}
+
+pub fn lengthEncodedIntegerPayloadSize(v: u64) u24 {
+    if (v < 251) {
+        return 1;
+    } else if (v < 1 << 16) {
+        return 3;
+    } else if (v < 1 << 24) {
+        return 4;
+    } else if (v < 1 << 64) {
+        return 9;
+    } else unreachable;
+}

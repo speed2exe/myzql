@@ -86,7 +86,7 @@ pub const Conn = struct {
 
     fn sendHandshakeResponse41(conn: Conn, handshake_v10: HandshakeV10, config: Config) !void {
         // debugging
-        try std.io.getStdErr().writer().print("v10: {any}\n", .{handshake_v10});
+        // try std.io.getStdErr().writer().print("v10: {any}\n", .{handshake_v10});
         // const auth_plugin_name = incoming.auth_plugin_name orelse return error.AuthPluginNameMissing;
         // try std.io.getStdErr().writer().print("auth_plugin_name: |{s}|\n", .{auth_plugin_name});
         // const auth_plugin_data = incoming.auth_plugin_data_part_1;
@@ -103,15 +103,15 @@ pub const Conn = struct {
         if (password_resp.len > 250) {
             resp_cap_flag |= constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
         }
-
         const response: HandshakeResponse41 = .{
+            .database = config.database,
             .client_flag = resp_cap_flag,
             .character_set = config.collation,
             .username = config.username,
             .auth_response = password_resp,
         };
         var writer = conn.writer;
-        try response.write(&writer);
+        try response.write_as_packet(&writer);
         try writer.flush();
     }
 

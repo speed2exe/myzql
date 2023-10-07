@@ -6,6 +6,7 @@ pub const Config = struct {
     username: [:0]const u8 = "root",
     address: std.net.Address = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306),
     password: []const u8 = "",
+    database: [:0]const u8 = "",
     collation: u8 = collations.utf8mb4_general_ci,
 
     // cfgs from Golang driver
@@ -32,6 +33,9 @@ pub const Config = struct {
         }
         if (config.multi_statements) {
             flags |= constants.CLIENT_MULTI_STATEMENTS;
+        }
+        if (config.database.len > 0) {
+            flags |= constants.CLIENT_CONNECT_WITH_DB;
         }
         return flags;
     }
