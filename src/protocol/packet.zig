@@ -1,10 +1,8 @@
 const std = @import("std");
 const constants = @import("../constants.zig");
 const buffered_stream = @import("../stream_buffered.zig");
-const OkPacket = @import("./generic_response.zig").OkPacket;
 const ErrorPacket = @import("./generic_response.zig").ErrorPacket;
-const EofPacket = @import("./generic_response.zig").EofPacket;
-const HandshakeV10 = @import("./handshake_v10.zig").HandshakeV10;
+const Config = @import("../config.zig").Config;
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html#sect_protocol_basic_packets_packet
 pub const Packet = struct {
@@ -22,6 +20,14 @@ pub const Packet = struct {
             .sequence_id = sequence_id,
             .payload = payload,
         };
+    }
+
+    pub fn asError(packet: *const Packet, capabilities: u32) error{ UnexpectedPacket, ErrorPacket } {
+        if (packet.payload[0] == constants.ERR) {
+            return ErrorPacket.initFromPacket(false, packet, capabilities).asError();
+        }
+        std.log.err("unexpected packet: {}", .{packet.payload[0]});
+        return error.UnexpectedPacket;
     }
 
     pub fn deinit(packet: *const Packet, allocator: std.mem.Allocator) void {

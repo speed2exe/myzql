@@ -35,7 +35,7 @@ pub const HandshakeResponse41 = struct {
     key_values: []const [2][]const u8 = &.{},
     zstd_compression_level: u8 = 0,
 
-    pub fn write_as_packet(h: *const HandshakeResponse41, writer: *stream_buffered.Writer, seq_id: u8) !void {
+    pub fn writeAsPacket(h: *const HandshakeResponse41, writer: *stream_buffered.Writer, seq_id: u8) !void {
         // Packet header
         const packet_size = payload_size(h);
         try packer_writer.writeUInt24(writer, packet_size);

@@ -17,7 +17,7 @@ pub const Client = struct {
 
     pub fn ping(client: *Client) !void {
         try client.connectIfNotConnected();
-        try client.conn.ping();
+        try client.conn.ping(client.allocator, &client.config);
     }
 
     pub fn query(_: Client) void {

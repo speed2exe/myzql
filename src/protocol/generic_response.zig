@@ -34,8 +34,12 @@ pub const ErrorPacket = struct {
         };
     }
 
-    pub fn print(err: *const ErrorPacket) void {
-        std.log.err("ErrorPacket, code: {d}, message: {s}", .{ err.error_code, err.error_message });
+    pub fn asError(err: *const ErrorPacket) error{ErrorPacket} {
+        std.log.err(
+            "error packet: (code: {d}, message: {s})",
+            .{ err.error_code, err.error_message },
+        );
+        return error.ErrorPacket;
     }
 };
 

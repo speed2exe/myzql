@@ -11,6 +11,7 @@ const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
 const FixedBytes = @import("./utils.zig").FixedBytes;
+const commands = @import("./commands.zig");
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -70,22 +71,16 @@ pub const Conn = struct {
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
         try conn.dial(config.address);
+        errdefer conn.close();
+
         var auth_plugin_name: FixedBytes(32) = .{};
         {
-            const packet = try Packet.initFromReader(allocator, &conn.reader);
+            const packet = try conn.readPacket(allocator);
             defer packet.deinit(allocator);
-            try conn.updateSequenceId(packet);
 
             const handshake_v10 = switch (packet.payload[0]) {
                 constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(&packet, config.capability_flags()),
-                constants.ERR => {
-                    ErrorPacket.initFromPacket(true, &packet, 0).print();
-                    return error.UnexpectedPacket;
-                },
-                else => {
-                    std.log.err("Unexpected packet: {any}\n", .{packet});
-                    return error.UnexpectedPacket;
-                },
+                else => return packet.asError(config.capability_flags()),
             };
             conn.server_capabilities = handshake_v10.capability_flags();
             if (handshake_v10.auth_plugin_name) |p| {
@@ -104,13 +99,11 @@ pub const Conn = struct {
         }
 
         while (true) {
-            const packet = try Packet.initFromReader(allocator, &conn.reader);
+            const packet = try conn.readPacket(allocator);
             defer packet.deinit(allocator);
-            try conn.updateSequenceId(packet);
 
             switch (packet.payload[0]) {
                 constants.OK => {
-                    std.debug.print("OK\n", .{});
                     _ = OkPacket.initFromPacket(&packet, config.capability_flags());
                     return;
                 },
@@ -131,14 +124,7 @@ pub const Conn = struct {
                         config,
                     );
                 },
-                constants.ERR => {
-                    ErrorPacket.initFromPacket(false, &packet, 0).print();
-                    return error.UnexpectedPacket;
-                },
-                else => {
-                    std.log.err("Unexpected packet: {any}\n", .{packet});
-                    return error.UnexpectedPacket;
-                },
+                else => return packet.asError(config.capability_flags()),
             }
         }
 
@@ -158,11 +144,7 @@ pub const Conn = struct {
             config.password,
             &auth_response,
         );
-        var writer = conn.writer;
-        try packet_writer.writeUInt24(&writer, @truncate(auth_response.len));
-        try packet_writer.writeUInt8(&writer, conn.generateSequenceId());
-        try writer.write(auth_response.get());
-        try writer.flush();
+        try conn.sendAndFlushAsPacket(auth_response.get());
     }
 
     fn sendHandshakeResponse41(conn: *Conn, handshake_v10: HandshakeV10, config: *const Config) !void {
@@ -186,13 +168,35 @@ pub const Conn = struct {
             .auth_response = auth_response.get(),
         };
         var writer = conn.writer;
-        try response.write_as_packet(&writer, conn.generateSequenceId());
+        try response.writeAsPacket(&writer, conn.generateSequenceId());
         try writer.flush();
     }
 
-    pub fn ping(conn: Conn) !void {
-        _ = conn;
-        @panic("not implemented");
+    pub fn ping(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
+        try conn.sendAndFlushAsPacket(&[_]u8{commands.COM_PING});
+        const packet = try conn.readPacket(allocator);
+        defer packet.deinit(allocator);
+        switch (packet.payload[0]) {
+            constants.OK => _ = OkPacket.initFromPacket(&packet, config.capability_flags()),
+            else => return packet.asError(config.capability_flags()),
+        }
+    }
+
+    fn sendAndFlushAsPacket(conn: *Conn, payload: []const u8) !void {
+        std.debug.assert(conn.state == .connected);
+        var writer = conn.writer;
+        try packet_writer.writeUInt24(&writer, @truncate(payload.len));
+        try packet_writer.writeUInt8(&writer, conn.generateSequenceId());
+        try writer.write(payload);
+        try writer.flush();
+    }
+
+    fn readPacket(conn: *Conn, allocator: std.mem.Allocator) !Packet {
+        std.debug.assert(conn.state == .connected);
+        var reader = conn.reader;
+        const packet = try Packet.initFromReader(allocator, &reader);
+        try conn.updateSequenceId(packet);
+        return packet;
     }
 };
 
@@ -269,10 +273,4 @@ const default_config: Config = .{};
 test "plain handshake" {
     var conn: Conn = .{};
     try conn.connect(std.testing.allocator, &default_config);
-    // try conn.dial(default_config.address);
-    // const packet = try conn.readPacket(std.testing.allocator);
-    // defer packet.deinit();
-    // const handshake = protocol.HandshakeV10.initFromPacket(packet);
-    // try std.io.getStdOut().writeAll("hello!!!");
-    // try protocol.HandshakeV10.dump(handshake, std.io.getStdOut().writer());
 }
