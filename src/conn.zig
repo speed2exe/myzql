@@ -167,6 +167,7 @@ pub const Conn = struct {
     }
 
     pub fn ping(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
+        conn.current_sequence_id = 0;
         try conn.sendAndFlushAsPacket(&[_]u8{commands.COM_PING});
         const packet = try conn.readPacket(allocator);
         defer packet.deinit(allocator);
@@ -267,4 +268,11 @@ const default_config: Config = .{};
 test "plain handshake" {
     var conn: Conn = .{};
     try conn.connect(std.testing.allocator, &default_config);
+    defer conn.close();
+}
+
+test "dial and close" {
+    var conn: Conn = .{};
+    try conn.dial(default_config.address);
+    conn.close();
 }
