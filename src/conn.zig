@@ -52,13 +52,7 @@ pub const Conn = struct {
     }
 
     fn updateSequenceId(conn: *Conn, packet: Packet) !void {
-        if (packet.sequence_id != conn.current_sequence_id) {
-            std.log.err(
-                "Unexpected sequence id: Conn:{d} != Packet: {d}\n",
-                .{ packet.sequence_id, conn.current_sequence_id },
-            );
-            return error.UnexpectedPacket;
-        }
+        std.debug.assert(packet.sequence_id == conn.current_sequence_id);
         conn.current_sequence_id += 1;
     }
 

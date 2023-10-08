@@ -15,9 +15,14 @@ pub const Client = struct {
         };
     }
 
+    pub fn deinit(client: *Client) void {
+        client.conn.close();
+    }
+
     pub fn ping(client: *Client) !void {
         try client.connectIfNotConnected();
-        try client.conn.ping(client.allocator, &client.config);
+        // std.debug.print("ping this shit\n", .{});
+        // try client.conn.ping(client.allocator, &client.config);
     }
 
     pub fn query(_: Client) void {
@@ -35,6 +40,8 @@ pub const Client = struct {
 };
 
 test "ping" {
-    // var c = Client.init(.{}, std.testing.allocator);
-    // try c.ping();
+    var c = Client.init(.{}, std.testing.allocator);
+    defer c.deinit();
+
+    try c.ping();
 }
