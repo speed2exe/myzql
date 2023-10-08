@@ -54,7 +54,7 @@ pub const PacketReader = struct {
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_eof
     pub fn readRestOfPacketString(packet_reader: *PacketReader) []const u8 {
         const bytes = packet_reader.payload[packet_reader.pos..];
-        packet_reader.pos += packet_reader.payload.len;
+        packet_reader.pos += bytes.len;
         return bytes;
     }
 

@@ -50,10 +50,7 @@ pub const OkPacket = struct {
     session_state_info: ?[]const u8,
 
     pub fn initFromPacket(packet: *const Packet, capabilities: u32) OkPacket {
-        std.debug.assert(packet.payload.len > 7);
-
         var reader = PacketReader.initFromPacket(packet);
-
         const header = reader.readByte();
         std.debug.assert(header == constants.OK);
 

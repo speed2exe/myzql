@@ -1,8 +1,6 @@
 // zig fmt: off
 const std = @import("std");
 
-pub const default_auth_plugin = "mysql_native_password";
-
 // MySQL Packet Header
 pub const OK:             u8 = 0x00;
 pub const EOF:            u8 = 0xFE;
@@ -59,3 +57,9 @@ pub const CLIENT_CAPABILITY_EXTENSION:           u32 = 1 << 29;
 pub const CLIENT_SSL_VERIFY_SERVER_CERT:         u32 = 1 << 30;
 
 pub const MAX_CAPABILITIES: u32 = std.math.maxInt(u32);
+
+// plugin names
+pub const mysql_native_password = "mysql_native_password";
+pub const sha256_password       = "sha256_password";
+pub const caching_sha2_password = "caching_sha2_password";
+pub const mysql_clear_password  = "mysql_clear_password";

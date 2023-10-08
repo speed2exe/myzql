@@ -10,6 +10,7 @@ const AuthSwitchRequest = protocol.auth_switch_request.AuthSwitchRequest;
 const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
+const FixedBytes = @import("./utils.zig").FixedBytes;
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -69,7 +70,7 @@ pub const Conn = struct {
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
         try conn.dial(config.address);
-        var auth_plugin_name: FixedString(32) = .{};
+        var auth_plugin_name: FixedBytes(32) = .{};
         {
             const packet = try Packet.initFromReader(allocator, &conn.reader);
             defer packet.deinit(allocator);
@@ -109,6 +110,7 @@ pub const Conn = struct {
 
             switch (packet.payload[0]) {
                 constants.OK => {
+                    std.debug.print("OK\n", .{});
                     _ = OkPacket.initFromPacket(&packet, config.capability_flags());
                     return;
                 },
@@ -130,7 +132,7 @@ pub const Conn = struct {
                     );
                 },
                 constants.ERR => {
-                    ErrorPacket.initFromPacket(true, &packet, 0).print();
+                    ErrorPacket.initFromPacket(false, &packet, 0).print();
                     return error.UnexpectedPacket;
                 },
                 else => {
@@ -149,30 +151,39 @@ pub const Conn = struct {
         plugin_data: []const u8,
         config: *const Config,
     ) !void {
-        const password_resp = try auth_data_resp(plugin_name, plugin_data, config.password);
+        var auth_response: FixedBytes(32) = .{};
+        try generate_auth_response(
+            plugin_name,
+            plugin_data,
+            config.password,
+            &auth_response,
+        );
         var writer = conn.writer;
-        try packet_writer.writeUInt24(&writer, @truncate(password_resp.len));
+        try packet_writer.writeUInt24(&writer, @truncate(auth_response.len));
         try packet_writer.writeUInt8(&writer, conn.generateSequenceId());
-        try writer.write(&password_resp);
+        try writer.write(auth_response.get());
         try writer.flush();
     }
 
     fn sendHandshakeResponse41(conn: *Conn, handshake_v10: HandshakeV10, config: *const Config) !void {
-        const password_resp = try auth_data_resp(
+        var auth_response: FixedBytes(32) = .{};
+        try generate_auth_response(
             handshake_v10.get_auth_plugin_name(),
             &handshake_v10.get_auth_data(),
             config.password,
+            &auth_response,
         );
         var resp_cap_flag = config.capability_flags();
-        if (password_resp.len > 250) {
-            resp_cap_flag |= constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
-        }
+        // TODO: support CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
+        // if (password_resp.len > 250) {
+        //     resp_cap_flag |= constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
+        // }
         const response: HandshakeResponse41 = .{
             .database = config.database,
             .client_flag = resp_cap_flag,
             .character_set = config.collation,
             .username = config.username,
-            .auth_response = &password_resp,
+            .auth_response = auth_response.get(),
         };
         var writer = conn.writer;
         try response.write_as_packet(&writer, conn.generateSequenceId());
@@ -185,9 +196,18 @@ pub const Conn = struct {
     }
 };
 
-fn auth_data_resp(auth_plugin_name: []const u8, auth_data: []const u8, password: []const u8) ![32]u8 {
-    if (std.mem.eql(u8, auth_plugin_name, "caching_sha2_password")) {
-        return scrambleSHA256Password(auth_data, password);
+fn generate_auth_response(
+    auth_plugin_name: []const u8,
+    auth_data: []const u8,
+    password: []const u8,
+    out: *FixedBytes(32),
+) !void {
+    if (std.mem.eql(u8, auth_plugin_name, constants.caching_sha2_password)) {
+        if (password.len == 0) {
+            try out.set("");
+        } else {
+            try out.set(&scrambleSHA256Password(auth_data, password));
+        }
     } else {
         // TODO: support more
         std.log.err("Unsupported auth plugin: |{s}|(contribution are welcome!)\n", .{auth_plugin_name});
@@ -219,27 +239,6 @@ fn scrambleSHA256Password(scramble: []const u8, password: []const u8) [32]u8 {
         m1.* ^= m2;
     }
     return message1;
-}
-
-fn FixedString(comptime max: usize) type {
-    return struct {
-        buf: [max]u8 = undefined,
-        len: usize = 0,
-
-        fn get(self: *const FixedString(max)) []const u8 {
-            return self.buf[0..self.len];
-        }
-        fn set(self: *FixedString(max), s: []const u8) !void {
-            if (s.len > max) {
-                return error.SourceTooLarge;
-            }
-            self.len = 0;
-            for (s) |c| {
-                self.buf[self.len] = c;
-                self.len += 1;
-            }
-        }
-    };
 }
 
 test "scrambleSHA256Password" {
