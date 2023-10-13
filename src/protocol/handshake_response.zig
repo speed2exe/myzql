@@ -31,7 +31,7 @@ pub const HandshakeResponse41 = struct {
     username: [:0]const u8,
     auth_response: []const u8,
     database: [:0]const u8,
-    client_plugin_name: [:0]const u8 = constants.caching_sha2_password,
+    client_plugin_name: [:0]const u8 = "caching_sha2_password",
     key_values: []const [2][]const u8 = &.{},
     zstd_compression_level: u8 = 0,
 

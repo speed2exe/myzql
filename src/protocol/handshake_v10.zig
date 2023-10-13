@@ -2,6 +2,7 @@ const std = @import("std");
 const Packet = @import("./packet.zig").Packet;
 const PacketReader = @import("./packet_reader.zig").PacketReader;
 const constants = @import("../constants.zig");
+const AuthPlugin = @import("../auth_plugin.zig").AuthPlugin;
 
 pub const HandshakeV10 = struct {
     protocol_version: u8,
@@ -68,8 +69,9 @@ pub const HandshakeV10 = struct {
         return f;
     }
 
-    pub fn get_auth_plugin_name(h: *const HandshakeV10) []const u8 {
-        return h.auth_plugin_name orelse "mysql_native_password";
+    pub fn get_auth_plugin(h: *const HandshakeV10) AuthPlugin {
+        const name = h.auth_plugin_name orelse return .unspecified;
+        return AuthPlugin.fromName(name);
     }
 
     pub fn get_auth_data(h: *const HandshakeV10) [20]u8 {

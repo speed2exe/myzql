@@ -1,6 +1,8 @@
 const std = @import("std");
 const Config = @import("./config.zig").Config;
 const constants = @import("./constants.zig");
+const auth_plugin = @import("./auth_plugin.zig");
+const AuthPlugin = auth_plugin.AuthPlugin;
 const protocol = @import("./protocol.zig");
 const HandshakeV10 = protocol.handshake_v10.HandshakeV10;
 const ErrorPacket = protocol.generic_response.ErrorPacket;
@@ -28,7 +30,7 @@ pub const Conn = struct {
     reader: stream_buffered.Reader = undefined,
     writer: stream_buffered.Writer = undefined,
     server_capabilities: u32 = 0,
-    current_sequence_id: u8 = 0,
+    sequence_id: u8 = 0,
 
     pub fn close(conn: *Conn) void {
         switch (conn.state) {
@@ -52,13 +54,13 @@ pub const Conn = struct {
     }
 
     fn updateSequenceId(conn: *Conn, packet: Packet) !void {
-        std.debug.assert(packet.sequence_id == conn.current_sequence_id);
-        conn.current_sequence_id += 1;
+        std.debug.assert(packet.sequence_id == conn.sequence_id);
+        conn.sequence_id += 1;
     }
 
     fn generateSequenceId(conn: *Conn) u8 {
-        const id = conn.current_sequence_id;
-        conn.current_sequence_id += 1;
+        const id = conn.sequence_id;
+        conn.sequence_id += 1;
         return id;
     }
 
@@ -67,7 +69,7 @@ pub const Conn = struct {
         try conn.dial(config.address);
         errdefer conn.close();
 
-        var auth_plugin_name: FixedBytes(32) = .{};
+        var auth: AuthPlugin = undefined;
         {
             const packet = try conn.readPacket(allocator);
             defer packet.deinit(allocator);
@@ -77,15 +79,17 @@ pub const Conn = struct {
                 else => return packet.asError(config.capability_flags()),
             };
             conn.server_capabilities = handshake_v10.capability_flags();
-            if (handshake_v10.auth_plugin_name) |p| {
-                try auth_plugin_name.set(p);
-            }
+            auth = handshake_v10.get_auth_plugin();
 
             // TODO: TLS handshake if enabled
 
             // send handshake response to server
             if (conn.hasCapability(constants.CLIENT_PROTOCOL_41)) {
-                try conn.sendHandshakeResponse41(handshake_v10, config);
+                try conn.sendHandshakeResponse41(
+                    auth,
+                    &handshake_v10.get_auth_data(),
+                    config,
+                );
             } else {
                 // TODO: handle older protocol
                 @panic("not implemented");
@@ -103,20 +107,29 @@ pub const Conn = struct {
                 },
                 constants.AUTH_SWITCH => {
                     const auth_switch = AuthSwitchRequest.initFromPacket(&packet);
-                    try auth_plugin_name.set(auth_switch.plugin_name);
+                    auth = AuthPlugin.fromName(auth_switch.plugin_name);
                     try conn.sendAuthSwitchResponse(
-                        auth_switch.plugin_name,
-                        auth_switch.plugin_name,
+                        auth,
+                        auth_switch.plugin_data,
                         config,
                     );
                 },
                 constants.AUTH_MORE_DATA => {
+                    // more auth exchange based on auth_method
+                    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_authentication_methods.html
                     const more_data = packet.payload[1..];
-                    try conn.sendAuthSwitchResponse(
-                        auth_plugin_name.get(),
-                        more_data,
-                        config,
-                    );
+                    switch (auth) {
+                        .caching_sha2_password => {
+                            switch (more_data[0]) {
+                                auth_plugin.caching_sha2_password_scramble_success => {},
+                                auth_plugin.caching_sha2_password_scramble_failure => {
+                                    return error.NotImplemented;
+                                },
+                                else => return error.UnsupportedCachingSha2PasswordMoreData,
+                            }
+                        },
+                        else => {},
+                    }
                 },
                 else => return packet.asError(config.capability_flags()),
             }
@@ -127,13 +140,13 @@ pub const Conn = struct {
 
     fn sendAuthSwitchResponse(
         conn: *Conn,
-        plugin_name: []const u8,
+        auth: AuthPlugin,
         plugin_data: []const u8,
         config: *const Config,
     ) !void {
         var auth_response: FixedBytes(32) = .{};
         try generate_auth_response(
-            plugin_name,
+            auth,
             plugin_data,
             config.password,
             &auth_response,
@@ -141,11 +154,11 @@ pub const Conn = struct {
         try conn.sendAndFlushAsPacket(auth_response.get());
     }
 
-    fn sendHandshakeResponse41(conn: *Conn, handshake_v10: HandshakeV10, config: *const Config) !void {
+    fn sendHandshakeResponse41(conn: *Conn, auth: AuthPlugin, auth_data: []const u8, config: *const Config) !void {
         var auth_response: FixedBytes(32) = .{};
         try generate_auth_response(
-            handshake_v10.get_auth_plugin_name(),
-            &handshake_v10.get_auth_data(),
+            auth,
+            auth_data,
             config.password,
             &auth_response,
         );
@@ -167,7 +180,7 @@ pub const Conn = struct {
     }
 
     pub fn ping(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
-        conn.current_sequence_id = 0;
+        conn.sequence_id = 0;
         try conn.sendAndFlushAsPacket(&[_]u8{commands.COM_PING});
         const packet = try conn.readPacket(allocator);
         defer packet.deinit(allocator);
@@ -196,21 +209,23 @@ pub const Conn = struct {
 };
 
 fn generate_auth_response(
-    auth_plugin_name: []const u8,
+    auth: AuthPlugin,
     auth_data: []const u8,
     password: []const u8,
     out: *FixedBytes(32),
 ) !void {
-    if (std.mem.eql(u8, auth_plugin_name, constants.caching_sha2_password)) {
-        if (password.len == 0) {
-            try out.set("");
-        } else {
-            try out.set(&scrambleSHA256Password(auth_data, password));
-        }
-    } else {
-        // TODO: support more
-        std.log.err("Unsupported auth plugin: |{s}|(contribution are welcome!)\n", .{auth_plugin_name});
-        return error.UnsupportedAuthPlugin;
+    switch (auth) {
+        .caching_sha2_password => {
+            if (password.len == 0) {
+                try out.set("");
+            } else {
+                try out.set(&scrambleSHA256Password(auth_data, password));
+            }
+        },
+        else => {
+            std.log.err("Unsupported auth plugin: {any}\n", .{auth_plugin});
+            return error.UnsupportedAuthPlugin;
+        },
     }
 }
 
