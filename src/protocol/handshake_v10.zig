@@ -34,8 +34,10 @@ pub const HandshakeV10 = struct {
         const reserved = reader.readFixed(10);
         std.debug.assert(std.mem.eql(u8, reserved, &[10]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
 
-        // This part is not clear in the docs, but it seems like null terminated string works
-        // TODO: investigate server code to confirm
+        // This part ambiguous in mariadb and mysql,
+        // It seems like null terminated string works for both, at least for now
+        // https://mariadb.com/kb/en/connection/#initial-handshake-packet
+        // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_handshake_v10.html
         const auth_plugin_data_part_2 = reader.readNullTerminatedString();
 
         var auth_plugin_name: ?[:0]const u8 = null;
