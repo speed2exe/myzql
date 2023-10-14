@@ -32,9 +32,8 @@ jobs:
           echo "zig version: $ZIG_VERSION"
           wget https://ziglang.org/builds/zig-linux-x86_64-$ZIG_VERSION.tar.xz
           tar xf zig-linux-x86_64-$ZIG_VERSION.tar.xz
-          mv zig-linux-x86_64-$ZIG_VERSION ~/zig-build
-          export PATH=~/zig-build:$PATH
+          mv zig-linux-x86_64-$ZIG_VERSION $HOME/zig-build
 
       - name: run the tests
         run: |
-          zig test src/myzql.zig
+          $HOME/zig-build/zig test src/myzql.zig
