@@ -1,0 +1,39 @@
+name: Integration Tests
+
+on:
+  push:
+    branches:
+     - main
+  pull_request:
+    branches:
+     - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql
+        env:
+          MYSQL_ROOT_PASSWORD: password
+        ports:
+          - 3306/tcp
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: install zig
+        run: |
+          curl https://ziglang.org/download/ > page.xml
+          ZIG_VERSION=$(cat page.xml | tidy -html 2> /dev/null | grep zig-linux-x86_64 | head -n 1 | cut -d '-' -f 4,5 | cut -d '.' -f 1,2,3,4)
+          echo "zig version: $ZIG_VERSION"
+          wget https://ziglang.org/builds/zig-linux-x86_64-$ZIG_VERSION.tar.xz
+          tar xf zig-linux-x86_64-$ZIG_VERSION.tar.xz
+          mv zig-linux-x86_64-$ZIG_VERSION ~/zig-build
+          export PATH=~/zig-build:$PATH
+
+      - name: run the tests
+        run: |
+          zig test src/myzql.zig
