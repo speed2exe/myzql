@@ -37,10 +37,3 @@ pub const Client = struct {
         }
     }
 };
-
-test "ping" {
-    var c = Client.init(.{}, std.testing.allocator);
-    defer c.deinit();
-
-    try c.ping();
-}

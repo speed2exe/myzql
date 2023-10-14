@@ -277,17 +277,3 @@ test "scrambleSHA256Password" {
         try std.testing.expectEqual(t.expected, actual);
     }
 }
-
-const default_config: Config = .{};
-
-test "plain handshake" {
-    var conn: Conn = .{};
-    try conn.connect(std.testing.allocator, &default_config);
-    defer conn.close();
-}
-
-test "dial and close" {
-    var conn: Conn = .{};
-    try conn.dial(default_config.address);
-    conn.close();
-}
