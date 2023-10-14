@@ -14,8 +14,10 @@ jobs:
     steps:
       - name: run mysql server
         run: |
+          # TODO: use password eventually
+          # docker run --name some-mysql --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql
           docker run --name some-mysql --env MYSQL_ALLOW_EMPTY_PASSWORD=1 -p 3306:3306 -d mysql
-      
+
       - uses: actions/checkout@v3
 
       - name: install zig
@@ -30,4 +32,4 @@ jobs:
 
       - name: run the tests
         run: |
-          $HOME/zig-build/zig test src/myzql.zig
+          $HOME/zig-build/zig test integration_tests/main.zig --main-mod-path .

@@ -23,7 +23,9 @@ pub const AuthPlugin = enum {
     }
 };
 
-pub const caching_sha2_password_public_key_request = 0x01;
-pub const caching_sha2_password_public_key_response = 0x02;
-pub const caching_sha2_password_scramble_success = 0x03;
-pub const caching_sha2_password_scramble_failure = 0x04;
+// https://dev.mysql.com/doc/dev/mysql-server/latest/page_caching_sha2_authentication_exchanges.html
+// https://mariadb.com/kb/en/caching_sha2_password-authentication-plugin/
+pub const caching_sha2_password_public_key_response = 0x01;
+pub const caching_sha2_password_public_key_request = 0x02;
+pub const caching_sha2_password_fast_auth_success = 0x03;
+pub const caching_sha2_password_full_authentication_start = 0x04;
