@@ -121,8 +121,21 @@ pub const Conn = struct {
                     switch (auth) {
                         .caching_sha2_password => {
                             switch (more_data[0]) {
-                                auth_plugin.caching_sha2_password_scramble_success => {},
-                                auth_plugin.caching_sha2_password_scramble_failure => {
+                                auth_plugin.caching_sha2_password_fast_auth_success => {
+                                    // Fast auth success
+                                },
+                                auth_plugin.caching_sha2_password_full_authentication_start => {
+                                    // Full Authentication start
+
+                                    // TODO: Implement sending encrypted password with server's public key
+                                    // when we can parse, decrypt and ecrypt data with RSA
+                                    //
+                                    // try conn.sendAndFlushAsPacket(&[_]u8{auth_plugin.caching_sha2_password_public_key_request});
+                                    // const public_key_packet = try conn.readPacket(allocator);
+                                    // defer public_key_packet.deinit(allocator);
+
+                                    // if TLS, send password as plain text
+                                    // try conn.sendAndFlushAsPacket(config.password);
                                     return error.NotImplemented;
                                 },
                                 else => return error.UnsupportedCachingSha2PasswordMoreData,

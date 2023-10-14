@@ -1,3 +1,4 @@
 const Config = @import("../src/config.zig").Config;
 
-pub const test_config: Config = .{ .password = "password" };
+// TODO: use a config with password
+pub const test_config: Config = .{};
