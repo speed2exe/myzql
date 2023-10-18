@@ -11,11 +11,11 @@ pub const HandshakeResponse320 = struct {
     auth_response: [:0]const u8,
     database: [:0]const u8 = "",
 
-    pub fn write(h: *const HandshakeResponse320, writer: *stream_buffered.Writer, capabilities: u32) !void {
+    pub fn write(h: *const HandshakeResponse41, writer: *stream_buffered.SmallPacketWriter) !void {
         try packer_writer.writeUInt16(writer, h.client_flags);
         try packer_writer.writeUInt24(writer, h.max_packet_size);
         try packer_writer.writeNullTerminatedString(writer, h.username);
-        if ((capabilities & constants.CLIENT_CONNECT_WITH_DB) > 0) {
+        if ((h.client_flag & constants.CLIENT_CONNECT_WITH_DB) > 0) {
             try packer_writer.writeNullTerminatedString(writer, h.auth_response);
             try packer_writer.writeNullTerminatedString(writer, h.database);
         } else {
@@ -35,16 +35,8 @@ pub const HandshakeResponse41 = struct {
     key_values: []const [2][]const u8 = &.{},
     zstd_compression_level: u8 = 0,
 
-    pub fn writeAsPacket(h: *const HandshakeResponse41, writer: *stream_buffered.Writer, seq_id: u8) !void {
-        // Packet header
-        const packet_size = payload_size(h);
-        try packer_writer.writeUInt24(writer, packet_size);
-        try packer_writer.writeUInt8(writer, seq_id); // sequence_id
-
-        // payload
-        // try packer_writer.writeUInt32(writer, h.client_flag);
-        try packer_writer.writeUInt32(writer, 1745541);
-
+    pub fn write(h: *const HandshakeResponse41, writer: *stream_buffered.SmallPacketWriter) !void {
+        try packer_writer.writeUInt32(writer, h.client_flag);
         try packer_writer.writeUInt32(writer, h.max_packet_size);
         try packer_writer.writeUInt8(writer, h.character_set);
         _ = try writer.write(&([_]u8{0} ** 23)); // filler
@@ -73,37 +65,5 @@ pub const HandshakeResponse41 = struct {
         if ((h.client_flag & constants.CLIENT_ZSTD_COMPRESSION_ALGORITHM) > 0) {
             try packer_writer.writeUInt8(writer, h.zstd_compression_level);
         }
-    }
-
-    pub fn payload_size(h: *const HandshakeResponse41) u24 {
-        // client_flag: u32
-        // max_packet_size: u32
-        // character_set: u8,
-        // filler: [23]u8,
-        // username: [:0]const u8,
-        var length: u24 = 4 + 4 + 1 + 23 + @as(u24, @truncate(h.username.len)) + 1;
-
-        if ((h.client_flag & constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) > 0) {
-            length += packer_writer.lengthEncodedStringPayloadSize(h.auth_response.len);
-        } else {
-            length += @truncate(h.auth_response.len + 1);
-        }
-        if ((h.client_flag & constants.CLIENT_CONNECT_WITH_DB) > 0) {
-            length += @truncate(h.database.len + 1);
-        }
-        if ((h.client_flag & constants.CLIENT_PLUGIN_AUTH) > 0) {
-            length += @truncate(h.client_plugin_name.len + 1);
-        }
-        if ((h.client_flag & constants.CLIENT_CONNECT_ATTRS) > 0) {
-            length += packer_writer.lengthEncodedIntegerPayloadSize(h.key_values.len);
-            for (h.key_values) |key_value| {
-                length += packer_writer.lengthEncodedStringPayloadSize(key_value[0].len);
-                length += packer_writer.lengthEncodedStringPayloadSize(key_value[1].len);
-            }
-        }
-        if ((h.client_flag & constants.CLIENT_ZSTD_COMPRESSION_ALGORITHM) > 0) {
-            length += 1;
-        }
-        return length;
     }
 };

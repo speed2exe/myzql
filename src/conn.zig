@@ -188,8 +188,9 @@ pub const Conn = struct {
             .auth_response = auth_response.get(),
         };
         var writer = conn.writer;
-        try response.writeAsPacket(&writer, conn.generateSequenceId());
-        try writer.flush();
+        var small_packet_writer = stream_buffered.SmallPacketWriter.init(&writer, conn.generateSequenceId());
+        try response.write(&small_packet_writer);
+        try small_packet_writer.flush();
     }
 
     pub fn ping(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {

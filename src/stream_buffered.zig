@@ -9,14 +9,14 @@ pub const Reader = struct {
     stream: std.net.Stream,
 
     // read all behavior
-    pub fn read(s: *Reader, buffer: []u8) !void {
+    pub fn read(r: *Reader, buffer: []u8) !void {
         var already_read: usize = 0;
         while (buffer.len > already_read) {
-            if (s.empty()) {
-                try s.fill();
+            if (r.empty()) {
+                try r.fill();
             }
-            const n = copy(buffer[already_read..], s.buf[s.pos..s.len]);
-            s.pos += n;
+            const n = copy(buffer[already_read..], r.buf[r.pos..r.len]);
+            r.pos += n;
             already_read += n;
         }
     }
@@ -41,24 +41,75 @@ pub const Writer = struct {
     stream: std.net.Stream,
 
     // write all behavior
-    pub fn write(s: *Writer, buffer: []const u8) !void {
+    pub fn write(w: *Writer, buffer: []const u8) !void {
         var already_written: usize = 0;
         while (buffer.len > already_written) {
-            if (s.full()) {
-                try s.flush();
+            if (w.full()) {
+                try w.flush();
             }
-            const n = copy(s.buf[s.len..], buffer[already_written..]);
-            s.len += n;
+            const n = copy(w.buf[w.len..], buffer[already_written..]);
+            w.len += n;
             already_written += n;
         }
     }
 
-    inline fn full(s: *Writer) bool {
-        return s.len == s.buf.len;
+    // if the buffer is full
+    inline fn full(w: *Writer) bool {
+        return w.len == w.buf.len;
     }
 
-    pub inline fn flush(s: *Writer) !void {
-        try s.stream.writeAll(s.buf[0..s.len]);
+    // how much space is left in the buffer before it is full
+    inline fn available(w: *Writer) usize {
+        return w.buf.len - w.len;
+    }
+
+    // flush the buffer to the stream
+    pub inline fn flush(w: *Writer) !void {
+        try w.stream.writeAll(w.buf[0..w.len]);
+        w.len = 0;
+    }
+
+    // copy the buffer to the writer's buffer
+    // assert that there is enough space in the buffer
+    // this will not flush the buffer to the stream
+    pub fn writeToBuffer(w: *Writer, source: []const u8) !void {
+        // ensure we have enough space to fill the buffer
+        if (source.len > w.available()) {
+            std.log.err(
+                "not enough space in buffer, required: {}, available: {}",
+                .{ source.len, w.available() },
+            );
+            return error.BufferNotEnoughSpace;
+        }
+
+        const len_after_write = w.len + source.len;
+        @memcpy(w.buf[w.len..len_after_write], source);
+        w.len = len_after_write;
+    }
+};
+
+// just a convenience wrapper around Writer
+// for payload with size smaller than 4096 - 4
+pub const SmallPacketWriter = struct {
+    writer: *Writer,
+
+    pub fn init(w: *Writer, seq_id: u8) SmallPacketWriter {
+        std.debug.assert(w.len == 0);
+        w.buf[3] = seq_id;
+        w.len = 4;
+        return .{ .writer = w };
+    }
+
+    pub fn write(p: *SmallPacketWriter, buffer: []const u8) !void {
+        try p.writer.writeToBuffer(buffer);
+    }
+
+    // after this is called, this writer is no longer usable
+    pub fn flush(p: *SmallPacketWriter) !void {
+        // write the packet length to first 3 bytes
+        const payload_size: u24 = @truncate(p.writer.len - 4);
+        std.mem.writeIntLittle(u24, p.writer.buf[0..3], payload_size);
+        try p.writer.flush();
     }
 };
 
