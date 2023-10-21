@@ -1,13 +1,12 @@
 const std = @import("std");
 const constants = @import("./constants.zig");
-const collations = @import("./collations.zig");
 
 pub const Config = struct {
     username: [:0]const u8 = "root",
     address: std.net.Address = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306),
     password: []const u8 = "",
     database: [:0]const u8 = "",
-    collation: u8 = collations.utf8mb4_general_ci,
+    collation: u8 = constants.utf8mb4_general_ci,
 
     // cfgs from Golang driver
     client_found_rows: bool = false, // Return number of matching rows instead of rows changed

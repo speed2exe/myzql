@@ -13,7 +13,6 @@ const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
 const FixedBytes = @import("./utils.zig").FixedBytes;
-const commands = @import("./commands.zig");
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -195,7 +194,7 @@ pub const Conn = struct {
 
     pub fn ping(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
         conn.sequence_id = 0;
-        try conn.sendAndFlushAsPacket(&[_]u8{commands.COM_PING});
+        try conn.sendAndFlushAsPacket(&[_]u8{constants.COM_PING});
         const packet = try conn.readPacket(allocator);
         defer packet.deinit(allocator);
         switch (packet.payload[0]) {
