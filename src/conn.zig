@@ -32,11 +32,10 @@ pub const Conn = struct {
     server_capabilities: u32 = 0,
     sequence_id: u8 = 0,
 
-    pub fn query(conn: *Conn) void {
+    pub fn query(conn: *Conn, query_string: []const u8) void {
         std.debug.assert(conn.state == .connected);
         const query_request: QueryRequest = .{
-            // query: []const u8,
-
+            .query = query_string,
             // params: []const ?[]const u8, //binary values
             // param_types: []const [2]u8,
             // param_names: []const []const u8,
@@ -56,7 +55,7 @@ pub const Conn = struct {
 
     pub fn ping(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
         conn.sequence_id = 0;
-        try conn.sendAndFlushAsPacket(&[_]u8{constants.COM_PING});
+        try conn.sendBytesAsPacket(&[_]u8{constants.COM_PING});
         const packet = try conn.readPacket(allocator);
         defer packet.deinit(allocator);
         switch (packet.payload[0]) {
@@ -165,7 +164,7 @@ pub const Conn = struct {
             config.password,
             &auth_response,
         );
-        try conn.sendAndFlushAsPacket(auth_response.get());
+        try conn.sendBytesAsPacket(auth_response.get());
     }
 
     fn sendHandshakeResponse41(conn: *Conn, auth: AuthPlugin, auth_data: []const u8, config: *const Config) !void {
@@ -188,13 +187,18 @@ pub const Conn = struct {
             .username = config.username,
             .auth_response = auth_response.get(),
         };
+        try conn.sendPacketUsingSmallPacketWriter(response);
+    }
+
+    fn sendPacketUsingSmallPacketWriter(conn: *Conn, packet: anytype) !void {
+        std.debug.assert(conn.state == .connected);
         var writer = conn.writer;
         var small_packet_writer = stream_buffered.SmallPacketWriter.init(&writer, conn.generateSequenceId());
-        try response.write(&small_packet_writer);
+        try packet.write(&small_packet_writer);
         try small_packet_writer.flush();
     }
 
-    fn sendAndFlushAsPacket(conn: *Conn, payload: []const u8) !void {
+    fn sendBytesAsPacket(conn: *Conn, payload: []const u8) !void {
         std.debug.assert(conn.state == .connected);
         var writer = conn.writer;
         try packet_writer.writeUInt24(&writer, @truncate(payload.len));

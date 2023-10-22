@@ -34,7 +34,7 @@ pub const QueryRequest = struct {
                 // write type_and_flag, name and values
                 // for each parameter
                 for (h.params) |p_opt| {
-                    const p = p_opt orelse continue;
+                    const p = p_opt orelse continue; // TODO: may not be correct
                     try packet_writer.writeUInt16(writer, p.type_and_flag);
                     try packet_writer.writeLengthEncodedString(writer, p.name);
                     try packet_writer.write(writer, p.value);
