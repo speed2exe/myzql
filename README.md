@@ -1,4 +1,4 @@
-# myzql
+# MyZql
 - mysql client in zig
 
 ## Status
@@ -6,15 +6,15 @@
 
 ## Features
 ### Connection
-[x] Connection with no password
-[ ] `caching_sha2_password` authentication
-[ ] TLS
+- [x] Connection with no password
+- [ ] `caching_sha2_password` authentication
+- [ ] TLS
 
 ### Client
-[x] Ping
-[x] Query Protocol
-[ ] Query Results
-[ ] Query Params
+- [x] Ping
+- [x] Query Protocol
+- [ ] Query Results
+- [ ] Query Parameters
 
 
 ## Unit Tests
