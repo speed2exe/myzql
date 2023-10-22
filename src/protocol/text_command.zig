@@ -3,32 +3,47 @@ const stream_buffered = @import("../stream_buffered.zig");
 const packet_writer = @import("./packet_writer.zig");
 const constants = @import("../constants.zig");
 
+pub const QueryParam = struct {
+    type_and_flag: [2]u8, // MSB: flag, LSB: type
+    name: []const u8,
+    value: []const u8,
+};
+
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query.html
-pub const Query = struct {
+pub const QueryRequest = struct {
     query: []const u8,
 
-    params: []const ?[]const u8, //binary values
-    param_types: []const [2]u8,
-    param_names: []const []const u8,
+    params: []const ?QueryParam = &.{},
 
-    pub fn write(h: *const Query, writer: *stream_buffered.SmallPacketWriter, capabilities: u32) !void {
+    pub fn write(h: *const QueryRequest, writer: *stream_buffered.SmallPacketWriter, capabilities: u32) !void {
+        // Packet Header
         try packet_writer.writeUInt8(writer, constants.COM_QUERY);
 
+        // Query Parameters
         if (capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) {
             try packet_writer.writeLengthEncodedInteger(writer, h.params.len);
             try packet_writer.writeLengthEncodedInteger(writer, 1); // Number of parameter sets. Currently always 1
             if (h.params.len > 0) {
+                // NULL bitmap, length= (num_params + 7) / 8
                 writeNullBitmap(h.params, writer);
-                const new_param_bind_flag = true; // Always 1. Malformed packet error if not 1
-                if (new_param_bind_flag) {
-                    for (h.params, 0..) |_, i| {
-                        try writer.write(&h.param_types[i]);
-                        try writer.write(&h.param_names[i]);
-                    }
-                    // TODO: write binary different for types
+
+                // new_params_bind_flag
+                // Always 1. Malformed packet error if not 1
+                try packet_writer.writeUInt8(writer, 1);
+
+                // write type_and_flag, name and values
+                // for each parameter
+                for (h.params) |p_opt| {
+                    const p = p_opt orelse continue;
+                    try packet_writer.writeUInt16(writer, p.type_and_flag);
+                    try packet_writer.writeLengthEncodedString(writer, p.name);
+                    try packet_writer.write(writer, p.value);
                 }
             }
         }
+
+        // Query String
+        try writer.write(h.query);
     }
 };
 

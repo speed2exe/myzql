@@ -9,6 +9,7 @@ const ErrorPacket = protocol.generic_response.ErrorPacket;
 const OkPacket = protocol.generic_response.OkPacket;
 const HandshakeResponse41 = protocol.handshake_response.HandshakeResponse41;
 const AuthSwitchRequest = protocol.auth_switch_request.AuthSwitchRequest;
+const QueryRequest = protocol.text_command.QueryRequest;
 const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
@@ -31,6 +32,18 @@ pub const Conn = struct {
     server_capabilities: u32 = 0,
     sequence_id: u8 = 0,
 
+    pub fn query(conn: *Conn) void {
+        std.debug.assert(conn.state == .connected);
+        const query_request: QueryRequest = .{
+            // query: []const u8,
+
+            // params: []const ?[]const u8, //binary values
+            // param_types: []const [2]u8,
+            // param_names: []const []const u8,
+        };
+        _ = query_request;
+    }
+
     pub fn close(conn: *Conn) void {
         switch (conn.state) {
             .connected => {
@@ -41,26 +54,15 @@ pub const Conn = struct {
         }
     }
 
-    fn dial(conn: *Conn, address: std.net.Address) !void {
-        const stream = try std.net.tcpConnectToAddress(address);
-        conn.reader = stream_buffered.reader(stream);
-        conn.writer = stream_buffered.writer(stream);
-        conn.state = .connected;
-    }
-
-    fn hasCapability(conn: *Conn, capability: u32) bool {
-        return conn.server_capabilities & capability > 0;
-    }
-
-    fn updateSequenceId(conn: *Conn, packet: Packet) !void {
-        std.debug.assert(packet.sequence_id == conn.sequence_id);
-        conn.sequence_id += 1;
-    }
-
-    fn generateSequenceId(conn: *Conn) u8 {
-        const id = conn.sequence_id;
-        conn.sequence_id += 1;
-        return id;
+    pub fn ping(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
+        conn.sequence_id = 0;
+        try conn.sendAndFlushAsPacket(&[_]u8{constants.COM_PING});
+        const packet = try conn.readPacket(allocator);
+        defer packet.deinit(allocator);
+        switch (packet.payload[0]) {
+            constants.OK => _ = OkPacket.initFromPacket(&packet, config.capability_flags()),
+            else => return packet.asError(config.capability_flags()),
+        }
     }
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
@@ -192,17 +194,6 @@ pub const Conn = struct {
         try small_packet_writer.flush();
     }
 
-    pub fn ping(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
-        conn.sequence_id = 0;
-        try conn.sendAndFlushAsPacket(&[_]u8{constants.COM_PING});
-        const packet = try conn.readPacket(allocator);
-        defer packet.deinit(allocator);
-        switch (packet.payload[0]) {
-            constants.OK => _ = OkPacket.initFromPacket(&packet, config.capability_flags()),
-            else => return packet.asError(config.capability_flags()),
-        }
-    }
-
     fn sendAndFlushAsPacket(conn: *Conn, payload: []const u8) !void {
         std.debug.assert(conn.state == .connected);
         var writer = conn.writer;
@@ -218,6 +209,28 @@ pub const Conn = struct {
         const packet = try Packet.initFromReader(allocator, &reader);
         try conn.updateSequenceId(packet);
         return packet;
+    }
+
+    fn dial(conn: *Conn, address: std.net.Address) !void {
+        const stream = try std.net.tcpConnectToAddress(address);
+        conn.reader = stream_buffered.reader(stream);
+        conn.writer = stream_buffered.writer(stream);
+        conn.state = .connected;
+    }
+
+    fn hasCapability(conn: *Conn, capability: u32) bool {
+        return conn.server_capabilities & capability > 0;
+    }
+
+    fn updateSequenceId(conn: *Conn, packet: Packet) !void {
+        std.debug.assert(packet.sequence_id == conn.sequence_id);
+        conn.sequence_id += 1;
+    }
+
+    fn generateSequenceId(conn: *Conn) u8 {
+        const id = conn.sequence_id;
+        conn.sequence_id += 1;
+        return id;
     }
 };
 

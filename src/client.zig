@@ -24,8 +24,9 @@ pub const Client = struct {
         try client.conn.ping(client.allocator, &client.config);
     }
 
-    pub fn query(_: Client) void {
-        std.debug.print("query\n", .{});
+    pub fn query(client: Client) !void {
+        try client.connectIfNotConnected();
+        try client.conn.query(client.allocator, &client.config);
     }
 
     fn connectIfNotConnected(c: *Client) !void {
