@@ -8,3 +8,11 @@ test "ping" {
 
     try c.ping();
 }
+
+test "query" {
+    var c = Client.init(test_config, std.testing.allocator);
+    defer c.deinit();
+
+    try c.query("CREATE DATABASE testdb");
+    try c.query("DROP DATABASE testdb");
+}

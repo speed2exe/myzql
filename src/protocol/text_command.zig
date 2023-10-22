@@ -13,19 +13,21 @@ pub const QueryParam = struct {
 pub const QueryRequest = struct {
     query: []const u8,
 
+    // params
+    capabilities: u32 = 0,
     params: []const ?QueryParam = &.{},
 
-    pub fn write(h: *const QueryRequest, writer: *stream_buffered.SmallPacketWriter, capabilities: u32) !void {
+    pub fn write(q: *const QueryRequest, writer: *stream_buffered.SmallPacketWriter) !void {
         // Packet Header
         try packet_writer.writeUInt8(writer, constants.COM_QUERY);
 
         // Query Parameters
-        if (capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) {
-            try packet_writer.writeLengthEncodedInteger(writer, h.params.len);
+        if (q.capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) {
+            try packet_writer.writeLengthEncodedInteger(writer, q.params.len);
             try packet_writer.writeLengthEncodedInteger(writer, 1); // Number of parameter sets. Currently always 1
-            if (h.params.len > 0) {
+            if (q.params.len > 0) {
                 // NULL bitmap, length= (num_params + 7) / 8
-                writeNullBitmap(h.params, writer);
+                try writeNullBitmap(q.params, writer);
 
                 // new_params_bind_flag
                 // Always 1. Malformed packet error if not 1
@@ -33,21 +35,21 @@ pub const QueryRequest = struct {
 
                 // write type_and_flag, name and values
                 // for each parameter
-                for (h.params) |p_opt| {
+                for (q.params) |p_opt| {
                     const p = p_opt orelse continue; // TODO: may not be correct
-                    try packet_writer.writeUInt16(writer, p.type_and_flag);
+                    try writer.write(&p.type_and_flag);
                     try packet_writer.writeLengthEncodedString(writer, p.name);
-                    try packet_writer.write(writer, p.value);
+                    try writer.write(p.value);
                 }
             }
         }
 
         // Query String
-        try writer.write(h.query);
+        try writer.write(q.query);
     }
 };
 
-fn writeNullBitmap(params: []const ?[]const u8, writer: anytype) !void {
+fn writeNullBitmap(params: []const ?QueryParam, writer: anytype) !void {
     const byte_count = (params.len + 7) / 8;
     var cur_param_index: usize = 0;
 
@@ -67,7 +69,15 @@ fn writeNullBitmap(params: []const ?[]const u8, writer: anytype) !void {
 }
 
 test "writeNullBitmap - 1" {
-    var params: []const ?[]const u8 = &.{ null, "some-data", null };
+    var params: []const ?QueryParam = &.{
+        null,
+        .{
+            .type_and_flag = .{ 0, 0 },
+            .name = "foo",
+            .value = "bar",
+        },
+        null,
+    };
 
     var buffer: [4]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);

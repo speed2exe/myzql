@@ -30,17 +30,20 @@ pub const Conn = struct {
     reader: stream_buffered.Reader = undefined,
     writer: stream_buffered.Writer = undefined,
     server_capabilities: u32 = 0,
+    client_capabilities: u32 = 0,
     sequence_id: u8 = 0,
 
-    pub fn query(conn: *Conn, query_string: []const u8) void {
+    pub fn query(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !void {
         std.debug.assert(conn.state == .connected);
-        const query_request: QueryRequest = .{
-            .query = query_string,
-            // params: []const ?[]const u8, //binary values
-            // param_types: []const [2]u8,
-            // param_names: []const []const u8,
-        };
-        _ = query_request;
+        conn.sequence_id = 0;
+        const query_request: QueryRequest = .{ .query = query_string };
+        try conn.sendPacketUsingSmallPacketWriter(query_request);
+        const response_packet = try conn.readPacket(allocator);
+        defer response_packet.deinit(allocator);
+        switch (response_packet.payload[0]) {
+            constants.OK => _ = OkPacket.initFromPacket(&response_packet, conn.client_capabilities),
+            else => return response_packet.asError(conn.client_capabilities),
+        }
     }
 
     pub fn close(conn: *Conn) void {
@@ -68,6 +71,8 @@ pub const Conn = struct {
     pub fn connect(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
         try conn.dial(config.address);
         errdefer conn.close();
+        conn.sequence_id = 0;
+        conn.client_capabilities = config.capability_flags();
 
         var auth: AuthPlugin = undefined;
         {
@@ -75,8 +80,8 @@ pub const Conn = struct {
             defer packet.deinit(allocator);
 
             const handshake_v10 = switch (packet.payload[0]) {
-                constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(&packet, config.capability_flags()),
-                else => return packet.asError(config.capability_flags()),
+                constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(&packet, conn.client_capabilities),
+                else => return packet.asError(conn.client_capabilities),
             };
             conn.server_capabilities = handshake_v10.capability_flags();
             auth = handshake_v10.get_auth_plugin();
@@ -102,7 +107,7 @@ pub const Conn = struct {
 
             switch (packet.payload[0]) {
                 constants.OK => {
-                    _ = OkPacket.initFromPacket(&packet, config.capability_flags());
+                    _ = OkPacket.initFromPacket(&packet, conn.client_capabilities);
                     return;
                 },
                 constants.AUTH_SWITCH => {
@@ -144,7 +149,7 @@ pub const Conn = struct {
                         else => {},
                     }
                 },
-                else => return packet.asError(config.capability_flags()),
+                else => return packet.asError(conn.client_capabilities),
             }
         }
 
@@ -175,14 +180,13 @@ pub const Conn = struct {
             config.password,
             &auth_response,
         );
-        var resp_cap_flag = config.capability_flags();
         // TODO: support CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
         // if (password_resp.len > 250) {
         //     resp_cap_flag |= constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
         // }
         const response: HandshakeResponse41 = .{
             .database = config.database,
-            .client_flag = resp_cap_flag,
+            .client_flag = conn.client_capabilities,
             .character_set = config.collation,
             .username = config.username,
             .auth_response = auth_response.get(),
