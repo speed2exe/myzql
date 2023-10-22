@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub fn writeUInt8(writer: anytype, v: u8) !void {
-    try writer.write(&[_]u8{v});
+    _ = try writer.write(&[_]u8{v});
 }
 
 pub fn writeUInt16(writer: anytype, v: u16) !void {
