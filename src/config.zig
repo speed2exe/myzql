@@ -16,11 +16,8 @@ pub const Config = struct {
     pub fn capability_flags(config: *const Config) u32 {
         // zig fmt: off
         var flags: u32 = constants.CLIENT_PROTOCOL_41
-                       | constants.CLIENT_LONG_PASSWORD
-                       | constants.CLIENT_LOCAL_FILES
                        | constants.CLIENT_PLUGIN_AUTH
-                       | constants.CLIENT_MULTI_RESULTS
-                       | constants.CLIENT_CONNECT_ATTRS
+                       // TODO: Support more
                        ;
         // zig fmt: on
         if (config.client_found_rows) {

@@ -23,6 +23,9 @@ pub const Reader = struct {
 
     inline fn fill(s: *Reader) !void {
         s.len = try s.stream.read(&s.buf);
+        if (s.len == 0) {
+            return error.UnexpectedEndOfStream;
+        }
         s.pos = 0;
     }
 
