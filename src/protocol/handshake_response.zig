@@ -4,26 +4,6 @@ const std = @import("std");
 const constants = @import("../constants.zig");
 const stream_buffered = @import("../stream_buffered.zig");
 
-pub const HandshakeResponse320 = struct {
-    client_flags: u16,
-    max_packet_size: u24,
-    username: [:0]const u8,
-    auth_response: [:0]const u8,
-    database: [:0]const u8 = "",
-
-    pub fn write(h: *const HandshakeResponse41, writer: *stream_buffered.SmallPacketWriter) !void {
-        try packer_writer.writeUInt16(writer, h.client_flags);
-        try packer_writer.writeUInt24(writer, h.max_packet_size);
-        try packer_writer.writeNullTerminatedString(writer, h.username);
-        if ((h.client_flag & constants.CLIENT_CONNECT_WITH_DB) > 0) {
-            try packer_writer.writeNullTerminatedString(writer, h.auth_response);
-            try packer_writer.writeNullTerminatedString(writer, h.database);
-        } else {
-            try writer.write(h.auth_response);
-        }
-    }
-};
-
 pub const HandshakeResponse41 = struct {
     client_flag: u32, // capabilities
     max_packet_size: u32 = 0,

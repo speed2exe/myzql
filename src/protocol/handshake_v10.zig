@@ -5,7 +5,6 @@ const constants = @import("../constants.zig");
 const AuthPlugin = @import("../auth_plugin.zig").AuthPlugin;
 
 pub const HandshakeV10 = struct {
-    protocol_version: u8,
     server_version: [:0]const u8,
     connection_id: u32,
     auth_plugin_data_part_1: *const [8]u8,
@@ -18,19 +17,22 @@ pub const HandshakeV10 = struct {
     auth_plugin_name: ?[:0]const u8,
 
     pub fn initFromPacket(packet: *const Packet, capabilities: u32) HandshakeV10 {
+        var handshake_v10: HandshakeV10 = undefined;
+
         var reader = PacketReader.initFromPacket(packet);
         const protocol_version = reader.readByte();
         std.debug.assert(protocol_version == constants.HANDSHAKE_V10);
-        const server_version = reader.readNullTerminatedString();
-        const connection_id = reader.readUInt32();
-        const auth_plugin_data_part_1 = reader.readFixed(8);
-        _ = reader.readByte(); // filler
-        const capability_flags_1 = reader.readUInt16();
-        const character_set = reader.readByte();
-        const status_flags = reader.readUInt16();
-        const capability_flags_2 = reader.readUInt16();
 
-        const auth_plugin_data_len = reader.readByte();
+        handshake_v10.server_version = reader.readNullTerminatedString();
+        handshake_v10.connection_id = reader.readUInt32();
+        handshake_v10.auth_plugin_data_part_1 = reader.readFixed(8);
+        _ = reader.readByte(); // filler
+        handshake_v10.capability_flags_1 = reader.readUInt16();
+        handshake_v10.character_set = reader.readByte();
+        handshake_v10.status_flags = reader.readUInt16();
+        handshake_v10.capability_flags_2 = reader.readUInt16();
+
+        handshake_v10.auth_plugin_data_len = reader.readByte();
 
         const reserved = reader.readFixed(10);
         std.debug.assert(std.mem.eql(u8, reserved, &[10]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
@@ -39,27 +41,16 @@ pub const HandshakeV10 = struct {
         // It seems like null terminated string works for both, at least for now
         // https://mariadb.com/kb/en/connection/#initial-handshake-packet
         // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_handshake_v10.html
-        const auth_plugin_data_part_2 = reader.readNullTerminatedString();
+        handshake_v10.auth_plugin_data_part_2 = reader.readNullTerminatedString();
 
-        var auth_plugin_name: ?[:0]const u8 = null;
         if (capabilities & constants.CLIENT_PLUGIN_AUTH > 0) {
-            auth_plugin_name = reader.readNullTerminatedString();
+            handshake_v10.auth_plugin_name = reader.readNullTerminatedString();
+        } else {
+            handshake_v10.auth_plugin_name = null;
         }
 
         std.debug.assert(reader.finished());
-        return .{
-            .protocol_version = protocol_version,
-            .server_version = server_version,
-            .connection_id = connection_id,
-            .auth_plugin_data_part_1 = auth_plugin_data_part_1,
-            .capability_flags_1 = capability_flags_1,
-            .character_set = character_set,
-            .status_flags = status_flags,
-            .capability_flags_2 = capability_flags_2,
-            .auth_plugin_data_len = auth_plugin_data_len,
-            .auth_plugin_data_part_2 = auth_plugin_data_part_2,
-            .auth_plugin_name = auth_plugin_name,
-        };
+        return handshake_v10;
     }
 
     pub fn capability_flags(h: *const HandshakeV10) u32 {

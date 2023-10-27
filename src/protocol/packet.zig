@@ -11,15 +11,16 @@ pub const Packet = struct {
     payload: []const u8,
 
     pub fn initFromReader(allocator: std.mem.Allocator, sbr: *buffered_stream.Reader) !Packet {
-        const payload_length = try readUInt24(sbr);
-        const sequence_id = try readUInt8(sbr);
-        var payload = try allocator.alloc(u8, @as(usize, payload_length));
-        try sbr.read(payload);
-        return .{
-            .payload_length = payload_length,
-            .sequence_id = sequence_id,
-            .payload = payload,
+        var packet: Packet = undefined;
+
+        packet.payload_length = try readUInt24(sbr);
+        packet.sequence_id = try readUInt8(sbr);
+        packet.payload = blk: {
+            var payload = try allocator.alloc(u8, @as(usize, packet.payload_length));
+            try sbr.read(payload);
+            break :blk payload;
         };
+        return packet;
     }
 
     pub fn asError(packet: *const Packet, capabilities: u32) error{ UnexpectedPacket, ErrorPacket } {
