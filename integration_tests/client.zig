@@ -30,5 +30,5 @@ test "query select 1" {
 
     const qr = try c.query("SELECT 1");
     var rows = qr.rows;
-    defer rows.deinit();
+    defer rows.deinit(std.testing.allocator);
 }
