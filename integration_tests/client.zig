@@ -13,7 +13,12 @@ test "query database create and drop" {
     var c = Client.init(test_config, std.testing.allocator);
     defer c.deinit();
 
-    _ = try c.query("CREATE DATABASE testdb");
+    switch (try c.query("CREATE DATABASE testdb")) {
+        .ok => {},
+        .error => {
+        },
+    }
+
     _ = try c.query("DROP DATABASE testdb");
 }
 
