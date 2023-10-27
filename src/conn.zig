@@ -14,9 +14,8 @@ const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
 const FixedBytes = @import("./utils.zig").FixedBytes;
-const QueryResult = @import("./query_result.zig").QueryResult;
-const TextResultSet = @import("./query_result.zig").TextResultSet;
 const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
+const ColumnDefinition41 = @import("./protocol/column_definition.zig").ColumnDefinition41;
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -50,7 +49,7 @@ pub const Conn = struct {
             else => {
                 var packet_reader = PacketReader.initFromPacket(&response_packet);
                 const column_count = packet_reader.readLengthEncodedInteger();
-                return .{ .rows = TextResultSet.init(allocator, conn, column_count) };
+                return .{ .rows = try TextResultSet.init(allocator, conn, column_count) };
             },
         };
     }
@@ -271,6 +270,38 @@ fn generate_auth_response(
             return error.UnsupportedAuthPlugin;
         },
     }
+}
+
+pub const QueryResult = union(enum) {
+    ok: OkPacket,
+    err: ErrorPacket,
+    rows: TextResultSet,
+};
+
+pub const TextResultSet = struct {
+    conn: *Conn,
+    column_count: u64,
+    column_definitions: []ColumnDefinition41,
+
+    // rows: []Row,
+
+    pub fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !TextResultSet {
+        return .{
+            .conn = conn,
+            .column_count = column_count,
+            .column_definitions = try readColumnDefinitions(allocator, conn, column_count),
+        };
+    }
+};
+
+fn readColumnDefinitions(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) ![]ColumnDefinition41 {
+    var column_definitions = try allocator.alloc(ColumnDefinition41, column_count);
+    for (column_definitions) |*column_definition| {
+        _ = column_definition;
+        const packet = try conn.readPacket(allocator);
+        _ = packet;
+    }
+    return column_definitions;
 }
 
 // XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))

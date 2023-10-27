@@ -1,7 +1,7 @@
 const std = @import("std");
 const Config = @import("./config.zig").Config;
 const Conn = @import("./conn.zig").Conn;
-const QueryResult = @import("./query_result.zig").QueryResult;
+const QueryResult = @import("./conn.zig").QueryResult;
 
 pub const Client = struct {
     config: Config,
