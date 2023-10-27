@@ -1,6 +1,7 @@
 const std = @import("std");
 const Config = @import("./config.zig").Config;
 const Conn = @import("./conn.zig").Conn;
+const QueryResult = @import("./query_result.zig").QueryResult;
 
 pub const Client = struct {
     config: Config,
@@ -24,9 +25,9 @@ pub const Client = struct {
         try client.conn.ping(client.allocator, &client.config);
     }
 
-    pub fn query(client: *Client, query_string: []const u8) !void {
+    pub fn query(client: *Client, query_string: []const u8) !QueryResult {
         try client.connectIfNotConnected();
-        try client.conn.query(client.allocator, query_string);
+        return try client.conn.query(client.allocator, query_string);
     }
 
     fn connectIfNotConnected(c: *Client) !void {

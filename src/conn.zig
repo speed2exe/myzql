@@ -14,6 +14,9 @@ const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
 const FixedBytes = @import("./utils.zig").FixedBytes;
+const QueryResult = @import("./query_result.zig").QueryResult;
+const TextResultSet = @import("./query_result.zig").TextResultSet;
+const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -33,17 +36,23 @@ pub const Conn = struct {
     client_capabilities: u32 = 0,
     sequence_id: u8 = 0,
 
-    pub fn query(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !void {
+    pub fn query(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult {
         std.debug.assert(conn.state == .connected);
         conn.sequence_id = 0;
         const query_request: QueryRequest = .{ .query = query_string };
         try conn.sendPacketUsingSmallPacketWriter(query_request);
         const response_packet = try conn.readPacket(allocator);
         defer response_packet.deinit(allocator);
-        switch (response_packet.payload[0]) {
-            constants.OK => _ = OkPacket.initFromPacket(&response_packet, conn.client_capabilities),
-            else => return response_packet.asError(conn.client_capabilities),
-        }
+        return switch (response_packet.payload[0]) {
+            constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
+            constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
+            constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
+            else => {
+                var packet_reader = PacketReader.initFromPacket(&response_packet);
+                const column_count = packet_reader.readLengthEncodedInteger();
+                return .{ .rows = TextResultSet.init(allocator, conn, column_count) };
+            },
+        };
     }
 
     pub fn close(conn: *Conn) void {
@@ -57,6 +66,7 @@ pub const Conn = struct {
     }
 
     pub fn ping(conn: *Conn, allocator: std.mem.Allocator, config: *const Config) !void {
+        std.debug.assert(conn.state == .connected);
         conn.sequence_id = 0;
         try conn.sendBytesAsPacket(&[_]u8{constants.COM_PING});
         const packet = try conn.readPacket(allocator);
