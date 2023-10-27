@@ -24,10 +24,11 @@ test "query syntax error" {
     _ = @field(try c.query("garbage query"), "err");
 }
 
-// test "query select 1" {
-//     var c = Client.init(test_config, std.testing.allocator);
-//     defer c.deinit();
-//
-//     const qr = try c.query("SELECT 1");
-//     _ = qr;
-// }
+test "query select 1" {
+    var c = Client.init(test_config, std.testing.allocator);
+    defer c.deinit();
+
+    const qr = try c.query("SELECT 1");
+    var rows = qr.rows;
+    defer rows.deinit();
+}

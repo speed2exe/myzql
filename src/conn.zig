@@ -298,7 +298,7 @@ pub const TextResultSet = struct {
         return text_result_set;
     }
 
-    pub fn deinit(allocator: std.mem.Allocator, text_result_set: *TextResultSet) void {
+    pub fn deinit(text_result_set: *TextResultSet, allocator: std.mem.Allocator) void {
         for (text_result_set.column_packets) |packet| {
             packet.deinit(allocator);
         }

@@ -34,7 +34,6 @@ pub const ColumnDefinition41 = struct {
         column_definition_41.flags = reader.readUInt16();
         column_definition_41.decimals = reader.readByte();
 
-        std.debug.assert(reader.finished());
         return column_definition_41;
     }
 };
