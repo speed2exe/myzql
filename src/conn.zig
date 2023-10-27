@@ -222,8 +222,7 @@ pub const Conn = struct {
 
     fn readPacket(conn: *Conn, allocator: std.mem.Allocator) !Packet {
         std.debug.assert(conn.state == .connected);
-        var reader = conn.reader;
-        const packet = try Packet.initFromReader(allocator, &reader);
+        const packet = try Packet.initFromReader(allocator, &conn.reader);
         try conn.updateSequenceId(packet);
         return packet;
     }
@@ -281,28 +280,32 @@ pub const QueryResult = union(enum) {
 pub const TextResultSet = struct {
     conn: *Conn,
     column_count: u64,
+    column_packets: []Packet,
     column_definitions: []ColumnDefinition41,
 
-    // rows: []Row,
-
     pub fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !TextResultSet {
-        return .{
-            .conn = conn,
-            .column_count = column_count,
-            .column_definitions = try readColumnDefinitions(allocator, conn, column_count),
-        };
+        var text_result_set: TextResultSet = undefined;
+        text_result_set.conn = conn;
+        text_result_set.column_count = column_count;
+
+        text_result_set.column_packets = try allocator.alloc(Packet, column_count);
+        text_result_set.column_definitions = try allocator.alloc(ColumnDefinition41, column_count);
+        for (0..column_count) |i| {
+            const packet = try conn.readPacket(allocator);
+            text_result_set.column_packets[i] = packet;
+            text_result_set.column_definitions[i] = ColumnDefinition41.initFromPacket(&packet);
+        }
+        return text_result_set;
+    }
+
+    pub fn deinit(allocator: std.mem.Allocator, text_result_set: *TextResultSet) void {
+        for (text_result_set.column_packets) |packet| {
+            packet.deinit(allocator);
+        }
+        allocator.free(text_result_set.column_packets);
+        allocator.free(text_result_set.column_definitions);
     }
 };
-
-fn readColumnDefinitions(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) ![]ColumnDefinition41 {
-    var column_definitions = try allocator.alloc(ColumnDefinition41, column_count);
-    for (column_definitions) |*column_definition| {
-        _ = column_definition;
-        const packet = try conn.readPacket(allocator);
-        _ = packet;
-    }
-    return column_definitions;
-}
 
 // XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))
 fn scrambleSHA256Password(scramble: []const u8, password: []const u8) [32]u8 {

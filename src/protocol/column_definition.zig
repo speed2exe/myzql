@@ -27,10 +27,10 @@ pub const ColumnDefinition41 = struct {
         column_definition_41.org_table = reader.readLengthEncodedString();
         column_definition_41.name = reader.readLengthEncodedString();
         column_definition_41.org_name = reader.readLengthEncodedString();
-        column_definition_41.fixed_length_fields_length = reader.readLengthEncodedString();
+        column_definition_41.fixed_length_fields_length = reader.readLengthEncodedInteger();
         column_definition_41.character_set = reader.readUInt16();
         column_definition_41.column_length = reader.readUInt32();
-        column_definition_41.column_type = reader.readUInt8();
+        column_definition_41.column_type = reader.readByte();
         column_definition_41.flags = reader.readUInt16();
         column_definition_41.decimals = reader.readByte();
 
