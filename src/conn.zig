@@ -295,6 +295,11 @@ pub const TextResultSet = struct {
             text_result_set.column_packets[i] = packet;
             text_result_set.column_definitions[i] = ColumnDefinition41.initFromPacket(&packet);
         }
+
+        const eof_packet = try conn.readPacket(allocator);
+        defer eof_packet.deinit(allocator);
+        std.debug.assert(eof_packet.payload[0] == constants.EOF);
+
         return text_result_set;
     }
 
