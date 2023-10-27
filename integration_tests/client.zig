@@ -13,13 +13,15 @@ test "query database create and drop" {
     var c = Client.init(test_config, std.testing.allocator);
     defer c.deinit();
 
-    switch (try c.query("CREATE DATABASE testdb")) {
-        .ok => {},
-        .error => {
-        },
-    }
+    _ = @field(try c.query("CREATE DATABASE testdb"), "ok");
+    _ = @field(try c.query("DROP DATABASE testdb"), "ok");
+}
 
-    _ = try c.query("DROP DATABASE testdb");
+test "query syntax error" {
+    var c = Client.init(test_config, std.testing.allocator);
+    defer c.deinit();
+
+    _ = @field(try c.query("garbage query"), "err");
 }
 
 // test "query select 1" {
