@@ -2,20 +2,22 @@
 - mysql client in zig
 
 ## Status
-- Vaporware 
+- Vaporware
 
 ## Features
-### Connection
 - [x] Connection with no password
+- [x] Ping
+- [x] Query Text Protocol
+
+## Example
+- Coming soon!
+
+## Task Pool
 - [ ] `caching_sha2_password` authentication
 - [ ] TLS
-
-### Client
-- [x] Ping
-- [x] Query Protocol
-- [ ] Query Results
-- [ ] Query Parameters
-
+- [ ] Query Text Protocol Input Parameters
+- [ ] Execute
+- [ ] Query Binary Protocol
 
 ## Unit Tests
 - `zig test src/myzql.zig`
