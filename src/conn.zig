@@ -10,6 +10,9 @@ const OkPacket = protocol.generic_response.OkPacket;
 const HandshakeResponse41 = protocol.handshake_response.HandshakeResponse41;
 const AuthSwitchRequest = protocol.auth_switch_request.AuthSwitchRequest;
 const QueryRequest = protocol.text_command.QueryRequest;
+const prepared_statements = protocol.prepared_statements;
+const PrepareRequest = prepared_statements.PrepareRequest;
+const PrepareOk = prepared_statements.PrepareOk;
 const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
@@ -41,16 +44,24 @@ pub const Conn = struct {
         const query_request: QueryRequest = .{ .query = query_string };
         try conn.sendPacketUsingSmallPacketWriter(query_request);
         const response_packet = try conn.readPacket(allocator);
+        errdefer response_packet.deinit(allocator);
+        return .{
+            .packet = response_packet,
+            .conn = conn,
+        };
+    }
+
+    pub fn prepare(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
+        std.debug.assert(conn.state == .connected);
+        conn.sequence_id = 0;
+        const prepare_request: PrepareRequest = .{ .query = query_string };
+        try conn.sendPacketUsingSmallPacketWriter(prepare_request);
+        const response_packet = try conn.readPacket(allocator);
         defer response_packet.deinit(allocator);
         return switch (response_packet.payload[0]) {
-            constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
             constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
-            constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-            else => {
-                var packet_reader = PacketReader.initFromPacket(&response_packet);
-                const column_count = packet_reader.readLengthEncodedInteger();
-                return .{ .rows = try TextResultSet.init(allocator, conn, column_count) };
-            },
+            constants.OK => _ = .{},
+            else => response_packet.asError(conn.client_capabilities),
         };
     }
 
@@ -271,42 +282,84 @@ fn generate_auth_response(
     }
 }
 
-pub const QueryResult = union(enum) {
-    ok: OkPacket,
-    err: ErrorPacket,
-    rows: TextResultSet,
+pub const PrepareResult = struct {
+    packet: Packet,
+    value: union(enum) {
+        err: ErrorPacket,
+        prep_ok: PrepareOk,
+    },
+
+    pub fn deinit(p: *const PrepareResult, allocator: std.mem.Allocator) void {
+        p.packet.deinit(allocator);
+    }
+
+    pub fn ok(p: *const PrepareResult) !PrepareOk {
+        return switch (p.value) {
+            .prep_ok => p.value.prep_ok,
+            .err => return p.value.err.asError(),
+        };
+    }
+};
+
+pub const QueryResult = struct {
+    packet: Packet,
+    conn: *Conn,
+
+    pub fn deinit(q: *const QueryResult, allocator: std.mem.Allocator) void {
+        q.packet.deinit(allocator);
+    }
+
+    pub fn ok(q: *const QueryResult) !OkPacket {
+        return switch (q.packet.payload[0]) {
+            constants.OK => OkPacket.initFromPacket(&q.packet, q.conn.client_capabilities),
+            constants.ERR => ErrorPacket.initFromPacket(false, &q.packet, q.conn.client_capabilities).asError(),
+            constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
+            else => error.RowsReturnedNotConsumed,
+        };
+    }
+
+    pub fn rows(q: *const QueryResult, allocator: std.mem.Allocator) !TextResultSet {
+        return switch (q.packet.payload[0]) {
+            constants.OK => error.NoRowsReturned,
+            constants.ERR => ErrorPacket.initFromPacket(false, &q.packet, q.conn.client_capabilities).asError(),
+            constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
+            else => {
+                var packet_reader = PacketReader.initFromPacket(&q.packet);
+                const column_count = packet_reader.readLengthEncodedInteger();
+                return TextResultSet.init(allocator, q.conn, column_count);
+            },
+        };
+    }
 };
 
 pub const TextResultSet = struct {
     conn: *Conn,
-    column_count: u64,
     column_packets: []Packet,
     column_definitions: []ColumnDefinition41,
 
-    pub fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !TextResultSet {
-        var text_result_set: TextResultSet = undefined;
-        text_result_set.conn = conn;
-        text_result_set.column_count = column_count;
+    fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !TextResultSet {
+        var t: TextResultSet = undefined;
 
-        text_result_set.column_packets = try allocator.alloc(Packet, column_count);
-        errdefer allocator.free(text_result_set.column_packets);
-        text_result_set.column_definitions = try allocator.alloc(ColumnDefinition41, column_count);
-        errdefer allocator.free(text_result_set.column_definitions);
+        t.column_packets = try allocator.alloc(Packet, column_count);
+        errdefer allocator.free(t.column_packets);
+        t.column_definitions = try allocator.alloc(ColumnDefinition41, column_count);
+        errdefer allocator.free(t.column_definitions);
         for (0..column_count) |i| {
             const packet = try conn.readPacket(allocator);
             errdefer packet.deinit(allocator);
-            text_result_set.column_packets[i] = packet;
-            text_result_set.column_definitions[i] = ColumnDefinition41.initFromPacket(&packet);
+            t.column_packets[i] = packet;
+            t.column_definitions[i] = ColumnDefinition41.initFromPacket(&packet);
         }
 
         const eof_packet = try conn.readPacket(allocator);
         defer eof_packet.deinit(allocator);
         std.debug.assert(eof_packet.payload[0] == constants.EOF);
 
-        return text_result_set;
+        t.conn = conn;
+        return t;
     }
 
-    pub fn deinit(text_result_set: *TextResultSet, allocator: std.mem.Allocator) void {
+    pub fn deinit(text_result_set: *const TextResultSet, allocator: std.mem.Allocator) void {
         for (text_result_set.column_packets) |packet| {
             packet.deinit(allocator);
         }

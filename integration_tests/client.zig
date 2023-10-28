@@ -1,74 +1,88 @@
 const std = @import("std");
 const Client = @import("../src/client.zig").Client;
 const test_config = @import("./config.zig").test_config;
+const allocator = std.testing.allocator;
 
 test "ping" {
-    var c = Client.init(test_config, std.testing.allocator);
+    var c = Client.init(test_config);
     defer c.deinit();
 
-    try c.ping();
+    try c.ping(allocator);
 }
 
 test "query database create and drop" {
-    var c = Client.init(test_config, std.testing.allocator);
+    var c = Client.init(test_config);
     defer c.deinit();
-
-    _ = @field(try c.query("CREATE DATABASE testdb"), "ok");
-    _ = @field(try c.query("DROP DATABASE testdb"), "ok");
+    {
+        const qr = try c.query(allocator, "CREATE DATABASE testdb");
+        defer qr.deinit(allocator);
+        _ = try qr.ok();
+    }
+    {
+        const qr = try c.query(allocator, "DROP DATABASE testdb");
+        defer qr.deinit(allocator);
+        _ = try qr.ok();
+    }
 }
 
 test "query syntax error" {
-    var c = Client.init(test_config, std.testing.allocator);
+    var c = Client.init(test_config);
     defer c.deinit();
 
-    _ = @field(try c.query("garbage query"), "err");
+    const qr = try c.query(allocator, "garbage query");
+    defer qr.deinit(allocator);
+    try std.testing.expectError(error.ErrorPacket, qr.ok());
 }
 
 test "query text protocol" {
-    var c = Client.init(test_config, std.testing.allocator);
+    var c = Client.init(test_config);
     defer c.deinit();
 
     {
-        const qr = try c.query("SELECT 1");
-        var rows = qr.rows;
-        defer rows.deinit(std.testing.allocator);
+        const qr = try c.query(allocator, "SELECT 1");
+        defer qr.deinit(allocator);
+        var rows = try qr.rows(allocator);
+        defer rows.deinit(allocator);
         var dest = [_]?[]const u8{undefined};
-        while (try rows.next(std.testing.allocator)) |row| {
-            defer row.deinit(std.testing.allocator);
+        while (try rows.next(allocator)) |row| {
+            defer row.deinit(allocator);
             row.scan(&dest);
             try std.testing.expectEqualSlices(u8, "1", dest[0].?);
         }
     }
     {
-        const qr = try c.query("SELECT 2");
-        var rows = qr.rows;
-        defer rows.deinit(std.testing.allocator);
+        const qr = try c.query(allocator, "SELECT 2");
+        defer qr.deinit(allocator);
+        var rows = try qr.rows(allocator);
+        defer rows.deinit(allocator);
         var dest = [_]?[]const u8{undefined};
-        while (try rows.next(std.testing.allocator)) |row| {
-            defer row.deinit(std.testing.allocator);
+        while (try rows.next(allocator)) |row| {
+            defer row.deinit(allocator);
             row.scan(&dest);
             try std.testing.expectEqualSlices(u8, "2", dest[0].?);
         }
     }
     {
-        const qr = try c.query("SELECT 3,4");
-        var rows = qr.rows;
-        defer rows.deinit(std.testing.allocator);
+        const qr = try c.query(allocator, "SELECT 3,4");
+        defer qr.deinit(allocator);
+        var rows = try qr.rows(allocator);
+        defer rows.deinit(allocator);
         var dest = [_]?[]const u8{ undefined, undefined };
-        while (try rows.next(std.testing.allocator)) |row| {
-            defer row.deinit(std.testing.allocator);
+        while (try rows.next(allocator)) |row| {
+            defer row.deinit(allocator);
             row.scan(&dest);
             try std.testing.expectEqualSlices(u8, "3", dest[0].?);
             try std.testing.expectEqualSlices(u8, "4", dest[1].?);
         }
     }
     {
-        const qr = try c.query("SELECT 5,null,7");
-        var rows = qr.rows;
-        defer rows.deinit(std.testing.allocator);
+        const qr = try c.query(allocator, "SELECT 5,null,7");
+        defer qr.deinit(allocator);
+        var rows = try qr.rows(allocator);
+        defer rows.deinit(allocator);
         var dest = [_]?[]const u8{ undefined, undefined, undefined };
-        while (try rows.next(std.testing.allocator)) |row| {
-            defer row.deinit(std.testing.allocator);
+        while (try rows.next(allocator)) |row| {
+            defer row.deinit(allocator);
             row.scan(&dest);
             try std.testing.expectEqualSlices(u8, "5", dest[0].?);
             try std.testing.expectEqual(@as(?[]const u8, null), dest[1]);
@@ -76,9 +90,10 @@ test "query text protocol" {
         }
     }
     {
-        const qr = try c.query("SELECT 8,9 UNION ALL SELECT 10,11");
-        var rows = qr.rows;
-        defer rows.deinit(std.testing.allocator);
+        const qr = try c.query(allocator, "SELECT 8,9 UNION ALL SELECT 10,11");
+        defer qr.deinit(allocator);
+        var rows = try qr.rows(allocator);
+        defer rows.deinit(allocator);
 
         var dest = [_]?[]const u8{ undefined, undefined };
         {

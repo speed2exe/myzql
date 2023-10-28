@@ -6,13 +6,11 @@ const QueryResult = @import("./conn.zig").QueryResult;
 pub const Client = struct {
     config: Config,
     conn: Conn,
-    allocator: std.mem.Allocator,
 
-    pub fn init(config: Config, allocator: std.mem.Allocator) Client {
+    pub fn init(config: Config) Client {
         return .{
             .config = config,
             .conn = .{},
-            .allocator = allocator,
         };
     }
 
@@ -20,21 +18,21 @@ pub const Client = struct {
         client.conn.close();
     }
 
-    pub fn ping(client: *Client) !void {
-        try client.connectIfNotConnected();
-        try client.conn.ping(client.allocator, &client.config);
+    pub fn ping(client: *Client, allocator: std.mem.Allocator) !void {
+        try client.connectIfNotConnected(allocator);
+        try client.conn.ping(allocator, &client.config);
     }
 
-    pub fn query(client: *Client, query_string: []const u8) !QueryResult {
-        try client.connectIfNotConnected();
-        return try client.conn.query(client.allocator, query_string);
+    pub fn query(client: *Client, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult {
+        try client.connectIfNotConnected(allocator);
+        return try client.conn.query(allocator, query_string);
     }
 
-    fn connectIfNotConnected(c: *Client) !void {
+    fn connectIfNotConnected(c: *Client, allocator: std.mem.Allocator) !void {
         switch (c.conn.state) {
             .connected => {},
             .disconnected => {
-                try c.conn.connect(c.allocator, &c.config);
+                try c.conn.connect(allocator, &c.config);
             },
         }
     }
