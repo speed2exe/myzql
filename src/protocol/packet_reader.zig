@@ -9,6 +9,18 @@ pub const PacketReader = struct {
         return .{ .payload = packet.payload, .pos = 0 };
     }
 
+    pub fn peek(packet_reader: *const PacketReader) ?u8 {
+        if (packet_reader.payload.len == packet_reader.pos) {
+            return null;
+        }
+        return packet_reader.payload[0];
+    }
+
+    pub fn forward_one(packet_reader: *PacketReader) void {
+        std.debug.assert(packet_reader.payload.len > packet_reader.pos);
+        packet_reader.pos += 1;
+    }
+
     pub fn readFixed(packet_reader: *PacketReader, comptime n: usize) *const [n]u8 {
         const bytes = packet_reader.payload[packet_reader.pos..][0..n];
         packet_reader.pos += n;

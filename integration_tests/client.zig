@@ -31,4 +31,11 @@ test "query select 1" {
     const qr = try c.query("SELECT 1");
     var rows = qr.rows;
     defer rows.deinit(std.testing.allocator);
+
+    var dest: []?[]const u8 = undefined;
+    while (try rows.next(std.testing.allocator)) |row| {
+        defer row.deinit(std.testing.allocator);
+        row.scan(dest);
+    }
+    std.debug.print("dest: {any}", .{dest});
 }

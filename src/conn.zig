@@ -289,9 +289,12 @@ pub const TextResultSet = struct {
         text_result_set.column_count = column_count;
 
         text_result_set.column_packets = try allocator.alloc(Packet, column_count);
+        errdefer allocator.free(text_result_set.column_packets);
         text_result_set.column_definitions = try allocator.alloc(ColumnDefinition41, column_count);
+        errdefer allocator.free(text_result_set.column_definitions);
         for (0..column_count) |i| {
             const packet = try conn.readPacket(allocator);
+            errdefer packet.deinit(allocator);
             text_result_set.column_packets[i] = packet;
             text_result_set.column_definitions[i] = ColumnDefinition41.initFromPacket(&packet);
         }
@@ -310,6 +313,56 @@ pub const TextResultSet = struct {
         allocator.free(text_result_set.column_packets);
         allocator.free(text_result_set.column_definitions);
     }
+
+    pub fn next(text_result_set: *TextResultSet, allocator: std.mem.Allocator) !?TextResultRow {
+        const packet = try text_result_set.conn.readPacket(allocator);
+        errdefer packet.deinit(allocator);
+
+        return switch (packet.payload[0]) {
+            constants.EOF => {
+                packet.deinit(allocator);
+                return null;
+            },
+            constants.ERR => return packet.asError(text_result_set.conn.client_capabilities),
+            else => TextResultRow.initFromPacket(packet, text_result_set.column_definitions),
+        };
+    }
+
+    pub const TextResultRow = struct {
+        packet: Packet,
+        column_definitions: []ColumnDefinition41,
+
+        fn initFromPacket(packet: Packet, column_definitions: []ColumnDefinition41) TextResultRow {
+            return .{
+                .packet = packet,
+                .column_definitions = column_definitions,
+            };
+        }
+
+        pub fn scan(row: *const TextResultRow, dest: []?[]const u8) void {
+            std.debug.assert(row.column_definitions.len == dest.len);
+
+            var packet_reader = PacketReader.initFromPacket(&row.packet);
+            _ = for (dest) |*d| {
+                var first_byte = blk: {
+                    const byte_opt = packet_reader.peek();
+                    std.debug.assert(byte_opt != null);
+                    break :blk byte_opt.?;
+                };
+                d.* = switch (first_byte) {
+                    constants.TEXT_RESULT_ROW_NULL => {
+                        packet_reader.forward_one();
+                        break null;
+                    },
+                    else => packet_reader.readLengthEncodedString(),
+                };
+            };
+        }
+
+        pub fn deinit(text_result_set: *const TextResultRow, allocator: std.mem.Allocator) void {
+            text_result_set.packet.deinit(allocator);
+        }
+    };
 };
 
 // XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))

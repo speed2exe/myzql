@@ -10,6 +10,9 @@ pub const ERR:                  u8 = 0xFF;
 pub const HANDSHAKE_V10:        u8 = 0x0A;
 pub const LOCAL_INFILE_REQUEST: u8 = 0xFB;
 
+// Query Result
+pub const TEXT_RESULT_ROW_NULL: u8 = 0xFB;
+
 // https://dev.mysql.com/doc/dev/mysql-server/latest/mysql__com_8h.html#a1d854e841086925be1883e4d7b4e8cad
 pub const SERVER_STATUS_IN_TRANS:             u16 = 1 << 0;
 pub const SERVER_STATUS_AUTOCOMMIT:           u16 = 1 << 1;
