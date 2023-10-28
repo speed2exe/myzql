@@ -10,10 +10,11 @@ pub const PacketReader = struct {
     }
 
     pub fn peek(packet_reader: *const PacketReader) ?u8 {
+        std.debug.assert(packet_reader.payload.len >= packet_reader.pos);
         if (packet_reader.payload.len == packet_reader.pos) {
             return null;
         }
-        return packet_reader.payload[0];
+        return packet_reader.payload[packet_reader.pos];
     }
 
     pub fn forward_one(packet_reader: *PacketReader) void {

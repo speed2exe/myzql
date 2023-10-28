@@ -343,20 +343,20 @@ pub const TextResultSet = struct {
             std.debug.assert(row.column_definitions.len == dest.len);
 
             var packet_reader = PacketReader.initFromPacket(&row.packet);
-            _ = for (dest) |*d| {
-                var first_byte = blk: {
-                    const byte_opt = packet_reader.peek();
-                    std.debug.assert(byte_opt != null);
-                    break :blk byte_opt.?;
-                };
-                d.* = switch (first_byte) {
-                    constants.TEXT_RESULT_ROW_NULL => {
+            for (dest) |*d| {
+                d.* = blk: {
+                    const first_byte = blk2: {
+                        const byte_opt = packet_reader.peek();
+                        std.debug.assert(byte_opt != null);
+                        break :blk2 byte_opt.?;
+                    };
+                    if (first_byte == constants.TEXT_RESULT_ROW_NULL) {
                         packet_reader.forward_one();
-                        break null;
-                    },
-                    else => packet_reader.readLengthEncodedString(),
+                        break :blk null;
+                    }
+                    break :blk packet_reader.readLengthEncodedString();
                 };
-            };
+            }
         }
 
         pub fn deinit(text_result_set: *const TextResultRow, allocator: std.mem.Allocator) void {
