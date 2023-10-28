@@ -4,7 +4,6 @@ const packet_writer = @import("./packet_writer.zig");
 const constants = @import("../constants.zig");
 const Packet = @import("./packet.zig").Packet;
 const PacketReader = @import("./packet_reader.zig").PacketReader;
-const QueryParam = @import("./text_command.zig").QueryParam;
 
 pub const BinaryParam = struct {
     type_and_flag: [2]u8, // LSB: type, MSB: flag
@@ -66,8 +65,8 @@ pub const ExecuteResquest = struct {
     iteration_count: u32 = 1, // Always 1
     new_params_bind_flag: u8 = 1,
 
-    params: []const BinaryParam = &.{},
-    attributes: []const BinaryParam = &.{},
+    params: []const ?BinaryParam = &.{},
+    attributes: []const ?BinaryParam = &.{},
 
     pub fn write(e: *const ExecuteResquest, writer: anytype, capabilities: u32) !void {
         std.debug.assert(e.prep_ok.num_params == e.params.len);
@@ -111,18 +110,24 @@ pub const ExecuteResquest = struct {
 
             // Write params as binary values
             for (e.params) |b| {
-                writer.write(b.raw);
+                try writeBinaryParam(b, writer);
             }
             if (has_attributes_to_write) {
                 for (e.attributes) |b| {
-                    writer.write(b.raw);
+                    try writeBinaryParam(b, writer);
                 }
             }
         }
     }
 };
 
-fn writeNullBitmap(params: []const BinaryParam, attributes: []const BinaryParam, writer: anytype) !void {
+fn writeBinaryParam(param: ?BinaryParam, writer: anytype) !void {
+    _ = writer;
+    _ = param;
+    @panic("TODO");
+}
+
+fn writeNullBitmap(params: []const ?BinaryParam, attributes: []const ?BinaryParam, writer: anytype) !void {
     const byte_count = (params.len + attributes.len + 7) / 8;
     for (0..byte_count) |i| {
         const start = i * 8;
@@ -133,21 +138,22 @@ fn writeNullBitmap(params: []const BinaryParam, attributes: []const BinaryParam,
         } else if (start >= params.len) {
             byte = nullBits1(attributes[(start - params.len)..]);
         } else {
-            byte = nullBits2(params[start..], attributes[(end - params.len)..]);
+            byte = nullBits2(params[start..], attributes);
         }
 
-        // const byte = nullBits(params[i * 8 ..]);
+        // [1,1,1,1] [1,1,1]
+        // start = 0, end = 8
         try packet_writer.writeUInt8(writer, byte);
     }
 }
 
-pub fn nullBits1(params: []const BinaryParam) u8 {
+pub fn nullBits1(params: []const ?BinaryParam) u8 {
     const final_params = if (params.len > 8) params[0..8] else params;
 
     var byte: u8 = 0;
     var current_bit: u8 = 1;
     for (final_params) |p| {
-        if (p.type_and_flag & 0x80 == 0) {
+        if (p == null) {
             byte |= current_bit;
         }
         current_bit <<= 1;
@@ -155,20 +161,20 @@ pub fn nullBits1(params: []const BinaryParam) u8 {
     return byte;
 }
 
-pub fn nullBits2(params1: []const BinaryParam, params2: []const BinaryParam) u8 {
+pub fn nullBits2(params1: []const ?BinaryParam, params2: []const ?BinaryParam) u8 {
     const final_params = if (params1.len > 8) params1[0..8] else params1;
     const final_attributes = if (params2.len > 8) params2[0..8] else params2;
 
     var byte: u8 = 0;
     var current_bit: u8 = 1;
     for (final_params) |p| {
-        if (p.type_and_flag & 0x80 == 0) {
+        if (p == null) {
             byte |= current_bit;
         }
         current_bit <<= 1;
     }
     for (final_attributes) |p| {
-        if (p.type_and_flag & 0x80 == 0) {
+        if (p == null) {
             byte |= current_bit;
         }
         current_bit <<= 1;
@@ -176,4 +182,80 @@ pub fn nullBits2(params1: []const BinaryParam, params2: []const BinaryParam) u8 
     return byte;
 }
 
-// TODO: test case
+fn nonNullBinaryParam() BinaryParam {
+    return .{
+        .type_and_flag = .{ 0x00, 0x00 },
+        .name = "foo",
+        .raw = "bar",
+    };
+}
+
+test "writeNullBitmap" {
+    var nn = nonNullBinaryParam();
+    var tests = .{
+        .{
+            .params = &.{nn},
+            .attributes = &.{nn},
+            .expected = &[_]u8{0b00000000},
+        },
+        .{
+            .params = &.{ null, null },
+            .attributes = &.{},
+            .expected = &[_]u8{0b00000011},
+        },
+        .{
+            .params = &.{ null, null, null, null, null, null, null, null },
+            .attributes = &.{},
+            .expected = &[_]u8{0b11111111},
+        },
+        .{
+            .params = &.{ null, null, null, null, null, null, null, null, null },
+            .attributes = &.{},
+            .expected = &[_]u8{ 0b11111111, 0b00000001 },
+        },
+        .{
+            .params = &.{},
+            .attributes = &.{ null, null, null, null, null, null, null, null, null },
+            .expected = &[_]u8{ 0b11111111, 0b00000001 },
+        },
+        .{
+            .params = &.{},
+            .attributes = &.{ null, null, null, null, null, null, null, null },
+            .expected = &[_]u8{0b11111111},
+        },
+        .{
+            .params = &.{},
+            .attributes = &.{ null, null, null, null, null, null, null },
+            .expected = &[_]u8{0b01111111},
+        },
+        .{
+            .params = &.{ null, null, null, null, null, null, null, null },
+            .attributes = &.{null},
+            .expected = &[_]u8{ 0b11111111, 0b00000001 },
+        },
+        .{
+            .params = &.{ null, null, null, null, null, null, null },
+            .attributes = &.{ null, null },
+            .expected = &[_]u8{ 0b11111111, 0b00000001 },
+        },
+        .{
+            .params = &.{ null, null, null, null },
+            .attributes = &.{ null, null, null, null },
+            .expected = &[_]u8{0b11111111},
+        },
+        .{
+            .params = &.{ null, null, null, null, null, null, null, null, null },
+            .attributes = &.{ null, null },
+            .expected = &[_]u8{ 0b11111111, 0b00000111 },
+        },
+    };
+
+    inline for (tests) |t| {
+        var buffer: [4]u8 = undefined;
+        var fbs = std.io.fixedBufferStream(&buffer);
+        _ = try writeNullBitmap(t.params, t.attributes, &fbs);
+
+        const written = fbs.buffer[0..fbs.pos];
+        try std.testing.expectEqualSlices(u8, t.expected, written);
+    }
+}

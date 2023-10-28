@@ -14,16 +14,16 @@ test "query database create and drop" {
     var c = Client.init(test_config);
     defer c.deinit();
     {
-        const qr = try c.query(allocator, "CREATE DATABASE IF NOT EXISTS testdb");
+        const qr = try c.query(allocator, "CREATE DATABASE testdb");
         defer qr.deinit(allocator);
         const a = try qr.ok();
         _ = a;
     }
-    // {
-    //     const qr = try c.query(allocator, "DROP DATABASE testdb");
-    //     defer qr.deinit(allocator);
-    //     _ = try qr.ok();
-    // }
+    {
+        const qr = try c.query(allocator, "DROP DATABASE testdb");
+        defer qr.deinit(allocator);
+        _ = try qr.ok();
+    }
 }
 
 test "query syntax error" {
