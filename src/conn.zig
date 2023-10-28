@@ -358,8 +358,8 @@ pub const TextResultSet = struct {
         allocator.free(text_result_set.column_definitions);
     }
 
-    pub fn next(text_result_set: *TextResultSet, allocator: std.mem.Allocator) !?TextResultRow {
-        const packet = try text_result_set.conn.readPacket(allocator);
+    pub fn next(t: *const TextResultSet, allocator: std.mem.Allocator) !?TextResultRow {
+        const packet = try t.conn.readPacket(allocator);
         errdefer packet.deinit(allocator);
 
         return switch (packet.payload[0]) {
@@ -367,21 +367,17 @@ pub const TextResultSet = struct {
                 packet.deinit(allocator);
                 return null;
             },
-            constants.ERR => return packet.asError(text_result_set.conn.client_capabilities),
-            else => TextResultRow.initFromPacket(packet, text_result_set.column_definitions),
+            constants.ERR => return packet.asError(t.conn.client_capabilities),
+            else => return .{
+                .packet = packet,
+                .column_definitions = t.column_definitions,
+            },
         };
     }
 
     pub const TextResultRow = struct {
         packet: Packet,
         column_definitions: []ColumnDefinition41,
-
-        fn initFromPacket(packet: Packet, column_definitions: []ColumnDefinition41) TextResultRow {
-            return .{
-                .packet = packet,
-                .column_definitions = column_definitions,
-            };
-        }
 
         pub fn scan(row: *const TextResultRow, dest: []?[]const u8) void {
             std.debug.assert(row.column_definitions.len == dest.len);

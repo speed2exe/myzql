@@ -4,7 +4,7 @@ const packet_writer = @import("./packet_writer.zig");
 const constants = @import("../constants.zig");
 
 pub const QueryParam = struct {
-    type_and_flag: [2]u8, // MSB: flag, LSB: type
+    type_and_flag: [2]u8, // LSB: type, MSB: flag
     name: []const u8,
     value: []const u8,
 };
@@ -49,23 +49,29 @@ pub const QueryRequest = struct {
     }
 };
 
-fn writeNullBitmap(params: []const ?QueryParam, writer: anytype) !void {
+pub fn writeNullBitmap(params: []const ?QueryParam, writer: anytype) !void {
     const byte_count = (params.len + 7) / 8;
-    var cur_param_index: usize = 0;
-
-    for (0..byte_count) |_| {
-        var byte: u8 = 0; // byte that is going to be send
-        var current_bit: u8 = 1;
-        while (cur_param_index < params.len) {
-            if (params[cur_param_index] == null) {
-                byte |= current_bit;
-            }
-            current_bit <<= 1;
-            cur_param_index += 1;
-        }
-
+    for (0..byte_count) |i| {
+        const byte = nullBits(params[i * 8 ..]);
         try packet_writer.writeUInt8(writer, byte);
     }
+}
+
+pub fn nullBits(params: []const ?QueryParam) u8 {
+    const final_params = if (params.len > 8)
+        params[0..8]
+    else
+        params;
+
+    var byte: u8 = 0;
+    var current_bit: u8 = 1;
+    for (final_params) |p_opt| {
+        if (p_opt == null) {
+            byte |= current_bit;
+        }
+        current_bit <<= 1;
+    }
+    return byte;
 }
 
 test "writeNullBitmap - 1" {
@@ -89,4 +95,23 @@ test "writeNullBitmap - 1" {
     // but it serves a good reference for now
     // could be big endian
     try std.testing.expectEqualSlices(u8, written, &[_]u8{0b00000101});
+}
+
+test "writeNullBitmap - 2" {
+    var params: []const ?QueryParam = &.{
+        null, null, null, null,
+        null, null, null, null,
+        null, null, null, null,
+    };
+
+    var buffer: [4]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buffer);
+    _ = try writeNullBitmap(params, &fbs);
+
+    const written = fbs.buffer[0..fbs.pos];
+
+    // TODO: not sure if this is the expected result
+    // but it serves a good reference for now
+    // could be big endian
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0b11111111, 0b00001111 }, written);
 }

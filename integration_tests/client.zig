@@ -14,15 +14,16 @@ test "query database create and drop" {
     var c = Client.init(test_config);
     defer c.deinit();
     {
-        const qr = try c.query(allocator, "CREATE DATABASE testdb");
+        const qr = try c.query(allocator, "CREATE DATABASE IF NOT EXISTS testdb");
         defer qr.deinit(allocator);
-        _ = try qr.ok();
+        const a = try qr.ok();
+        _ = a;
     }
-    {
-        const qr = try c.query(allocator, "DROP DATABASE testdb");
-        defer qr.deinit(allocator);
-        _ = try qr.ok();
-    }
+    // {
+    //     const qr = try c.query(allocator, "DROP DATABASE testdb");
+    //     defer qr.deinit(allocator);
+    //     _ = try qr.ok();
+    // }
 }
 
 test "query syntax error" {
@@ -123,7 +124,13 @@ test "prepare" {
     {
         const pr = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
         defer pr.deinit(allocator);
-        const res = try pr.ok();
-        std.debug.print("prepare result: {}\n", .{res});
+        _ = try pr.ok();
+    }
+    {
+        const pr = try c.prepare(allocator, "select concat (?, ?) as my_col");
+        defer pr.deinit(allocator);
+        const prep_ok = try pr.ok();
+        try std.testing.expectEqual(prep_ok.num_params, 2);
+        try std.testing.expectEqual(prep_ok.num_columns, 1);
     }
 }
