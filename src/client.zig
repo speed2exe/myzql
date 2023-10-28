@@ -1,7 +1,9 @@
 const std = @import("std");
+const conn = @import("./conn.zig");
 const Config = @import("./config.zig").Config;
-const Conn = @import("./conn.zig").Conn;
-const QueryResult = @import("./conn.zig").QueryResult;
+const Conn = conn.Conn;
+const QueryResult = conn.QueryResult;
+const PrepareResult = conn.PrepareResult;
 
 pub const Client = struct {
     config: Config,
@@ -25,7 +27,12 @@ pub const Client = struct {
 
     pub fn query(client: *Client, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult {
         try client.connectIfNotConnected(allocator);
-        return try client.conn.query(allocator, query_string);
+        return client.conn.query(allocator, query_string);
+    }
+
+    pub fn prepare(client: *Client, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
+        try client.connectIfNotConnected(allocator);
+        return client.conn.prepare(allocator, query_string);
     }
 
     fn connectIfNotConnected(c: *Client, allocator: std.mem.Allocator) !void {

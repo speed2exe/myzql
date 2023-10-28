@@ -116,3 +116,14 @@ test "query text protocol" {
         }
     }
 }
+
+test "prepare" {
+    var c = Client.init(test_config);
+    defer c.deinit();
+    {
+        const pr = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
+        defer pr.deinit(allocator);
+        const res = try pr.ok();
+        std.debug.print("prepare result: {}\n", .{res});
+    }
+}

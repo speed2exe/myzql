@@ -45,10 +45,7 @@ pub const Conn = struct {
         try conn.sendPacketUsingSmallPacketWriter(query_request);
         const response_packet = try conn.readPacket(allocator);
         errdefer response_packet.deinit(allocator);
-        return .{
-            .packet = response_packet,
-            .conn = conn,
-        };
+        return .{ .packet = response_packet, .conn = conn };
     }
 
     pub fn prepare(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
@@ -57,12 +54,8 @@ pub const Conn = struct {
         const prepare_request: PrepareRequest = .{ .query = query_string };
         try conn.sendPacketUsingSmallPacketWriter(prepare_request);
         const response_packet = try conn.readPacket(allocator);
-        defer response_packet.deinit(allocator);
-        return switch (response_packet.payload[0]) {
-            constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
-            constants.OK => _ = .{},
-            else => response_packet.asError(conn.client_capabilities),
-        };
+        errdefer response_packet.deinit(allocator);
+        return .{ .packet = response_packet, .capabilities = conn.client_capabilities };
     }
 
     pub fn close(conn: *Conn) void {
@@ -284,19 +277,17 @@ fn generate_auth_response(
 
 pub const PrepareResult = struct {
     packet: Packet,
-    value: union(enum) {
-        err: ErrorPacket,
-        prep_ok: PrepareOk,
-    },
+    capabilities: u32,
 
     pub fn deinit(p: *const PrepareResult, allocator: std.mem.Allocator) void {
         p.packet.deinit(allocator);
     }
 
     pub fn ok(p: *const PrepareResult) !PrepareOk {
-        return switch (p.value) {
-            .prep_ok => p.value.prep_ok,
-            .err => return p.value.err.asError(),
+        return switch (p.packet.payload[0]) {
+            constants.ERR => ErrorPacket.initFromPacket(false, &p.packet, p.capabilities).asError(),
+            constants.OK => PrepareOk.initFromPacket(&p.packet, p.capabilities),
+            else => p.packet.asError(p.capabilities),
         };
     }
 };
