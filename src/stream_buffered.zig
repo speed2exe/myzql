@@ -78,7 +78,7 @@ pub const Writer = struct {
     pub fn writeToBuffer(w: *Writer, source: []const u8) !void {
         // ensure we have enough space to fill the buffer
         if (source.len > w.available()) {
-            std.log.err(
+            std.log.warn(
                 "not enough space in buffer, required: {}, available: {}",
                 .{ source.len, w.available() },
             );

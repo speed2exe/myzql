@@ -276,7 +276,7 @@ fn generate_auth_response(
             }
         },
         else => {
-            std.log.err("Unsupported auth plugin: {any}\n", .{auth_plugin});
+            std.log.warn("Unsupported auth plugin: {any}\n", .{auth_plugin});
             return error.UnsupportedAuthPlugin;
         },
     }

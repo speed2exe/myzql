@@ -27,7 +27,7 @@ pub const Packet = struct {
         if (packet.payload[0] == constants.ERR) {
             return ErrorPacket.initFromPacket(false, packet, capabilities).asError();
         }
-        std.log.err("unexpected packet: {any}", .{packet.payload[0]});
+        std.log.warn("unexpected packet: {any}", .{packet.payload[0]});
         return error.UnexpectedPacket;
     }
 

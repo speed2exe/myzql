@@ -31,7 +31,7 @@ pub const ErrorPacket = struct {
 
     pub fn asError(err: *const ErrorPacket) error{ErrorPacket} {
         // TODO: better way to do this?
-        std.log.err(
+        std.log.warn(
             "error packet: (code: {d}, message: {s})",
             .{ err.error_code, err.error_message },
         );

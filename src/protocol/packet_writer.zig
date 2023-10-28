@@ -55,7 +55,7 @@ pub fn writeLengthEncodedInteger(writer: anytype, v: u64) !void {
         try writeUInt8(writer, 0xFE);
         try writeUInt64(writer, v);
     } else {
-        std.log.err("Invalid length encoded integer: {any}\n", .{v});
+        std.log.warn("Invalid length encoded integer: {any}\n", .{v});
         return error.InvalidLengthEncodedInteger;
     }
 }

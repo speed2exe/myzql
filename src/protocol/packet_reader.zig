@@ -93,7 +93,7 @@ pub const PacketReader = struct {
     pub fn readNullTerminatedString(packet_reader: *PacketReader) [:0]const u8 {
         const start = packet_reader.pos;
         const i = std.mem.indexOfScalarPos(u8, packet_reader.payload, start, 0) orelse {
-            std.log.err("null terminated string not found\n, pos: {any}, payload: {any}", .{
+            std.log.warn("null terminated string not found\n, pos: {any}, payload: {any}", .{
                 packet_reader.pos,
                 packet_reader.payload,
             });
