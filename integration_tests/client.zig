@@ -11,25 +11,25 @@ test "ping" {
     try c.ping(allocator);
 }
 
-fn expectRows(a: anytype) !@TypeOf(a.rows) {
-    return switch (a) {
+fn expectRows(value: anytype) !@TypeOf(value.rows) {
+    return switch (value) {
         .rows => |rows| rows,
-        else => errorUnexpectedValue(a),
+        else => errorUnexpectedValue(value),
     };
 }
 
-fn expectErr(value: anytype) !void {
-    switch (value) {
-        .err => {},
+fn expectErr(value: anytype) !@TypeOf(value.err) {
+    return switch (value) {
+        .err => |err| err,
         else => return errorUnexpectedValue(value),
-    }
+    };
 }
 
-fn expectOk(value: anytype) !void {
-    switch (value) {
-        .ok => {},
+fn expectOk(value: anytype) !@TypeOf(value.ok) {
+    return switch (value) {
+        .ok => |ok| ok,
         else => return errorUnexpectedValue(value),
-    }
+    };
 }
 
 fn errorUnexpectedValue(value: anytype) error{ ErrorPacket, UnexpectedValue } {
@@ -56,12 +56,12 @@ test "query database create and drop" {
     {
         const qr = try c.query(allocator, "CREATE DATABASE testdb");
         defer qr.deinit(allocator);
-        try expectOk(qr.value);
+        _ = try expectOk(qr.value);
     }
     {
         const qr = try c.query(allocator, "DROP DATABASE testdb");
         defer qr.deinit(allocator);
-        try expectOk(qr.value);
+        _ = try expectOk(qr.value);
     }
 }
 
@@ -71,7 +71,7 @@ test "query syntax error" {
 
     const qr = try c.query(allocator, "garbage query");
     defer qr.deinit(allocator);
-    try expectErr(qr.value);
+    _ = try expectErr(qr.value);
 }
 
 test "query text protocol" {
@@ -151,12 +151,12 @@ test "query text protocol" {
 test "prepare" {
     var c = Client.init(test_config);
     defer c.deinit();
-    {
+    { // prepare no execute
         const pr = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
         defer pr.deinit(allocator);
-        try expectOk(pr.value);
+        _ = try expectOk(pr.value);
     }
-    {
+    { // prepare with params
         const pr = try c.prepare(allocator, "SELECT CONCAT(?, ?) as my_col");
         defer pr.deinit(allocator);
         switch (pr.value) {
