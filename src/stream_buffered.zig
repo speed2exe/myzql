@@ -93,6 +93,7 @@ pub const Writer = struct {
 
 // just a convenience wrapper around Writer
 // for payload with size smaller than 4096 - 4
+// TODO: growable buffer aside from writer
 pub const SmallPacketWriter = struct {
     writer: *Writer,
 

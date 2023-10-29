@@ -13,6 +13,7 @@ const QueryRequest = protocol.text_command.QueryRequest;
 const prepared_statements = protocol.prepared_statements;
 const PrepareRequest = prepared_statements.PrepareRequest;
 const PrepareOk = prepared_statements.PrepareOk;
+const ExecuteRequest = prepared_statements.ExecuteRequest;
 const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
@@ -38,24 +39,57 @@ pub const Conn = struct {
     client_capabilities: u32 = 0,
     sequence_id: u8 = 0,
 
+    // TODO: add options
+    /// caller must consume the result by switching on the result's value
     pub fn query(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult {
         std.debug.assert(conn.state == .connected);
         conn.sequence_id = 0;
         const query_request: QueryRequest = .{ .query = query_string };
         try conn.sendPacketUsingSmallPacketWriter(query_request);
         const response_packet = try conn.readPacket(allocator);
-        errdefer response_packet.deinit(allocator);
-        return .{ .packet = response_packet, .conn = conn };
+        return .{
+            .packet = response_packet,
+            .value = switch (response_packet.payload[0]) {
+                constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
+                constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
+                constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
+                else => .{
+                    .rows = blk: {
+                        var packet_reader = PacketReader.initFromPacket(&response_packet);
+                        const column_count = packet_reader.readLengthEncodedInteger();
+                        var result_set = try TextResultSet.init(allocator, conn, column_count);
+                        break :blk result_set;
+                    },
+                },
+            },
+        };
     }
 
+    // TODO: add options
     pub fn prepare(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
         std.debug.assert(conn.state == .connected);
         conn.sequence_id = 0;
         const prepare_request: PrepareRequest = .{ .query = query_string };
         try conn.sendPacketUsingSmallPacketWriter(prepare_request);
         const response_packet = try conn.readPacket(allocator);
-        errdefer response_packet.deinit(allocator);
-        return .{ .packet = response_packet, .capabilities = conn.client_capabilities };
+        return .{
+            .packet = response_packet,
+            .value = switch (response_packet.payload[0]) {
+                constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
+                constants.OK => .{ .ok = PrepareOk.initFromPacket(&response_packet, conn.client_capabilities) },
+                else => return response_packet.asError(conn.client_capabilities),
+            },
+        };
+    }
+
+    // TODO: add options
+    pub fn execute(conn: *Conn, allocator: std.mem.Allocator, prep_ok: PrepareOk) !ExecuteResponse {
+        std.debug.assert(conn.state == .connected);
+        conn.sequence_id = 0;
+        const execute_request: ExecuteRequest = .{ .prep_ok = &prep_ok };
+        try conn.sendPacketUsingSmallPacketWriter(execute_request);
+        const response_packet = try conn.readPacket(allocator);
+        return .{ .packet = response_packet, .conn = conn };
     }
 
     pub fn close(conn: *Conn) void {
@@ -277,49 +311,30 @@ fn generate_auth_response(
 
 pub const PrepareResult = struct {
     packet: Packet,
-    capabilities: u32,
+    value: union(enum) {
+        ok: PrepareOk,
+        err: ErrorPacket,
+    },
 
     pub fn deinit(p: *const PrepareResult, allocator: std.mem.Allocator) void {
         p.packet.deinit(allocator);
-    }
-
-    pub fn ok(p: *const PrepareResult) !PrepareOk {
-        return switch (p.packet.payload[0]) {
-            constants.ERR => ErrorPacket.initFromPacket(false, &p.packet, p.capabilities).asError(),
-            constants.OK => PrepareOk.initFromPacket(&p.packet, p.capabilities),
-            else => p.packet.asError(p.capabilities),
-        };
     }
 };
 
 pub const QueryResult = struct {
     packet: Packet,
-    conn: *Conn,
+    value: union(enum) {
+        ok: OkPacket,
+        err: ErrorPacket,
+        rows: TextResultSet,
+    },
 
     pub fn deinit(q: *const QueryResult, allocator: std.mem.Allocator) void {
         q.packet.deinit(allocator);
-    }
-
-    pub fn ok(q: *const QueryResult) !OkPacket {
-        return switch (q.packet.payload[0]) {
-            constants.OK => OkPacket.initFromPacket(&q.packet, q.conn.client_capabilities),
-            constants.ERR => ErrorPacket.initFromPacket(false, &q.packet, q.conn.client_capabilities).asError(),
-            constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-            else => error.RowsReturnedNotConsumed,
-        };
-    }
-
-    pub fn rows(q: *const QueryResult, allocator: std.mem.Allocator) !TextResultSet {
-        return switch (q.packet.payload[0]) {
-            constants.OK => error.NoRowsReturned,
-            constants.ERR => ErrorPacket.initFromPacket(false, &q.packet, q.conn.client_capabilities).asError(),
-            constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-            else => {
-                var packet_reader = PacketReader.initFromPacket(&q.packet);
-                const column_count = packet_reader.readLengthEncodedInteger();
-                return TextResultSet.init(allocator, q.conn, column_count);
-            },
-        };
+        switch (q.value) {
+            .rows => |rows| rows.deinit(allocator),
+            else => {},
+        }
     }
 };
 
@@ -350,15 +365,15 @@ pub const TextResultSet = struct {
         return t;
     }
 
-    pub fn deinit(text_result_set: *const TextResultSet, allocator: std.mem.Allocator) void {
-        for (text_result_set.column_packets) |packet| {
+    fn deinit(t: *const TextResultSet, allocator: std.mem.Allocator) void {
+        for (t.column_packets) |packet| {
             packet.deinit(allocator);
         }
-        allocator.free(text_result_set.column_packets);
-        allocator.free(text_result_set.column_definitions);
+        allocator.free(t.column_packets);
+        allocator.free(t.column_definitions);
     }
 
-    pub fn next(t: *const TextResultSet, allocator: std.mem.Allocator) !?TextResultRow {
+    pub fn next(t: *TextResultSet, allocator: std.mem.Allocator) !?TextResultRow {
         const packet = try t.conn.readPacket(allocator);
         errdefer packet.deinit(allocator);
 
@@ -370,19 +385,19 @@ pub const TextResultSet = struct {
             constants.ERR => return packet.asError(t.conn.client_capabilities),
             else => return .{
                 .packet = packet,
-                .column_definitions = t.column_definitions,
+                .text_result_set = t,
             },
         };
     }
 
     pub const TextResultRow = struct {
         packet: Packet,
-        column_definitions: []ColumnDefinition41,
+        text_result_set: *const TextResultSet,
 
-        pub fn scan(row: *const TextResultRow, dest: []?[]const u8) void {
-            std.debug.assert(row.column_definitions.len == dest.len);
+        pub fn scan(r: *const TextResultRow, dest: []?[]const u8) void {
+            std.debug.assert(r.text_result_set.column_definitions.len == dest.len);
 
-            var packet_reader = PacketReader.initFromPacket(&row.packet);
+            var packet_reader = PacketReader.initFromPacket(&r.packet);
             for (dest) |*d| {
                 d.* = blk: {
                     const first_byte = blk2: {
@@ -403,6 +418,23 @@ pub const TextResultSet = struct {
             text_result_set.packet.deinit(allocator);
         }
     };
+};
+
+pub const ExecuteResponse = struct {
+    packet: Packet,
+    conn: *Conn,
+
+    pub fn deinit(e: *const ExecuteResponse, allocator: std.mem.Allocator) void {
+        e.packet.deinit(allocator);
+    }
+
+    pub fn ok(q: *const ExecuteResponse) !OkPacket {
+        return switch (q.packet.payload[0]) {
+            constants.OK => OkPacket.initFromPacket(&q.packet, q.conn.client_capabilities),
+            constants.ERR => ErrorPacket.initFromPacket(false, &q.packet, q.conn.client_capabilities).asError(),
+            else => error.RowsReturnedNotConsumed,
+        };
+    }
 };
 
 // XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))

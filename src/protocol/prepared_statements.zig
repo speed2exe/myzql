@@ -59,7 +59,7 @@ pub const PrepareOk = struct {
     }
 };
 
-pub const ExecuteResquest = struct {
+pub const ExecuteRequest = struct {
     prep_ok: *const PrepareOk,
     flags: u8 = 0, // Cursor type
     iteration_count: u32 = 1, // Always 1
@@ -68,7 +68,7 @@ pub const ExecuteResquest = struct {
     params: []const ?BinaryParam = &.{},
     attributes: []const ?BinaryParam = &.{},
 
-    pub fn write(e: *const ExecuteResquest, writer: anytype, capabilities: u32) !void {
+    pub fn write(e: *const ExecuteRequest, writer: anytype, capabilities: u32) !void {
         std.debug.assert(e.prep_ok.num_params == e.params.len);
 
         try packet_writer.writeUInt8(writer, constants.COM_STMT_EXECUTE);

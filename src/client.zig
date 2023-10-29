@@ -1,6 +1,8 @@
 const std = @import("std");
 const conn = @import("./conn.zig");
 const Config = @import("./config.zig").Config;
+const protocol = @import("./protocol.zig");
+const PrepareOk = protocol.prepared_statements.PrepareOk;
 const Conn = conn.Conn;
 const QueryResult = conn.QueryResult;
 const PrepareResult = conn.PrepareResult;
@@ -33,6 +35,11 @@ pub const Client = struct {
     pub fn prepare(client: *Client, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
         try client.connectIfNotConnected(allocator);
         return client.conn.prepare(allocator, query_string);
+    }
+
+    pub fn execute(client: *Client, allocator: std.mem.Allocator, prep_ok: PrepareOk) !QueryResult {
+        try client.connectIfNotConnected(allocator);
+        return client.conn.execute(allocator, prep_ok);
     }
 
     fn connectIfNotConnected(c: *Client, allocator: std.mem.Allocator) !void {
