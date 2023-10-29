@@ -9,6 +9,10 @@ pub const PacketReader = struct {
         return .{ .payload = packet.payload, .pos = 0 };
     }
 
+    pub fn initFromPayload(payload: []const u8) PacketReader {
+        return .{ .payload = payload, .pos = 0 };
+    }
+
     pub fn peek(packet_reader: *const PacketReader) ?u8 {
         std.debug.assert(packet_reader.payload.len >= packet_reader.pos);
         if (packet_reader.payload.len == packet_reader.pos) {

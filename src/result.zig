@@ -8,7 +8,9 @@ const OkPacket = protocol.generic_response.OkPacket;
 const ErrorPacket = protocol.generic_response.ErrorPacket;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 const Conn = @import("./conn.zig").Conn;
-const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
+const EofPacket = protocol.generic_response.EofPacket;
+const helper = @import("./helper.zig");
+const TextResultSetIter = helper.TextResultSetIter;
 
 pub const QueryResult = struct {
     packet: Packet,
@@ -62,51 +64,46 @@ pub const TextResultSet = struct {
         allocator.free(t.column_definitions);
     }
 
-    pub fn next(t: *TextResultSet, allocator: std.mem.Allocator) !?TextResultRow {
+    pub fn readRow(t: *const TextResultSet, allocator: std.mem.Allocator) !TextResultRow {
         const packet = try t.conn.readPacket(allocator);
-        errdefer packet.deinit(allocator);
-
-        return switch (packet.payload[0]) {
-            constants.EOF => {
-                packet.deinit(allocator);
-                return null;
-            },
-            constants.ERR => return packet.asError(t.conn.client_capabilities),
-            else => return .{
-                .packet = packet,
-                .text_result_set = t,
+        return .{
+            .text_result_set = t,
+            .packet = packet,
+            .value = switch (packet.payload[0]) {
+                constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &packet, t.conn.client_capabilities) },
+                constants.EOF => .{ .eof = EofPacket.initFromPacket(&packet, t.conn.client_capabilities) },
+                else => .{ .raw = packet.payload },
             },
         };
     }
 
-    pub const TextResultRow = struct {
-        packet: Packet,
-        text_result_set: *const TextResultSet,
+    pub fn iter(t: *const TextResultSet) TextResultSetIter {
+        return .{ .text_result_set = t };
+    }
+};
 
-        pub fn scan(r: *const TextResultRow, dest: []?[]const u8) void {
-            std.debug.assert(r.text_result_set.column_definitions.len == dest.len);
+pub const TextResultRow = struct {
+    text_result_set: *const TextResultSet,
+    packet: Packet,
+    value: union(enum) {
+        err: ErrorPacket,
+        eof: EofPacket,
 
-            var packet_reader = PacketReader.initFromPacket(&r.packet);
-            for (dest) |*d| {
-                d.* = blk: {
-                    const first_byte = blk2: {
-                        const byte_opt = packet_reader.peek();
-                        std.debug.assert(byte_opt != null);
-                        break :blk2 byte_opt.?;
-                    };
-                    if (first_byte == constants.TEXT_RESULT_ROW_NULL) {
-                        packet_reader.forward_one();
-                        break :blk null;
-                    }
-                    break :blk packet_reader.readLengthEncodedString();
-                };
-            }
+        //https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query_response_text_resultset_row.html
+        raw: []const u8,
+    },
+
+    pub fn scan(t: *const TextResultRow, dest: []?[]const u8) !void {
+        switch (t.value) {
+            .err => |err| return err.asError(),
+            .eof => |eof| return eof.asError(),
+            .raw => try helper.scanTextResultRow(t.value.raw, dest),
         }
+    }
 
-        pub fn deinit(text_result_set: *const TextResultRow, allocator: std.mem.Allocator) void {
-            text_result_set.packet.deinit(allocator);
-        }
-    };
+    pub fn deinit(text_result_set: *const TextResultRow, allocator: std.mem.Allocator) void {
+        text_result_set.packet.deinit(allocator);
+    }
 };
 
 pub const PrepareResult = struct {
@@ -131,8 +128,8 @@ pub const ExecuteResponse = struct {
 
     pub fn ok(q: *const ExecuteResponse) !OkPacket {
         return switch (q.packet.payload[0]) {
-            constants.OK => OkPacket.initFromPacket(&q.packet, q.conn.client_capabilities),
-            constants.ERR => ErrorPacket.initFromPacket(false, &q.packet, q.conn.client_capabilities).asError(),
+            constants.OK => OkPacket.initFromPacket(q.packet, q.conn.client_capabilities),
+            constants.ERR => ErrorPacket.initFromPacket(false, q.packet, q.conn.client_capabilities).asError(),
             else => error.RowsReturnedNotConsumed,
         };
     }

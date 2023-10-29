@@ -88,7 +88,6 @@ pub const OkPacket = struct {
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_eof_packet.html
 pub const EofPacket = struct {
-    header: u8,
     status_flags: ?u16,
     warnings: ?u16,
 
@@ -109,5 +108,14 @@ pub const EofPacket = struct {
 
         std.debug.assert(reader.finished());
         return eof_packet;
+    }
+
+    pub fn asError(p: *const EofPacket) error{EofPacket} {
+        // TODO: better way to do this?
+        std.log.warn(
+            "eof packet: (status_flags: {any}, warnings: {any})",
+            .{ p.status_flags, p.warnings },
+        );
+        return error.EofPacket;
     }
 };
