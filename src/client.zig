@@ -4,8 +4,9 @@ const Config = @import("./config.zig").Config;
 const protocol = @import("./protocol.zig");
 const PrepareOk = protocol.prepared_statements.PrepareOk;
 const Conn = conn.Conn;
-const QueryResult = conn.QueryResult;
-const PrepareResult = conn.PrepareResult;
+const result = @import("./result.zig");
+const QueryResult = result.QueryResult;
+const PrepareResult = result.PrepareResult;
 
 pub const Client = struct {
     config: Config,
