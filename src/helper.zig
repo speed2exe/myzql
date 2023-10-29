@@ -2,7 +2,7 @@
 const std = @import("std");
 const constants = @import("./constants.zig");
 const result = @import("./result.zig");
-const TextResultSet = result.TextResultSet;
+const ResultSet = result.ResultSet;
 const TextResultRow = result.TextResultRow;
 
 const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
@@ -25,7 +25,7 @@ pub fn scanTextResultRow(raw: []const u8, dest: []?[]const u8) !void {
 }
 
 pub const TextResultSetIter = struct {
-    text_result_set: *const TextResultSet,
+    text_result_set: *const ResultSet(TextResultRow),
 
     pub fn next(i: *const TextResultSetIter, allocator: std.mem.Allocator) !?TextResultRow {
         const row = try i.text_result_set.readRow(allocator);

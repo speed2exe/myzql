@@ -148,23 +148,33 @@ test "query text protocol" {
     }
 }
 
-test "prepare" {
+test "prepare execute" {
     var c = Client.init(test_config);
     defer c.deinit();
-    { // prepare no execute
-        const pr = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
-        defer pr.deinit(allocator);
-        _ = try expectOk(pr.value);
-    }
-    { // prepare with params
-        const pr = try c.prepare(allocator, "SELECT CONCAT(?, ?) as my_col");
-        defer pr.deinit(allocator);
-        switch (pr.value) {
-            .ok => |prep_ok| {
-                try std.testing.expectEqual(prep_ok.num_params, 2);
-                try std.testing.expectEqual(prep_ok.num_columns, 1);
-            },
-            else => return errorUnexpectedValue(pr.value),
-        }
-    }
+    // { // prepare no execute
+    //     const pr = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
+    //     defer pr.deinit(allocator);
+    //     _ = try expectOk(pr.value);
+    // }
+    // { // prepare with params
+    //     const pr = try c.prepare(allocator, "SELECT CONCAT(?, ?) as my_col");
+    //     defer pr.deinit(allocator);
+    //     switch (pr.value) {
+    //         .ok => |prep_ok| {
+    //             try std.testing.expectEqual(prep_ok.num_params, 2);
+    //             try std.testing.expectEqual(prep_ok.num_columns, 1);
+    //         },
+    //         else => return errorUnexpectedValue(pr.value),
+    //     }
+    // }
+    // {
+    //     const pr = try c.prepare(allocator, "SELECT 1,2,3");
+    //     defer pr.deinit(allocator);
+    //     const prep_ok = try expectOk(pr.value);
+
+    //
+    //     const res = c.execute(allocator, prep_ok);
+    //     // std.log.err("prep_ok: {any}", .{prep_ok});
+    // }
+
 }

@@ -7,6 +7,8 @@ const Conn = conn.Conn;
 const result = @import("./result.zig");
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
+const ExecuteResult = result.ExecuteResponse;
+const TextResultRow = result.TextResultRow;
 
 pub const Client = struct {
     config: Config,
@@ -28,7 +30,7 @@ pub const Client = struct {
         try client.conn.ping(allocator, &client.config);
     }
 
-    pub fn query(client: *Client, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult {
+    pub fn query(client: *Client, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult(TextResultRow) {
         try client.connectIfNotConnected(allocator);
         return client.conn.query(allocator, query_string);
     }
@@ -38,7 +40,7 @@ pub const Client = struct {
         return client.conn.prepare(allocator, query_string);
     }
 
-    pub fn execute(client: *Client, allocator: std.mem.Allocator, prep_ok: PrepareOk) !QueryResult {
+    pub fn execute(client: *Client, allocator: std.mem.Allocator, prep_ok: PrepareOk) !ExecuteResult {
         try client.connectIfNotConnected(allocator);
         return client.conn.execute(allocator, prep_ok);
     }

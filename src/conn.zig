@@ -22,8 +22,9 @@ const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
 const result = @import("./result.zig");
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
-const TextResultSet = result.TextResultSet;
 const ExecuteResponse = result.ExecuteResponse;
+const TextResultRow = result.TextResultRow;
+const ResultSet = result.ResultSet;
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -45,7 +46,7 @@ pub const Conn = struct {
 
     // TODO: add options
     /// caller must consume the result by switching on the result's value
-    pub fn query(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult {
+    pub fn query(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult(TextResultRow) {
         std.debug.assert(conn.state == .connected);
         conn.sequence_id = 0;
         const query_request: QueryRequest = .{ .query = query_string };
@@ -61,7 +62,9 @@ pub const Conn = struct {
                     .rows = blk: {
                         var packet_reader = PacketReader.initFromPacket(&response_packet);
                         const column_count = packet_reader.readLengthEncodedInteger();
-                        var result_set = try TextResultSet.init(allocator, conn, column_count);
+
+                        var result_set = try ResultSet(TextResultRow).init(allocator, conn, column_count);
+
                         break :blk result_set;
                     },
                 },
