@@ -110,6 +110,30 @@ pub const TextResultRow = struct {
     }
 };
 
+pub const BinaryResultRow = struct {
+    text_result_set: *const ResultSet(BinaryResultRow),
+    packet: Packet,
+    value: union(enum) {
+        err: ErrorPacket,
+        eof: EofPacket,
+        raw: []const u8,
+    },
+
+    const Options = struct {};
+
+    pub fn scanStruct(comptime T: type, t: *const BinaryResultRow, dest: ?*const T, options: Options) !void {
+        switch (t.value) {
+            .err => |err| return err.asError(),
+            .eof => |eof| return eof.asError(),
+            .raw => try helper.scanTextBinaryRow(T, t.value.raw, dest, options),
+        }
+    }
+
+    pub fn deinit(text_result_set: *const TextResultRow, allocator: std.mem.Allocator) void {
+        text_result_set.packet.deinit(allocator);
+    }
+};
+
 pub const PrepareResult = struct {
     packet: Packet,
     value: union(enum) {
@@ -121,56 +145,3 @@ pub const PrepareResult = struct {
         p.packet.deinit(allocator);
     }
 };
-
-pub const ExecuteResponse = struct {
-    packet: Packet,
-    value: union(enum) {
-        ok: OkPacket,
-        err: ErrorPacket,
-        // rows: BinaryResultSet,
-    },
-
-    pub fn deinit(e: *const ExecuteResponse, allocator: std.mem.Allocator) void {
-        e.packet.deinit(allocator);
-        switch (e.value) {
-            .rows => |rows| rows.deinit(allocator),
-            else => {},
-        }
-    }
-};
-
-// pub const BinaryResultSet = struct {
-//     conn: *Conn,
-//     column_packets: []Packet,
-//     column_definitions: []ColumnDefinition41,
-//
-//     pub fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !BinaryResultSet {
-//         var t: BinaryResultSet = undefined;
-//
-//         t.column_packets = try allocator.alloc(Packet, column_count);
-//         errdefer allocator.free(t.column_packets);
-//         t.column_definitions = try allocator.alloc(ColumnDefinition41, column_count);
-//         errdefer allocator.free(t.column_definitions);
-//         for (0..column_count) |i| {
-//             const packet = try conn.readPacket(allocator);
-//             errdefer packet.deinit(allocator);
-//             t.column_packets[i] = packet;
-//             t.column_definitions[i] = ColumnDefinition41.initFromPacket(&packet);
-//         }
-//
-//         const eof_packet = try conn.readPacket(allocator);
-//         defer eof_packet.deinit(allocator);
-//         std.debug.assert(eof_packet.payload[0] == constants.EOF);
-//
-//         t.conn = conn;
-//         return t;
-//     }
-//
-//     pub fn deinit(b: *const BinaryResultSet, allocator: std.mem.Allocator) void {
-//         for (b.column_packets) |packet| {
-//             packet.deinit(allocator);
-//         }
-//         allocator.free(b.column_packets);
-//         allocator.free(b.column_definitions);
-//     }
-// };

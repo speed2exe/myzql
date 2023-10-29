@@ -4,7 +4,7 @@ const constants = @import("./constants.zig");
 const result = @import("./result.zig");
 const ResultSet = result.ResultSet;
 const TextResultRow = result.TextResultRow;
-
+const Options = result.BinaryResultRow.Options;
 const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
 
 pub fn scanTextResultRow(raw: []const u8, dest: []?[]const u8) !void {
@@ -22,6 +22,13 @@ pub fn scanTextResultRow(raw: []const u8, dest: []?[]const u8) !void {
             break :blk packet_reader.readLengthEncodedString();
         };
     }
+}
+
+pub fn scanBinaryResultRow(comptime T: type, raw: []const u8, dest: *T, options: Options) !void {
+    _ = options;
+    _ = dest;
+    _ = raw;
+    @panic("not implemented");
 }
 
 pub const TextResultSetIter = struct {

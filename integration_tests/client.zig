@@ -172,9 +172,8 @@ test "prepare execute" {
     //     defer pr.deinit(allocator);
     //     const prep_ok = try expectOk(pr.value);
 
-    //
-    //     const res = c.execute(allocator, prep_ok);
+    //     const res = try c.execute(allocator, prep_ok);
+    //     _ = res;
     //     // std.log.err("prep_ok: {any}", .{prep_ok});
     // }
-
 }

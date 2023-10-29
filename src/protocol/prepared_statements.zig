@@ -8,7 +8,7 @@ const PacketReader = @import("./packet_reader.zig").PacketReader;
 pub const BinaryParam = struct {
     type_and_flag: [2]u8, // LSB: type, MSB: flag
     name: []const u8,
-    raw: []const u8,
+    raw: ?[]const u8,
 };
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query.html
@@ -60,15 +60,16 @@ pub const PrepareOk = struct {
 };
 
 pub const ExecuteRequest = struct {
+    capabilities: u32,
     prep_ok: *const PrepareOk,
     flags: u8 = 0, // Cursor type
     iteration_count: u32 = 1, // Always 1
     new_params_bind_flag: u8 = 1,
 
-    params: []const ?BinaryParam = &.{},
-    attributes: []const ?BinaryParam = &.{},
+    params: []const BinaryParam = &.{},
+    attributes: []const BinaryParam = &.{},
 
-    pub fn write(e: *const ExecuteRequest, writer: anytype, capabilities: u32) !void {
+    pub fn write(e: *const ExecuteRequest, writer: anytype) !void {
         std.debug.assert(e.prep_ok.num_params == e.params.len);
 
         try packet_writer.writeUInt8(writer, constants.COM_STMT_EXECUTE);
@@ -76,8 +77,8 @@ pub const ExecuteRequest = struct {
         try packet_writer.writeUInt8(writer, e.flags);
         try packet_writer.writeUInt32(writer, e.iteration_count);
 
-        const has_attributes_to_write = (capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) and e.attributes.len > 0;
-        if (e.prep_ok.num_params > 0 || has_attributes_to_write) {
+        const has_attributes_to_write = (e.capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) and e.attributes.len > 0;
+        if (e.prep_ok.num_params > 0 or has_attributes_to_write) {
             if (has_attributes_to_write) {
                 try packet_writer.writeLengthEncodedInteger(writer, e.attributes.len + e.prep_ok.num_params);
             }
@@ -95,14 +96,14 @@ pub const ExecuteRequest = struct {
             try packet_writer.writeLengthEncodedInteger(writer, e.new_params_bind_flag);
             if (e.new_params_bind_flag > 0) {
                 for (e.params) |b| {
-                    try writer.write(b.type_and_flag);
-                    if (capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) {
+                    try writer.write(&b.type_and_flag);
+                    if (e.capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) {
                         try packet_writer.writeLengthEncodedString(writer, b.name);
                     }
                 }
                 if (has_attributes_to_write) {
                     for (e.attributes) |b| {
-                        try writer.write(b.type_and_flag);
+                        try writer.write(&b.type_and_flag);
                         try packet_writer.writeLengthEncodedString(writer, b.name);
                     }
                 }
@@ -121,13 +122,13 @@ pub const ExecuteRequest = struct {
     }
 };
 
-fn writeBinaryParam(param: ?BinaryParam, writer: anytype) !void {
+fn writeBinaryParam(param: BinaryParam, writer: anytype) !void {
     _ = writer;
     _ = param;
     @panic("TODO");
 }
 
-fn writeNullBitmap(params: []const ?BinaryParam, attributes: []const ?BinaryParam, writer: anytype) !void {
+fn writeNullBitmap(params: []const BinaryParam, attributes: []const BinaryParam, writer: anytype) !void {
     const byte_count = (params.len + attributes.len + 7) / 8;
     for (0..byte_count) |i| {
         const start = i * 8;
@@ -147,13 +148,13 @@ fn writeNullBitmap(params: []const ?BinaryParam, attributes: []const ?BinaryPara
     }
 }
 
-pub fn nullBits1(params: []const ?BinaryParam) u8 {
+pub fn nullBits1(params: []const BinaryParam) u8 {
     const final_params = if (params.len > 8) params[0..8] else params;
 
     var byte: u8 = 0;
     var current_bit: u8 = 1;
     for (final_params) |p| {
-        if (p == null) {
+        if (p.raw == null) {
             byte |= current_bit;
         }
         current_bit <<= 1;
@@ -161,20 +162,20 @@ pub fn nullBits1(params: []const ?BinaryParam) u8 {
     return byte;
 }
 
-pub fn nullBits2(params1: []const ?BinaryParam, params2: []const ?BinaryParam) u8 {
+pub fn nullBits2(params1: []const BinaryParam, params2: []const BinaryParam) u8 {
     const final_params = if (params1.len > 8) params1[0..8] else params1;
     const final_attributes = if (params2.len > 8) params2[0..8] else params2;
 
     var byte: u8 = 0;
     var current_bit: u8 = 1;
     for (final_params) |p| {
-        if (p == null) {
+        if (p.raw == null) {
             byte |= current_bit;
         }
         current_bit <<= 1;
     }
     for (final_attributes) |p| {
-        if (p == null) {
+        if (p.raw == null) {
             byte |= current_bit;
         }
         current_bit <<= 1;
@@ -190,8 +191,17 @@ fn nonNullBinaryParam() BinaryParam {
     };
 }
 
+fn nullBinaryParam() BinaryParam {
+    return .{
+        .type_and_flag = .{ 0x00, 0x00 },
+        .name = "hello",
+        .raw = null,
+    };
+}
+
 test "writeNullBitmap" {
     var nn = nonNullBinaryParam();
+    var n = nullBinaryParam();
     var tests = .{
         .{
             .params = &.{nn},
@@ -199,53 +209,53 @@ test "writeNullBitmap" {
             .expected = &[_]u8{0b00000000},
         },
         .{
-            .params = &.{ null, null },
+            .params = &.{ n, n },
             .attributes = &.{},
             .expected = &[_]u8{0b00000011},
         },
         .{
-            .params = &.{ null, null, null, null, null, null, null, null },
+            .params = &.{ n, n, n, n, n, n, n, n },
             .attributes = &.{},
             .expected = &[_]u8{0b11111111},
         },
         .{
-            .params = &.{ null, null, null, null, null, null, null, null, null },
+            .params = &.{ n, n, n, n, n, n, n, n, n },
             .attributes = &.{},
             .expected = &[_]u8{ 0b11111111, 0b00000001 },
         },
         .{
             .params = &.{},
-            .attributes = &.{ null, null, null, null, null, null, null, null, null },
+            .attributes = &.{ n, n, n, n, n, n, n, n, n },
             .expected = &[_]u8{ 0b11111111, 0b00000001 },
         },
         .{
             .params = &.{},
-            .attributes = &.{ null, null, null, null, null, null, null, null },
+            .attributes = &.{ n, n, n, n, n, n, n, n },
             .expected = &[_]u8{0b11111111},
         },
         .{
             .params = &.{},
-            .attributes = &.{ null, null, null, null, null, null, null },
+            .attributes = &.{ n, n, n, n, n, n, n },
             .expected = &[_]u8{0b01111111},
         },
         .{
-            .params = &.{ null, null, null, null, null, null, null, null },
-            .attributes = &.{null},
+            .params = &.{ n, n, n, n, n, n, n, n },
+            .attributes = &.{n},
             .expected = &[_]u8{ 0b11111111, 0b00000001 },
         },
         .{
-            .params = &.{ null, null, null, null, null, null, null },
-            .attributes = &.{ null, null },
+            .params = &.{ n, n, n, n, n, n, n },
+            .attributes = &.{ n, n },
             .expected = &[_]u8{ 0b11111111, 0b00000001 },
         },
         .{
-            .params = &.{ null, null, null, null },
-            .attributes = &.{ null, null, null, null },
+            .params = &.{ n, n, n, n },
+            .attributes = &.{ n, n, n, n },
             .expected = &[_]u8{0b11111111},
         },
         .{
-            .params = &.{ null, null, null, null, null, null, null, null, null },
-            .attributes = &.{ null, null },
+            .params = &.{ n, n, n, n, n, n, n, n, n },
+            .attributes = &.{ n, n },
             .expected = &[_]u8{ 0b11111111, 0b00000111 },
         },
     };
