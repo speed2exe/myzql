@@ -46,4 +46,42 @@ pub const TextResultSetIter = struct {
             else => row,
         };
     }
+
+    pub fn collect(iter: *const TextResultSetIter, allocator: std.mem.Allocator) !TableTexts {
+        var row_acc = std.ArrayList(TextResultRow).init(allocator);
+        while (try iter.next(allocator)) |row| {
+            var new_row_ptr = try row_acc.addOne();
+            new_row_ptr.* = row;
+        }
+
+        const num_cols = iter.text_result_set.column_definitions.len;
+        var rows = try allocator.alloc([]?[]const u8, row_acc.items.len);
+        var elems = try allocator.alloc(?[]const u8, row_acc.items.len * num_cols);
+        for (row_acc.items, 0..) |row, i| {
+            const dest_row = elems[i * num_cols .. (i + 1) * num_cols];
+            try row.scan(dest_row);
+            rows[i] = dest_row;
+        }
+
+        return .{
+            .result_rows = try row_acc.toOwnedSlice(),
+            .elems = elems,
+            .rows = rows,
+        };
+    }
+};
+
+pub const TableTexts = struct {
+    result_rows: []TextResultRow,
+    elems: []?[]const u8,
+    rows: [][]?[]const u8,
+
+    pub fn deinit(t: *const TableTexts, allocator: std.mem.Allocator) void {
+        for (t.result_rows) |row| {
+            row.deinit(allocator);
+        }
+        allocator.free(t.result_rows);
+        allocator.free(t.rows);
+        allocator.free(t.elems);
+    }
 };

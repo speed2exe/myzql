@@ -98,6 +98,7 @@ pub const TextResultRow = struct {
     },
 
     pub fn scan(t: *const TextResultRow, dest: []?[]const u8) !void {
+        std.debug.assert(dest.len == t.text_result_set.column_definitions.len);
         switch (t.value) {
             .err => |err| return err.asError(),
             .eof => |eof| return eof.asError(),

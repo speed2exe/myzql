@@ -148,6 +148,32 @@ test "query text protocol" {
     }
 }
 
+test "query text table" {
+    var c = Client.init(test_config);
+    defer c.deinit();
+
+    {
+        const qr = try c.query(allocator, "SELECT 1,2,3 UNION ALL SELECT 4,null,6");
+        defer qr.deinit(allocator);
+        const iter = (try expectRows(qr.value)).iter();
+        const table = try iter.collect(allocator);
+        defer table.deinit(allocator);
+        try std.testing.expectEqual(table.rows.len, 2);
+        {
+            var expected = [_]?[]const u8{ "1", "2", "3", "4", null, "6" };
+            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table.elems);
+        }
+        {
+            var expected = [_]?[]const u8{ "1", "2", "3" };
+            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table.rows[0]);
+        }
+        {
+            var expected = [_]?[]const u8{ "4", null, "6" };
+            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table.rows[1]);
+        }
+    }
+}
+
 test "prepare execute" {
     var c = Client.init(test_config);
     defer c.deinit();
