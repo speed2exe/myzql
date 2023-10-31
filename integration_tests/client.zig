@@ -171,9 +171,10 @@ test "prepare execute" {
     //     const pr = try c.prepare(allocator, "SELECT 1,2,3");
     //     defer pr.deinit(allocator);
     //     const prep_ok = try expectOk(pr.value);
+    //     _ = prep_ok;
 
-    //     const res = try c.execute(allocator, prep_ok);
-    //     _ = res;
+    //     // const res = try c.execute(allocator, prep_ok);
+    //     // _ = res;
     //     // std.log.err("prep_ok: {any}", .{prep_ok});
     // }
 }

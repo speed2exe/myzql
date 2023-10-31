@@ -281,7 +281,7 @@ pub const Conn = struct {
     pub fn readPacket(conn: *Conn, allocator: std.mem.Allocator) !Packet {
         std.debug.assert(conn.state == .connected);
         const packet = try Packet.initFromReader(allocator, &conn.reader);
-        try conn.updateSequenceId(packet);
+        conn.sequence_id = packet.sequence_id + 1;
         return packet;
     }
 
@@ -294,11 +294,6 @@ pub const Conn = struct {
 
     fn hasCapability(conn: *Conn, capability: u32) bool {
         return conn.server_capabilities & capability > 0;
-    }
-
-    fn updateSequenceId(conn: *Conn, packet: Packet) !void {
-        std.debug.assert(packet.sequence_id == conn.sequence_id);
-        conn.sequence_id += 1;
     }
 
     fn generateSequenceId(conn: *Conn) u8 {
