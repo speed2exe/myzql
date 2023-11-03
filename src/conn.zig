@@ -25,6 +25,7 @@ const PrepareResult = result.PrepareResult;
 const TextResultRow = result.TextResultRow;
 const BinaryResultRow = result.BinaryResultRow;
 const ResultSet = result.ResultSet;
+const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -93,21 +94,23 @@ pub const Conn = struct {
         conn.sequence_id = 0;
         const execute_request: ExecuteRequest = .{ .prep_ok = &prep_ok, .capabilities = conn.client_capabilities };
         try conn.sendPacketUsingSmallPacketWriter(execute_request);
+
+        if (prep_ok.num_columns > 0) {
+            return .{
+                .packet = .{ .payload_length = 0, .sequence_id = 0, .payload = &.{} }, // create phantom packet to make the result type happy
+                .value = .{
+                    .rows = try ResultSet(BinaryResultRow).init(allocator, conn, prep_ok.num_columns),
+                },
+            };
+        }
+
         const response_packet = try conn.readPacket(allocator);
         return .{
             .packet = response_packet,
             .value = switch (response_packet.payload[0]) {
                 constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
                 constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
-                constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-                else => .{
-                    .rows = blk: {
-                        var packet_reader = PacketReader.initFromPacket(&response_packet);
-                        const column_count = packet_reader.readLengthEncodedInteger();
-                        var result_set = try ResultSet(BinaryResultRow).init(allocator, conn, column_count);
-                        break :blk result_set;
-                    },
-                },
+                else => return response_packet.asError(conn.client_capabilities),
             },
         };
     }

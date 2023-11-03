@@ -79,10 +79,10 @@ test "query text protocol" {
     defer c.deinit();
 
     {
-        const qr = try c.query(allocator, "SELECT 1");
-        defer qr.deinit(allocator);
+        const query_res = try c.query(allocator, "SELECT 1");
+        defer query_res.deinit(allocator);
 
-        const rows = (try expectRows(qr.value)).iter();
+        const rows = (try expectRows(query_res.value)).iter();
         var dest = [_]?[]const u8{undefined};
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
@@ -91,9 +91,9 @@ test "query text protocol" {
         }
     }
     {
-        const qr = try c.query(allocator, "SELECT 3,4");
-        defer qr.deinit(allocator);
-        const rows = (try expectRows(qr.value)).iter();
+        const query_res = try c.query(allocator, "SELECT 3,4");
+        defer query_res.deinit(allocator);
+        const rows = (try expectRows(query_res.value)).iter();
 
         var dest = [_]?[]const u8{ undefined, undefined };
         while (try rows.next(allocator)) |row| {
@@ -104,9 +104,9 @@ test "query text protocol" {
         }
     }
     {
-        const qr = try c.query(allocator, "SELECT 5,null,7");
-        defer qr.deinit(allocator);
-        const rows = (try expectRows(qr.value)).iter();
+        const query_res = try c.query(allocator, "SELECT 5,null,7");
+        defer query_res.deinit(allocator);
+        const rows = (try expectRows(query_res.value)).iter();
         var dest = [_]?[]const u8{ undefined, undefined, undefined };
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
@@ -117,9 +117,9 @@ test "query text protocol" {
         }
     }
     {
-        const qr = try c.query(allocator, "SELECT 8,9 UNION ALL SELECT 10,11");
-        defer qr.deinit(allocator);
-        const rows = try expectRows(qr.value);
+        const query_res = try c.query(allocator, "SELECT 8,9 UNION ALL SELECT 10,11");
+        defer query_res.deinit(allocator);
+        const rows = try expectRows(query_res.value);
 
         var dest = [_]?[]const u8{ undefined, undefined };
         {
@@ -153,9 +153,9 @@ test "query text table" {
     defer c.deinit();
 
     {
-        const qr = try c.query(allocator, "SELECT 1,2,3 UNION ALL SELECT 4,null,6");
-        defer qr.deinit(allocator);
-        const iter = (try expectRows(qr.value)).iter();
+        const query_res = try c.query(allocator, "SELECT 1,2,3 UNION ALL SELECT 4,null,6");
+        defer query_res.deinit(allocator);
+        const iter = (try expectRows(query_res.value)).iter();
         const table = try iter.collect(allocator);
         defer table.deinit(allocator);
         try std.testing.expectEqual(table.rows.len, 2);
@@ -178,19 +178,19 @@ test "prepare check" {
     var c = Client.init(test_config);
     defer c.deinit();
     { // prepare no execute
-        const pr = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
-        defer pr.deinit(allocator);
-        _ = try expectOk(pr.value);
+        const prep_res = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
+        defer prep_res.deinit(allocator);
+        _ = try expectOk(prep_res.value);
     }
     { // prepare with params
-        const pr = try c.prepare(allocator, "SELECT CONCAT(?, ?) as my_col");
-        defer pr.deinit(allocator);
-        switch (pr.value) {
+        const prep_res = try c.prepare(allocator, "SELECT CONCAT(?, ?) as my_col");
+        defer prep_res.deinit(allocator);
+        switch (prep_res.value) {
             .ok => |prep_ok| {
                 try std.testing.expectEqual(prep_ok.num_params, 2);
                 try std.testing.expectEqual(prep_ok.num_columns, 1);
             },
-            else => return errorUnexpectedValue(pr.value),
+            else => return errorUnexpectedValue(prep_res.value),
         }
     }
 }
@@ -199,20 +199,20 @@ test "prepare execute - 1" {
     var c = Client.init(test_config);
     defer c.deinit();
     {
-        const pr = try c.prepare(allocator, "CREATE DATABASE testdb2");
-        defer pr.deinit(allocator);
-        const prep_ok = try expectOk(pr.value);
-        const qr = try c.execute(allocator, prep_ok);
-        defer qr.deinit(allocator);
-        _ = try expectOk(qr.value);
+        const prep_res = try c.prepare(allocator, "CREATE DATABASE testdb2");
+        defer prep_res.deinit(allocator);
+        const prep_ok = try expectOk(prep_res.value);
+        const query_res = try c.execute(allocator, prep_ok);
+        defer query_res.deinit(allocator);
+        _ = try expectOk(query_res.value);
     }
     {
-        const pr = try c.prepare(allocator, "DROP DATABASE testdb2");
-        defer pr.deinit(allocator);
-        const prep_ok = try expectOk(pr.value);
-        const qr = try c.execute(allocator, prep_ok);
-        defer qr.deinit(allocator);
-        _ = try expectOk(qr.value);
+        const prep_res = try c.prepare(allocator, "DROP DATABASE testdb2");
+        defer prep_res.deinit(allocator);
+        const prep_ok = try expectOk(prep_res.value);
+        const query_res = try c.execute(allocator, prep_ok);
+        defer query_res.deinit(allocator);
+        _ = try expectOk(query_res.value);
     }
 }
 
@@ -220,44 +220,45 @@ test "prepare execute - 2" {
     var c = Client.init(test_config);
     defer c.deinit();
 
-    const pr1 = try c.prepare(allocator, "CREATE DATABASE testdb3");
-    defer pr1.deinit(allocator);
-    const prep_ok_1 = try expectOk(pr1.value);
+    const prep_res_1 = try c.prepare(allocator, "CREATE DATABASE testdb3");
+    defer prep_res_1.deinit(allocator);
+    const prep_ok_1 = try expectOk(prep_res_1.value);
 
-    const pr2 = try c.prepare(allocator, "DROP DATABASE testdb3");
-    defer pr2.deinit(allocator);
-    const prep_ok_2 = try expectOk(pr2.value);
+    const prep_res_2 = try c.prepare(allocator, "DROP DATABASE testdb3");
+    defer prep_res_2.deinit(allocator);
+    const prep_ok_2 = try expectOk(prep_res_2.value);
 
     {
-        const qr = try c.execute(allocator, prep_ok_1);
-        defer qr.deinit(allocator);
-        _ = try expectOk(qr.value);
+        const query_res = try c.execute(allocator, prep_ok_1);
+        defer query_res.deinit(allocator);
+        _ = try expectOk(query_res.value);
     }
     {
-        const qr = try c.execute(allocator, prep_ok_2);
-        defer qr.deinit(allocator);
-        _ = try expectOk(qr.value);
+        const query_res = try c.execute(allocator, prep_ok_2);
+        defer query_res.deinit(allocator);
+        _ = try expectOk(query_res.value);
     }
 }
 
-// test "prepare execute with result" {
-//     var c = Client.init(test_config);
-//     defer c.deinit();
-//
-//     {
-//         const query =
-//             \\SELECT 42,null,'hello'
-//         ;
-//         const pr = try c.prepare(allocator, query);
-//         defer pr.deinit(allocator);
-//         const prep_ok = try expectOk(pr.value);
-//         const qr = try c.execute(allocator, prep_ok);
-//         const rows = (try expectRows(qr.value)).iter();
-//         while (try rows.next(allocator)) |row| {
-//             std.debug.print("rows.next: {any}\n", .{row});
-//             defer row.deinit(allocator);
-//         }
-//     }
-// }
+test "prepare execute with result" {
+    var c = Client.init(test_config);
+    defer c.deinit();
+
+    {
+        const query =
+            \\SELECT 42,null,'hello'
+        ;
+        const prep_res = try c.prepare(allocator, query);
+        defer prep_res.deinit(allocator);
+        const prep_ok = try expectOk(prep_res.value);
+        const query_res = try c.execute(allocator, prep_ok);
+        defer query_res.deinit(allocator);
+        const rows = (try expectRows(query_res.value)).iter();
+        while (try rows.next(allocator)) |row| {
+            defer row.deinit(allocator);
+            // std.debug.print("rows.next: {any}\n", .{row});
+        }
+    }
+}
 
 // SELECT CONCAT(?, ?) AS col1
