@@ -174,33 +174,68 @@ test "query text table" {
     }
 }
 
-test "prepare execute" {
+test "prepare check" {
     var c = Client.init(test_config);
     defer c.deinit();
-    // { // prepare no execute
-    //     const pr = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
-    //     defer pr.deinit(allocator);
-    //     _ = try expectOk(pr.value);
-    // }
-    // { // prepare with params
-    //     const pr = try c.prepare(allocator, "SELECT CONCAT(?, ?) as my_col");
-    //     defer pr.deinit(allocator);
-    //     switch (pr.value) {
-    //         .ok => |prep_ok| {
-    //             try std.testing.expectEqual(prep_ok.num_params, 2);
-    //             try std.testing.expectEqual(prep_ok.num_columns, 1);
-    //         },
-    //         else => return errorUnexpectedValue(pr.value),
-    //     }
-    // }
-    // {
-    //     const pr = try c.prepare(allocator, "SELECT 1,2,3");
-    //     defer pr.deinit(allocator);
-    //     const prep_ok = try expectOk(pr.value);
-    //     _ = prep_ok;
+    { // prepare no execute
+        const pr = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
+        defer pr.deinit(allocator);
+        _ = try expectOk(pr.value);
+    }
+    { // prepare with params
+        const pr = try c.prepare(allocator, "SELECT CONCAT(?, ?) as my_col");
+        defer pr.deinit(allocator);
+        switch (pr.value) {
+            .ok => |prep_ok| {
+                try std.testing.expectEqual(prep_ok.num_params, 2);
+                try std.testing.expectEqual(prep_ok.num_columns, 1);
+            },
+            else => return errorUnexpectedValue(pr.value),
+        }
+    }
+}
 
-    //     // const res = try c.execute(allocator, prep_ok);
-    //     // _ = res;
-    //     // std.log.err("prep_ok: {any}", .{prep_ok});
-    // }
+test "prepare execute - 1" {
+    var c = Client.init(test_config);
+    defer c.deinit();
+    {
+        const pr = try c.prepare(allocator, "CREATE DATABASE testdb2");
+        defer pr.deinit(allocator);
+        const prep_ok = try expectOk(pr.value);
+        const qr = try c.execute(allocator, prep_ok);
+        defer qr.deinit(allocator);
+        _ = try expectOk(qr.value);
+    }
+    {
+        const pr = try c.prepare(allocator, "DROP DATABASE testdb2");
+        defer pr.deinit(allocator);
+        const prep_ok = try expectOk(pr.value);
+        const qr = try c.execute(allocator, prep_ok);
+        defer qr.deinit(allocator);
+        _ = try expectOk(qr.value);
+    }
+}
+
+test "prepare execute - 2" {
+    var c = Client.init(test_config);
+    defer c.deinit();
+
+    const pr1 = try c.prepare(allocator, "CREATE DATABASE testdb3");
+    defer pr1.deinit(allocator);
+    const prep_ok_1 = try expectOk(pr1.value);
+
+    const pr2 = try c.prepare(allocator, "DROP DATABASE testdb3");
+    defer pr2.deinit(allocator);
+    const prep_ok_2 = try expectOk(pr2.value);
+
+    {
+        const qr = try c.execute(allocator, prep_ok_1);
+        defer qr.deinit(allocator);
+        _ = try expectOk(qr.value);
+    }
+    {
+        const qr = try c.execute(allocator, prep_ok_2);
+        defer qr.deinit(allocator);
+        _ = try expectOk(qr.value);
+    }
 }
