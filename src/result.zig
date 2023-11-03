@@ -10,7 +10,7 @@ const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 const Conn = @import("./conn.zig").Conn;
 const EofPacket = protocol.generic_response.EofPacket;
 const helper = @import("./helper.zig");
-const TextResultSetIter = helper.TextResultSetIter;
+const ResultSetIter = helper.ResultSetIter;
 
 pub fn QueryResult(comptime ResultRowType: type) type {
     return struct {
@@ -80,7 +80,7 @@ pub fn ResultSet(comptime ResultRowType: type) type {
             };
         }
 
-        pub fn iter(t: *const ResultSet(ResultRowType)) TextResultSetIter {
+        pub fn iter(t: *const ResultSet(ResultRowType)) ResultSetIter(ResultRowType) {
             return .{ .text_result_set = t };
         }
     };

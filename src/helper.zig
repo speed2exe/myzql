@@ -31,45 +31,47 @@ pub fn scanBinaryResultRow(comptime T: type, raw: []const u8, dest: *T, options:
     @panic("not implemented");
 }
 
-pub const TextResultSetIter = struct {
-    text_result_set: *const ResultSet(TextResultRow),
+pub fn ResultSetIter(comptime ResultRowType: type) type {
+    return struct {
+        text_result_set: *const ResultSet(ResultRowType),
 
-    pub fn next(i: *const TextResultSetIter, allocator: std.mem.Allocator) !?TextResultRow {
-        const row = try i.text_result_set.readRow(allocator);
-        return switch (row.value) {
-            .eof => {
-                // need to deinit as caller would not know to do so
-                row.deinit(allocator);
-                return null;
-            },
-            .err => |err| err.asError(),
-            else => row,
-        };
-    }
-
-    pub fn collect(iter: *const TextResultSetIter, allocator: std.mem.Allocator) !TableTexts {
-        var row_acc = std.ArrayList(TextResultRow).init(allocator);
-        while (try iter.next(allocator)) |row| {
-            var new_row_ptr = try row_acc.addOne();
-            new_row_ptr.* = row;
+        pub fn next(i: *const ResultSetIter(ResultRowType), allocator: std.mem.Allocator) !?TextResultRow {
+            const row = try i.text_result_set.readRow(allocator);
+            return switch (row.value) {
+                .eof => {
+                    // need to deinit as caller would not know to do so
+                    row.deinit(allocator);
+                    return null;
+                },
+                .err => |err| err.asError(),
+                else => row,
+            };
         }
 
-        const num_cols = iter.text_result_set.column_definitions.len;
-        var rows = try allocator.alloc([]?[]const u8, row_acc.items.len);
-        var elems = try allocator.alloc(?[]const u8, row_acc.items.len * num_cols);
-        for (row_acc.items, 0..) |row, i| {
-            const dest_row = elems[i * num_cols .. (i + 1) * num_cols];
-            try row.scan(dest_row);
-            rows[i] = dest_row;
-        }
+        pub fn collect(iter: *const ResultSetIter(ResultRowType), allocator: std.mem.Allocator) !TableTexts {
+            var row_acc = std.ArrayList(TextResultRow).init(allocator);
+            while (try iter.next(allocator)) |row| {
+                var new_row_ptr = try row_acc.addOne();
+                new_row_ptr.* = row;
+            }
 
-        return .{
-            .result_rows = try row_acc.toOwnedSlice(),
-            .elems = elems,
-            .rows = rows,
-        };
-    }
-};
+            const num_cols = iter.text_result_set.column_definitions.len;
+            var rows = try allocator.alloc([]?[]const u8, row_acc.items.len);
+            var elems = try allocator.alloc(?[]const u8, row_acc.items.len * num_cols);
+            for (row_acc.items, 0..) |row, i| {
+                const dest_row = elems[i * num_cols .. (i + 1) * num_cols];
+                try row.scan(dest_row);
+                rows[i] = dest_row;
+            }
+
+            return .{
+                .result_rows = try row_acc.toOwnedSlice(),
+                .elems = elems,
+                .rows = rows,
+            };
+        }
+    };
+}
 
 pub const TableTexts = struct {
     result_rows: []TextResultRow,

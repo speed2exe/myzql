@@ -93,7 +93,7 @@ test "query text protocol" {
     {
         const qr = try c.query(allocator, "SELECT 3,4");
         defer qr.deinit(allocator);
-        var rows = (try expectRows(qr.value)).iter();
+        const rows = (try expectRows(qr.value)).iter();
 
         var dest = [_]?[]const u8{ undefined, undefined };
         while (try rows.next(allocator)) |row| {
@@ -106,7 +106,7 @@ test "query text protocol" {
     {
         const qr = try c.query(allocator, "SELECT 5,null,7");
         defer qr.deinit(allocator);
-        var rows = (try expectRows(qr.value)).iter();
+        const rows = (try expectRows(qr.value)).iter();
         var dest = [_]?[]const u8{ undefined, undefined, undefined };
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
@@ -119,7 +119,7 @@ test "query text protocol" {
     {
         const qr = try c.query(allocator, "SELECT 8,9 UNION ALL SELECT 10,11");
         defer qr.deinit(allocator);
-        var rows = try expectRows(qr.value);
+        const rows = try expectRows(qr.value);
 
         var dest = [_]?[]const u8{ undefined, undefined };
         {
@@ -239,3 +239,24 @@ test "prepare execute - 2" {
         _ = try expectOk(qr.value);
     }
 }
+
+// test "prepare execute with result" {
+//     var c = Client.init(test_config);
+//     defer c.deinit();
+//
+//     {
+//         const query =
+//             \\SELECT 42,null,'hello'
+//         ;
+//         const pr = try c.prepare(allocator, query);
+//         defer pr.deinit(allocator);
+//         const prep_ok = try expectOk(pr.value);
+//         const qr = try c.execute(allocator, prep_ok);
+//         const rows = (try expectRows(qr.value)).iter();
+//         while (try rows.next(allocator)) |row| {
+//             defer row.deinit(allocator);
+//         }
+//     }
+// }
+//
+// // SELECT CONCAT(?, ?) AS col1
