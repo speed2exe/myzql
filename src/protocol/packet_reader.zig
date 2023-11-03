@@ -47,25 +47,25 @@ pub const PacketReader = struct {
     pub fn readUInt16(packet_reader: *PacketReader) u16 {
         const bytes = packet_reader.payload[packet_reader.pos..][0..2];
         packet_reader.pos += 2;
-        return std.mem.readIntLittle(u16, bytes);
+        return std.mem.readInt(u16, bytes, .little);
     }
 
     fn readUInt24(packet_reader: *PacketReader) u24 {
         const bytes = packet_reader.payload[packet_reader.pos..][0..3];
         packet_reader.pos += 3;
-        return std.mem.readIntLittle(u24, bytes);
+        return std.mem.readInt(u24, bytes, .little);
     }
 
     pub fn readUInt32(packet_reader: *PacketReader) u32 {
         const bytes = packet_reader.payload[packet_reader.pos..][0..4];
         packet_reader.pos += 4;
-        return std.mem.readIntLittle(u32, bytes);
+        return std.mem.readInt(u32, bytes, .little);
     }
 
     fn readUInt64(packet_reader: *PacketReader) u64 {
         const bytes = packet_reader.payload[packet_reader.pos..][0..8];
         packet_reader.pos += 8;
-        return std.mem.readIntLittle(u64, bytes);
+        return std.mem.readInt(u64, bytes, .little);
     }
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_eof

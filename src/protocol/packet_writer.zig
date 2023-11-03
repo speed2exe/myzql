@@ -6,25 +6,25 @@ pub fn writeUInt8(writer: anytype, v: u8) !void {
 
 pub fn writeUInt16(writer: anytype, v: u16) !void {
     var bytes: [2]u8 = undefined;
-    std.mem.writeIntLittle(u16, &bytes, v);
+    std.mem.writeInt(u16, &bytes, v, .little);
     try writer.write(&bytes);
 }
 
 pub fn writeUInt24(writer: anytype, v: u24) !void {
     var bytes: [3]u8 = undefined;
-    std.mem.writeIntLittle(u24, &bytes, v);
+    std.mem.writeInt(u24, &bytes, v, .little);
     try writer.write(&bytes);
 }
 
 pub fn writeUInt32(writer: anytype, v: u32) !void {
     var bytes: [4]u8 = undefined;
-    std.mem.writeIntLittle(u32, &bytes, v);
+    std.mem.writeInt(u32, &bytes, v, .little);
     try writer.write(&bytes);
 }
 
 pub fn writeUInt64(writer: anytype, v: u64) !void {
     var bytes: [8]u8 = undefined;
-    std.mem.writeIntLittle(u64, &bytes, v);
+    std.mem.writeInt(u64, &bytes, v, .little);
     try writer.write(&bytes);
 }
 

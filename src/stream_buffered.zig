@@ -112,7 +112,7 @@ pub const SmallPacketWriter = struct {
     pub fn flush(p: *SmallPacketWriter) !void {
         // write the packet length to first 3 bytes
         const payload_size: u24 = @truncate(p.writer.len - 4);
-        std.mem.writeIntLittle(u24, p.writer.buf[0..3], payload_size);
+        std.mem.writeInt(u24, p.writer.buf[0..3], payload_size, .little);
         try p.writer.flush();
     }
 };

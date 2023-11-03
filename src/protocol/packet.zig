@@ -39,7 +39,7 @@ pub const Packet = struct {
 fn readUInt24(reader: *buffered_stream.Reader) !u24 {
     var bytes: [3]u8 = undefined;
     try reader.read(&bytes);
-    return std.mem.readIntLittle(u24, &bytes);
+    return std.mem.readInt(u24, &bytes, .little);
 }
 
 fn readUInt8(reader: *buffered_stream.Reader) !u8 {
