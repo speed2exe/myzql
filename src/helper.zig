@@ -35,7 +35,7 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
     return struct {
         text_result_set: *const ResultSet(ResultRowType),
 
-        pub fn next(i: *const ResultSetIter(ResultRowType), allocator: std.mem.Allocator) !?TextResultRow {
+        pub fn next(i: *const ResultSetIter(ResultRowType), allocator: std.mem.Allocator) !?ResultRowType {
             const row = try i.text_result_set.readRow(allocator);
             return switch (row.value) {
                 .eof => {
@@ -48,7 +48,7 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
             };
         }
 
-        pub fn collect(iter: *const ResultSetIter(ResultRowType), allocator: std.mem.Allocator) !TableTexts {
+        pub fn collect(iter: *const ResultSetIter(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
             var row_acc = std.ArrayList(TextResultRow).init(allocator);
             while (try iter.next(allocator)) |row| {
                 var new_row_ptr = try row_acc.addOne();

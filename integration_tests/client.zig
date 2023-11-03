@@ -254,9 +254,10 @@ test "prepare execute - 2" {
 //         const qr = try c.execute(allocator, prep_ok);
 //         const rows = (try expectRows(qr.value)).iter();
 //         while (try rows.next(allocator)) |row| {
+//             std.debug.print("rows.next: {any}\n", .{row});
 //             defer row.deinit(allocator);
 //         }
 //     }
 // }
-//
-// // SELECT CONCAT(?, ?) AS col1
+
+// SELECT CONCAT(?, ?) AS col1

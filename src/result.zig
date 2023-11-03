@@ -67,10 +67,10 @@ pub fn ResultSet(comptime ResultRowType: type) type {
             allocator.free(t.column_definitions);
         }
 
-        pub fn readRow(t: *const ResultSet(ResultRowType), allocator: std.mem.Allocator) !TextResultRow {
+        pub fn readRow(t: *const ResultSet(ResultRowType), allocator: std.mem.Allocator) !ResultRowType {
             const packet = try t.conn.readPacket(allocator);
             return .{
-                .text_result_set = t,
+                .result_set = t,
                 .packet = packet,
                 .value = switch (packet.payload[0]) {
                     constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &packet, t.conn.client_capabilities) },
@@ -87,7 +87,7 @@ pub fn ResultSet(comptime ResultRowType: type) type {
 }
 
 pub const TextResultRow = struct {
-    text_result_set: *const ResultSet(TextResultRow),
+    result_set: *const ResultSet(TextResultRow),
     packet: Packet,
     value: union(enum) {
         err: ErrorPacket,
@@ -98,7 +98,7 @@ pub const TextResultRow = struct {
     },
 
     pub fn scan(t: *const TextResultRow, dest: []?[]const u8) !void {
-        std.debug.assert(dest.len == t.text_result_set.column_definitions.len);
+        std.debug.assert(dest.len == t.result_set.column_definitions.len);
         switch (t.value) {
             .err => |err| return err.asError(),
             .eof => |eof| return eof.asError(),
@@ -112,7 +112,7 @@ pub const TextResultRow = struct {
 };
 
 pub const BinaryResultRow = struct {
-    text_result_set: *const ResultSet(BinaryResultRow),
+    result_set: *const ResultSet(BinaryResultRow),
     packet: Packet,
     value: union(enum) {
         err: ErrorPacket,
@@ -130,7 +130,7 @@ pub const BinaryResultRow = struct {
         }
     }
 
-    pub fn deinit(text_result_set: *const TextResultRow, allocator: std.mem.Allocator) void {
+    pub fn deinit(text_result_set: *const BinaryResultRow, allocator: std.mem.Allocator) void {
         text_result_set.packet.deinit(allocator);
     }
 };
