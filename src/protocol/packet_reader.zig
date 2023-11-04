@@ -32,7 +32,7 @@ pub const PacketReader = struct {
         return bytes;
     }
 
-    fn readFixedRuntime(packet_reader: *PacketReader, n: usize) []const u8 {
+    pub fn readFixedRuntime(packet_reader: *PacketReader, n: usize) []const u8 {
         const bytes = packet_reader.payload[packet_reader.pos..][0..n];
         packet_reader.pos += n;
         return bytes;

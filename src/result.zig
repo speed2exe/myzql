@@ -34,18 +34,18 @@ pub fn QueryResult(comptime ResultRowType: type) type {
 pub fn ResultSet(comptime ResultRowType: type) type {
     return struct {
         conn: *Conn,
-        column_packets: []Packet,
-        column_definitions: []ColumnDefinition41,
+        col_packets: []Packet,
+        col_defs: []ColumnDefinition41,
 
         pub fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !ResultSet(ResultRowType) {
-            var t: ResultSet(ResultRowType) = .{ .conn = conn, .column_packets = &.{}, .column_definitions = &.{} };
+            var t: ResultSet(ResultRowType) = .{ .conn = conn, .col_packets = &.{}, .col_defs = &.{} };
             errdefer t.deinit(allocator);
 
-            t.column_packets = try allocator.alloc(Packet, column_count);
-            @memset(t.column_packets, Packet.safe_deinit());
-            t.column_definitions = try allocator.alloc(ColumnDefinition41, column_count);
+            t.col_packets = try allocator.alloc(Packet, column_count);
+            @memset(t.col_packets, Packet.safe_deinit());
+            t.col_defs = try allocator.alloc(ColumnDefinition41, column_count);
 
-            for (t.column_packets, t.column_definitions) |*pac, *def| {
+            for (t.col_packets, t.col_defs) |*pac, *def| {
                 pac.* = try conn.readPacket(allocator);
                 def.* = ColumnDefinition41.initFromPacket(pac);
             }
@@ -57,11 +57,11 @@ pub fn ResultSet(comptime ResultRowType: type) type {
         }
 
         fn deinit(t: *const ResultSet(ResultRowType), allocator: std.mem.Allocator) void {
-            for (t.column_packets) |packet| {
+            for (t.col_packets) |packet| {
                 packet.deinit(allocator);
             }
-            allocator.free(t.column_packets);
-            allocator.free(t.column_definitions);
+            allocator.free(t.col_packets);
+            allocator.free(t.col_defs);
         }
 
         pub fn readRow(t: *const ResultSet(ResultRowType), allocator: std.mem.Allocator) !ResultRowType {
@@ -95,7 +95,7 @@ pub const TextResultRow = struct {
     },
 
     pub fn scan(t: *const TextResultRow, dest: []?[]const u8) !void {
-        std.debug.assert(dest.len == t.result_set.column_definitions.len);
+        std.debug.assert(dest.len == t.result_set.col_defs.len);
         switch (t.value) {
             .err => |err| return err.asError(),
             .eof => |eof| return eof.asError(),
@@ -119,11 +119,11 @@ pub const BinaryResultRow = struct {
 
     const Options = struct {};
 
-    pub fn scanStruct(comptime T: type, t: *const BinaryResultRow, dest: ?*const T, options: Options) !void {
-        switch (t.value) {
+    pub fn scanStruct(b: *const BinaryResultRow, dest: anytype) !void {
+        switch (b.value) {
             .err => |err| return err.asError(),
             .eof => |eof| return eof.asError(),
-            .raw => try helper.scanTextBinaryRow(T, t.value.raw, dest, options),
+            .raw => |raw| helper.scanBinResRowtoStruct(dest, raw, b.result_set.col_defs),
         }
     }
 
@@ -140,11 +140,6 @@ pub const PrepareResult = struct {
     },
 
     pub fn deinit(p: *const PrepareResult, allocator: std.mem.Allocator) void {
-        // for (p.value.ok.packets, 0..) |pp, i| {
-        //     std.debug.print("prepare result deinit: packet, {any} ptr: {any}\n", .{ i, @intFromPtr(pp.payload.ptr) });
-        //     pp.deinit(allocator);
-        // }
-
         p.packet.deinit(allocator);
         switch (p.value) {
             .ok => |prep_stmt| prep_stmt.deinit(allocator),

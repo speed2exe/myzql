@@ -242,26 +242,33 @@ test "prepare execute - 2" {
     }
 }
 
-// test "prepare execute with result" {
-//     var c = Client.init(test_config);
-//     defer c.deinit();
-//
-//     {
-//         const query =
-//             \\SELECT 1,2,3,4,5
-//         ;
-//         const prep_res = try c.prepare(allocator, query);
-//         defer prep_res.deinit(allocator);
-//         const prep_ok = try expectOk(prep_res.value);
-//         _ = prep_ok;
-//         // const query_res = try c.execute(allocator, &prep_ok);
-//         // defer query_res.deinit(allocator);
-//         // const rows = (try expectRows(query_res.value)).iter();
-//         // while (try rows.next(allocator)) |row| {
-//         //     std.debug.print("row: {any}\n", .{row.value.raw});
-//         //     defer row.deinit(allocator);
-//         // }
-//     }
-// }
+test "prepare execute with result" {
+    var c = Client.init(test_config);
+    defer c.deinit();
+
+    {
+        const query =
+            \\SELECT null
+        ;
+        const prep_res = try c.prepare(allocator, query);
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try expectOk(prep_res.value);
+        const query_res = try c.execute(allocator, &prep_stmt);
+        defer query_res.deinit(allocator);
+        const rows = (try expectRows(query_res.value)).iter();
+
+        const MyType = struct {
+            a: ?u8,
+        };
+        const expected = MyType{ .a = null };
+
+        var dest: MyType = undefined;
+        while (try rows.next(allocator)) |row| {
+            defer row.deinit(allocator);
+            try row.scanStruct(&dest);
+            try std.testing.expectEqual(expected, dest);
+        }
+    }
+}
 
 // SELECT CONCAT(?, ?) AS col1
