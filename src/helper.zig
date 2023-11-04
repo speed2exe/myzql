@@ -43,25 +43,70 @@ pub fn scanBinResRowtoStruct(dest: anytype, raw: []const u8, col_defs: []ColumnD
     std.debug.assert(struct_fields.len == col_defs.len);
 
     inline for (struct_fields, col_defs, 0..) |field, col_def, i| {
-        if (!binResIsNull(null_bitmap, i)) {
-            @field(dest, field.name) = binElemToValue(field.type, &col_def, &reader);
-        } else {
-            switch (@typeInfo(field.type)) {
-                .Optional => @field(dest, field.name) = null,
-                else => {
-                    std.log.err("field {s} is not optional\n", .{field.name});
+        const field_info = @typeInfo(field.type);
+        const isNull = binResIsNull(null_bitmap, i);
+
+        switch (field_info) {
+            .Optional => {
+                if (isNull) {
+                    @field(dest, field.name) = null;
+                } else {
+                    std.debug.print("{any}", .{col_def});
+                    //@field(dest, field.name) = binElemToValue(field_info.Optional.child, field.name, &col_def, &reader);
+                    var v: field_info.Optional.child = undefined;
+                    binElemToValue(field_info.Optional.child, field.name, &v, &col_def, &reader);
+                }
+            },
+            else => {
+                if (isNull) {
+                    std.log.err("column: {s} value is null, but field: {s} is not nullable\n", .{ col_def.name, field.name });
                     unreachable;
-                },
-            }
+                }
+                binElemToValue(field.type, field.name, &@field(dest, field.name), &col_def, &reader);
+            },
         }
     }
     std.debug.assert(reader.finished());
 }
 
-inline fn binElemToValue(comptime T: type, col_def: *const ColumnDefinition41, reader: *PacketReader) T {
-    _ = reader;
+inline fn logConversionError(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, col_type: EnumFieldType) void {
+    std.log.err(
+        "cannot convert to type({any}) of field({s}) from column({s}) of type({any})\n",
+        .{ FieldType, field_name, col_def.name, col_type },
+    );
+}
+
+inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, field_ptr: *FieldType, col_def: *const ColumnDefinition41, reader: *PacketReader) void {
+    const field_info = @typeInfo(FieldType);
     const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
-    return switch (col_type) {
+    switch (col_type) {
+        .MYSQL_TYPE_INT24 => {
+            switch (field_info) {
+                .Int => {
+                    const i = reader.readLengthEncodedInteger();
+                    field_ptr.* = @truncate(i);
+                },
+                else => {
+                    logConversionError(FieldType, field_name, col_def, col_type);
+                    unreachable;
+                },
+            }
+        },
+        .MYSQL_TYPE_STRING,
+        .MYSQL_TYPE_VARCHAR,
+        .MYSQL_TYPE_VAR_STRING,
+        .MYSQL_TYPE_ENUM,
+        .MYSQL_TYPE_SET,
+        .MYSQL_TYPE_LONG_BLOB,
+        .MYSQL_TYPE_MEDIUM_BLOB,
+        .MYSQL_TYPE_BLOB,
+        .MYSQL_TYPE_TINY_BLOB,
+        .MYSQL_TYPE_GEOMETRY,
+        .MYSQL_TYPE_BIT,
+        .MYSQL_TYPE_DECIMAL,
+        .MYSQL_TYPE_NEWDECIMAL,
+        => field_ptr.* = reader.readLengthEncodedString(),
+
         else => {
             std.log.err("unimplemented col_type: {any}\n", .{col_type});
             unreachable;
@@ -101,7 +146,7 @@ inline fn binElemToValue(comptime T: type, col_def: *const ColumnDefinition41, r
         // .MYSQL_TYPE_VAR_STRING => {},
         // .MYSQL_TYPE_STRING => {},
         // .MYSQL_TYPE_GEOMETRY => {},
-    };
+    }
 }
 
 inline fn binResIsNull(null_bitmap: []const u8, col_idx: usize) bool {

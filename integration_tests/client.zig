@@ -248,7 +248,7 @@ test "prepare execute with result" {
 
     {
         const query =
-            \\SELECT null
+            \\SELECT null, "hello", 3
         ;
         const prep_res = try c.prepare(allocator, query);
         defer prep_res.deinit(allocator);
@@ -259,14 +259,20 @@ test "prepare execute with result" {
 
         const MyType = struct {
             a: ?u8,
+            b: []const u8,
+            c: ?u8,
         };
-        const expected = MyType{ .a = null };
+        const expected = MyType{
+            .a = null,
+            .b = "hello",
+            .c = 3,
+        };
 
         var dest: MyType = undefined;
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
             try row.scanStruct(&dest);
-            try std.testing.expectEqual(expected, dest);
+            try std.testing.expectEqualDeep(expected, dest);
         }
     }
 }
