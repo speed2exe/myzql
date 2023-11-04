@@ -34,6 +34,10 @@ pub const ColumnDefinition41 = struct {
         column_definition_41.flags = reader.readUInt16();
         column_definition_41.decimals = reader.readByte();
 
+        // https://mariadb.com/kb/en/result-set-packets/#column-definition-packet
+        // According to mariadb, there seem to be extra 2 bytes at the end that is not being used
+        std.debug.assert(reader.remained() == 2);
+
         return column_definition_41;
     }
 };

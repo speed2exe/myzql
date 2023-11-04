@@ -112,4 +112,8 @@ pub const PacketReader = struct {
     pub fn finished(packet_reader: *PacketReader) bool {
         return packet_reader.pos == packet_reader.payload.len;
     }
+
+    pub fn remained(packet_reader: *PacketReader) usize {
+        return packet_reader.payload.len - packet_reader.pos;
+    }
 };
