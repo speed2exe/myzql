@@ -63,6 +63,7 @@ pub fn scanBinResRowtoStruct(dest: anytype, raw: []const u8, col_defs: []ColumnD
             },
         }
     }
+    std.debug.assert(reader.finished());
 }
 
 inline fn logConversionError(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, col_type: EnumFieldType) void {
@@ -107,7 +108,7 @@ inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_d
             _ = int;
             switch (col_type) {
                 .MYSQL_TYPE_LONGLONG => {
-                    return @intCast(reader.readLengthEncodedInteger());
+                    return @intCast(reader.readUInt64());
                 },
                 else => {},
             }

@@ -62,7 +62,7 @@ pub const PacketReader = struct {
         return std.mem.readInt(u32, bytes, .little);
     }
 
-    fn readUInt64(packet_reader: *PacketReader) u64 {
+    pub fn readUInt64(packet_reader: *PacketReader) u64 {
         const bytes = packet_reader.payload[packet_reader.pos..][0..8];
         packet_reader.pos += 8;
         return std.mem.readInt(u64, bytes, .little);
