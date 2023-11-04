@@ -51,10 +51,7 @@ pub fn scanBinResRowtoStruct(dest: anytype, raw: []const u8, col_defs: []ColumnD
                 if (isNull) {
                     @field(dest, field.name) = null;
                 } else {
-                    std.debug.print("{any}", .{col_def});
-                    //@field(dest, field.name) = binElemToValue(field_info.Optional.child, field.name, &col_def, &reader);
-                    var v: field_info.Optional.child = undefined;
-                    binElemToValue(field_info.Optional.child, field.name, &v, &col_def, &reader);
+                    @field(dest, field.name) = binElemToValue(field_info.Optional.child, field.name, &col_def, &reader);
                 }
             },
             else => {
@@ -62,11 +59,10 @@ pub fn scanBinResRowtoStruct(dest: anytype, raw: []const u8, col_defs: []ColumnD
                     std.log.err("column: {s} value is null, but field: {s} is not nullable\n", .{ col_def.name, field.name });
                     unreachable;
                 }
-                binElemToValue(field.type, field.name, &@field(dest, field.name), &col_def, &reader);
+                @field(dest, field.name) = binElemToValue(field.type, field.name, &col_def, &reader);
             },
         }
     }
-    std.debug.assert(reader.finished());
 }
 
 inline fn logConversionError(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, col_type: EnumFieldType) void {
@@ -76,77 +72,51 @@ inline fn logConversionError(comptime FieldType: type, field_name: []const u8, c
     );
 }
 
-inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, field_ptr: *FieldType, col_def: *const ColumnDefinition41, reader: *PacketReader) void {
+inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, reader: *PacketReader) FieldType {
     const field_info = @typeInfo(FieldType);
     const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
-    switch (col_type) {
-        .MYSQL_TYPE_INT24 => {
-            switch (field_info) {
-                .Int => {
-                    const i = reader.readLengthEncodedInteger();
-                    field_ptr.* = @truncate(i);
+
+    switch (field_info) {
+        .Pointer => |pointer| {
+            switch (@typeInfo(pointer.child)) {
+                .Int => |int| {
+                    if (int.bits == 8) {
+                        switch (col_type) {
+                            .MYSQL_TYPE_STRING,
+                            .MYSQL_TYPE_VARCHAR,
+                            .MYSQL_TYPE_VAR_STRING,
+                            .MYSQL_TYPE_ENUM,
+                            .MYSQL_TYPE_SET,
+                            .MYSQL_TYPE_LONG_BLOB,
+                            .MYSQL_TYPE_MEDIUM_BLOB,
+                            .MYSQL_TYPE_BLOB,
+                            .MYSQL_TYPE_TINY_BLOB,
+                            .MYSQL_TYPE_GEOMETRY,
+                            .MYSQL_TYPE_BIT,
+                            .MYSQL_TYPE_DECIMAL,
+                            .MYSQL_TYPE_NEWDECIMAL,
+                            => return reader.readLengthEncodedString(),
+                            else => {},
+                        }
+                    }
                 },
-                else => {
-                    logConversionError(FieldType, field_name, col_def, col_type);
-                    unreachable;
-                },
+                else => {},
             }
         },
-        .MYSQL_TYPE_STRING,
-        .MYSQL_TYPE_VARCHAR,
-        .MYSQL_TYPE_VAR_STRING,
-        .MYSQL_TYPE_ENUM,
-        .MYSQL_TYPE_SET,
-        .MYSQL_TYPE_LONG_BLOB,
-        .MYSQL_TYPE_MEDIUM_BLOB,
-        .MYSQL_TYPE_BLOB,
-        .MYSQL_TYPE_TINY_BLOB,
-        .MYSQL_TYPE_GEOMETRY,
-        .MYSQL_TYPE_BIT,
-        .MYSQL_TYPE_DECIMAL,
-        .MYSQL_TYPE_NEWDECIMAL,
-        => field_ptr.* = reader.readLengthEncodedString(),
-
-        else => {
-            std.log.err("unimplemented col_type: {any}\n", .{col_type});
-            unreachable;
+        .Int => |int| {
+            _ = int;
+            switch (col_type) {
+                .MYSQL_TYPE_LONGLONG => {
+                    return @intCast(reader.readLengthEncodedInteger());
+                },
+                else => {},
+            }
         },
-        // .MYSQL_TYPE_DECIMAL => {},
-        // .MYSQL_TYPE_TINY => {},
-        // .MYSQL_TYPE_SHORT => {},
-        // .MYSQL_TYPE_LONG => {},
-        // .MYSQL_TYPE_FLOAT => {},
-        // .MYSQL_TYPE_DOUBLE => {},
-        // .MYSQL_TYPE_NULL => {},
-        // .MYSQL_TYPE_TIMESTAMP => {},
-        // .MYSQL_TYPE_LONGLONG => {},
-        // .MYSQL_TYPE_INT24 => {},
-        // .MYSQL_TYPE_DATE => {},
-        // .MYSQL_TYPE_TIME => {},
-        // .MYSQL_TYPE_DATETIME => {},
-        // .MYSQL_TYPE_YEAR => {},
-        // .MYSQL_TYPE_NEWDATE => {},
-        // .MYSQL_TYPE_VARCHAR => {},
-        // .MYSQL_TYPE_BIT => {},
-        // .MYSQL_TYPE_TIMESTAMP2 => {},
-        // .MYSQL_TYPE_DATETIME2 => {},
-        // .MYSQL_TYPE_TIME2 => {},
-        // .MYSQL_TYPE_TYPED_ARRAY => {},
-
-        // .MYSQL_TYPE_INVALID => {},
-        // .MYSQL_TYPE_BOOL => {},
-        // .MYSQL_TYPE_JSON => {},
-        // .MYSQL_TYPE_NEWDECIMAL => {},
-        // .MYSQL_TYPE_ENUM => {},
-        // .MYSQL_TYPE_SET => {},
-        // .MYSQL_TYPE_TINY_BLOB => {},
-        // .MYSQL_TYPE_MEDIUM_BLOB => {},
-        // .MYSQL_TYPE_LONG_BLOB => {},
-        // .MYSQL_TYPE_BLOB => {},
-        // .MYSQL_TYPE_VAR_STRING => {},
-        // .MYSQL_TYPE_STRING => {},
-        // .MYSQL_TYPE_GEOMETRY => {},
+        else => {},
     }
+
+    logConversionError(FieldType, field_name, col_def, col_type);
+    unreachable;
 }
 
 inline fn binResIsNull(null_bitmap: []const u8, col_idx: usize) bool {
