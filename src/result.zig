@@ -45,10 +45,8 @@ pub fn ResultSet(comptime ResultRowType: type) type {
             t.column_definitions = try allocator.alloc(ColumnDefinition41, column_count);
             errdefer allocator.free(t.column_definitions);
             for (0..column_count) |i| {
-                const packet = try conn.readPacket(allocator);
-                errdefer packet.deinit(allocator);
-                t.column_packets[i] = packet;
-                t.column_definitions[i] = ColumnDefinition41.initFromPacket(&packet);
+                t.column_packets[i] = try conn.readPacket(allocator);
+                t.column_definitions[i] = ColumnDefinition41.initFromPacket(&t.column_packets[i]);
             }
 
             const eof_packet = try conn.readPacket(allocator);

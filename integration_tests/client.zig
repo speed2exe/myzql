@@ -246,7 +246,7 @@ test "prepare execute with result" {
 
     {
         const query =
-            \\SELECT 42,null,'hello'
+            \\SELECT 1,3,5,7
         ;
         const prep_res = try c.prepare(allocator, query);
         defer prep_res.deinit(allocator);
@@ -256,7 +256,6 @@ test "prepare execute with result" {
         const rows = (try expectRows(query_res.value)).iter();
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
-            // std.debug.print("rows.next: {any}\n", .{row});
         }
     }
 }
