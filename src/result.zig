@@ -38,15 +38,16 @@ pub fn ResultSet(comptime ResultRowType: type) type {
         column_definitions: []ColumnDefinition41,
 
         pub fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !ResultSet(ResultRowType) {
-            var t: ResultSet(ResultRowType) = undefined;
+            var t: ResultSet(ResultRowType) = .{ .conn = conn, .column_packets = &.{}, .column_definitions = &.{} };
+            errdefer t.deinit(allocator);
 
             t.column_packets = try allocator.alloc(Packet, column_count);
-            errdefer allocator.free(t.column_packets);
+            @memset(t.column_packets, Packet.safe_deinit());
             t.column_definitions = try allocator.alloc(ColumnDefinition41, column_count);
-            errdefer allocator.free(t.column_definitions);
-            for (0..column_count) |i| {
-                t.column_packets[i] = try conn.readPacket(allocator);
-                t.column_definitions[i] = ColumnDefinition41.initFromPacket(&t.column_packets[i]);
+
+            for (t.column_packets, t.column_definitions) |*pac, *def| {
+                pac.* = try conn.readPacket(allocator);
+                def.* = ColumnDefinition41.initFromPacket(pac);
             }
 
             const eof_packet = try conn.readPacket(allocator);

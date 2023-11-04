@@ -62,6 +62,7 @@ pub const Conn = struct {
                 else => .{ .rows = blk: {
                     var packet_reader = PacketReader.initFromPacket(&response_packet);
                     const column_count = packet_reader.readLengthEncodedInteger();
+                    std.debug.assert(packet_reader.finished());
                     break :blk try ResultSet(TextResultRow).init(allocator, conn, column_count);
                 } },
             },
@@ -86,11 +87,20 @@ pub const Conn = struct {
     }
 
     // TODO: add options
-    pub fn execute(conn: *Conn, allocator: std.mem.Allocator, prep_ok: PrepareOk) !QueryResult(BinaryResultRow) {
+    pub fn execute(conn: *Conn, allocator: std.mem.Allocator, prep_ok: *const PrepareOk) !QueryResult(BinaryResultRow) {
         std.debug.assert(conn.state == .connected);
         conn.sequence_id = 0;
-        const execute_request: ExecuteRequest = .{ .prep_ok = &prep_ok, .capabilities = conn.client_capabilities };
+        const execute_request: ExecuteRequest = .{ .prep_ok = prep_ok, .capabilities = conn.client_capabilities };
         try conn.sendPacketUsingSmallPacketWriter(execute_request);
+
+        if (prep_ok.num_columns > 0) {
+            return .{
+                .packet = .{ .payload_length = 0, .sequence_id = 0, .payload = &.{} },
+                .value = .{
+                    .rows = try ResultSet(BinaryResultRow).init(allocator, conn, prep_ok.num_columns),
+                },
+            };
+        }
 
         const response_packet = try conn.readPacket(allocator);
         return .{
@@ -98,11 +108,7 @@ pub const Conn = struct {
             .value = switch (response_packet.payload[0]) {
                 constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
                 constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
-                else => .{ .rows = blk: {
-                    var packet_reader = PacketReader.initFromPacket(&response_packet);
-                    const column_count = packet_reader.readLengthEncodedInteger();
-                    break :blk try ResultSet(BinaryResultRow).init(allocator, conn, column_count);
-                } },
+                else => return response_packet.asError(conn.client_capabilities),
             },
         };
     }

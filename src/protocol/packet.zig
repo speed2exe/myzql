@@ -10,6 +10,11 @@ pub const Packet = struct {
     sequence_id: u8,
     payload: []const u8,
 
+    // generate a packet safe to deinit with allocator
+    pub fn safe_deinit() Packet {
+        return .{ .payload_length = undefined, .sequence_id = undefined, .payload = &.{} };
+    }
+
     pub fn initFromReader(allocator: std.mem.Allocator, sbr: *buffered_stream.Reader) !Packet {
         var packet: Packet = undefined;
 
@@ -27,7 +32,7 @@ pub const Packet = struct {
         if (packet.payload[0] == constants.ERR) {
             return ErrorPacket.initFromPacket(false, packet, capabilities).asError();
         }
-        std.log.warn("unexpected packet: {any}", .{packet.payload[0]});
+        std.log.warn("unexpected packet: {any}", .{packet});
         return error.UnexpectedPacket;
     }
 
