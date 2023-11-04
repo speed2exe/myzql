@@ -50,9 +50,7 @@ pub fn ResultSet(comptime ResultRowType: type) type {
                 def.* = ColumnDefinition41.initFromPacket(pac);
             }
 
-            const eof_packet = try conn.readPacket(allocator);
-            defer eof_packet.deinit(allocator);
-            std.debug.assert(eof_packet.payload[0] == constants.EOF);
+            try discardEofPacket(conn, allocator);
 
             t.conn = conn;
             return t;
@@ -137,11 +135,72 @@ pub const BinaryResultRow = struct {
 pub const PrepareResult = struct {
     packet: Packet,
     value: union(enum) {
-        ok: PrepareOk,
+        ok: PreparedStatement,
         err: ErrorPacket,
     },
 
     pub fn deinit(p: *const PrepareResult, allocator: std.mem.Allocator) void {
+        // for (p.value.ok.packets, 0..) |pp, i| {
+        //     std.debug.print("prepare result deinit: packet, {any} ptr: {any}\n", .{ i, @intFromPtr(pp.payload.ptr) });
+        //     pp.deinit(allocator);
+        // }
+
         p.packet.deinit(allocator);
+        switch (p.value) {
+            .ok => |prep_stmt| prep_stmt.deinit(allocator),
+            else => {},
+        }
     }
 };
+
+pub const PreparedStatement = struct {
+    prep_ok: PrepareOk,
+    packets: []Packet,
+    params: []ColumnDefinition41,
+    col_defs: []ColumnDefinition41,
+
+    pub fn initFromPacket(resp_packet: *const Packet, conn: *Conn, allocator: std.mem.Allocator) !PreparedStatement {
+        const prep_ok = PrepareOk.initFromPacket(resp_packet, conn.client_capabilities);
+        var prep_stmt: PreparedStatement = .{ .prep_ok = prep_ok, .packets = &.{}, .params = &.{}, .col_defs = &.{} };
+        errdefer prep_stmt.deinit(allocator);
+
+        prep_stmt.packets = try allocator.alloc(Packet, prep_ok.num_params + prep_ok.num_columns);
+        @memset(prep_stmt.packets, Packet.safe_deinit());
+
+        prep_stmt.params = try allocator.alloc(ColumnDefinition41, prep_ok.num_params);
+        prep_stmt.col_defs = try allocator.alloc(ColumnDefinition41, prep_ok.num_columns);
+
+        if (prep_ok.num_params > 0) {
+            for (prep_stmt.packets[0..prep_ok.num_params], prep_stmt.params) |*packet, *param| {
+                packet.* = try conn.readPacket(allocator);
+                param.* = ColumnDefinition41.initFromPacket(packet);
+            }
+            try discardEofPacket(conn, allocator);
+        }
+
+        if (prep_ok.num_columns > 0) {
+            for (prep_stmt.packets[prep_ok.num_params..], prep_stmt.col_defs) |*packet, *col_def| {
+                packet.* = try conn.readPacket(allocator);
+                col_def.* = ColumnDefinition41.initFromPacket(packet);
+            }
+            try discardEofPacket(conn, allocator);
+        }
+
+        return prep_stmt;
+    }
+
+    pub fn deinit(prep_stmt: *const PreparedStatement, allocator: std.mem.Allocator) void {
+        allocator.free(prep_stmt.params);
+        allocator.free(prep_stmt.col_defs);
+        for (prep_stmt.packets) |packet| {
+            packet.deinit(allocator);
+        }
+        allocator.free(prep_stmt.packets);
+    }
+};
+
+fn discardEofPacket(conn: *Conn, allocator: std.mem.Allocator) !void {
+    const eof_packet = try conn.readPacket(allocator);
+    defer eof_packet.deinit(allocator);
+    std.debug.assert(eof_packet.payload[0] == constants.EOF);
+}

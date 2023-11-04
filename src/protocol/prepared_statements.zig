@@ -61,7 +61,8 @@ pub const PrepareOk = struct {
 
 pub const ExecuteRequest = struct {
     capabilities: u32,
-    prep_ok: *const PrepareOk,
+    stmt_id: u32,
+    num_params: u16,
     flags: u8 = 0, // Cursor type
     iteration_count: u32 = 1, // Always 1
     new_params_bind_flag: u8 = 1,
@@ -70,17 +71,17 @@ pub const ExecuteRequest = struct {
     attributes: []const BinaryParam = &.{},
 
     pub fn write(e: *const ExecuteRequest, writer: anytype) !void {
-        std.debug.assert(e.prep_ok.num_params == e.params.len);
+        std.debug.assert(e.num_params == e.params.len);
 
         try packet_writer.writeUInt8(writer, constants.COM_STMT_EXECUTE);
-        try packet_writer.writeUInt32(writer, e.prep_ok.statement_id);
+        try packet_writer.writeUInt32(writer, e.stmt_id);
         try packet_writer.writeUInt8(writer, e.flags);
         try packet_writer.writeUInt32(writer, e.iteration_count);
 
         const has_attributes_to_write = (e.capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) and e.attributes.len > 0;
-        if (e.prep_ok.num_params > 0 or has_attributes_to_write) {
+        if (e.num_params > 0 or has_attributes_to_write) {
             if (has_attributes_to_write) {
-                try packet_writer.writeLengthEncodedInteger(writer, e.attributes.len + e.prep_ok.num_params);
+                try packet_writer.writeLengthEncodedInteger(writer, e.attributes.len + e.num_params);
             }
 
             // Write Null Bitmap

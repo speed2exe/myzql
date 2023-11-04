@@ -22,6 +22,7 @@ const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
 const result = @import("./result.zig");
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
+const PreparedStatement = result.PreparedStatement;
 const TextResultRow = result.TextResultRow;
 const BinaryResultRow = result.BinaryResultRow;
 const ResultSet = result.ResultSet;
@@ -80,27 +81,22 @@ pub const Conn = struct {
             .packet = response_packet,
             .value = switch (response_packet.payload[0]) {
                 constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
-                constants.OK => .{ .ok = PrepareOk.initFromPacket(&response_packet, conn.client_capabilities) },
+                constants.OK => .{ .ok = try PreparedStatement.initFromPacket(&response_packet, conn, allocator) },
                 else => return response_packet.asError(conn.client_capabilities),
             },
         };
     }
 
     // TODO: add options
-    pub fn execute(conn: *Conn, allocator: std.mem.Allocator, prep_ok: *const PrepareOk) !QueryResult(BinaryResultRow) {
+    pub fn execute(conn: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement) !QueryResult(BinaryResultRow) {
         std.debug.assert(conn.state == .connected);
         conn.sequence_id = 0;
-        const execute_request: ExecuteRequest = .{ .prep_ok = prep_ok, .capabilities = conn.client_capabilities };
+        const execute_request: ExecuteRequest = .{
+            .capabilities = conn.client_capabilities,
+            .stmt_id = prep_stmt.prep_ok.statement_id,
+            .num_params = prep_stmt.prep_ok.num_params,
+        };
         try conn.sendPacketUsingSmallPacketWriter(execute_request);
-
-        if (prep_ok.num_columns > 0) {
-            return .{
-                .packet = .{ .payload_length = 0, .sequence_id = 0, .payload = &.{} },
-                .value = .{
-                    .rows = try ResultSet(BinaryResultRow).init(allocator, conn, prep_ok.num_columns),
-                },
-            };
-        }
 
         const response_packet = try conn.readPacket(allocator);
         return .{
@@ -108,7 +104,12 @@ pub const Conn = struct {
             .value = switch (response_packet.payload[0]) {
                 constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
                 constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
-                else => return response_packet.asError(conn.client_capabilities),
+                else => .{ .rows = blk: {
+                    var packet_reader = PacketReader.initFromPacket(&response_packet);
+                    const column_count = packet_reader.readLengthEncodedInteger();
+                    std.debug.assert(packet_reader.finished());
+                    break :blk try ResultSet(BinaryResultRow).init(allocator, conn, column_count);
+                } },
             },
         };
     }

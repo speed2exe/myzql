@@ -185,13 +185,15 @@ test "prepare check" {
     { // prepare with params
         const prep_res = try c.prepare(allocator, "SELECT CONCAT(?, ?) as my_col");
         defer prep_res.deinit(allocator);
+
         switch (prep_res.value) {
-            .ok => |prep_ok| {
-                try std.testing.expectEqual(prep_ok.num_params, 2);
-                try std.testing.expectEqual(prep_ok.num_columns, 1);
+            .ok => |prep_stmt| {
+                try std.testing.expectEqual(prep_stmt.prep_ok.num_params, 2);
+                try std.testing.expectEqual(prep_stmt.prep_ok.num_columns, 1);
             },
             else => return errorUnexpectedValue(prep_res.value),
         }
+        try std.testing.expectEqual(c.conn.reader.pos, c.conn.reader.len);
     }
 }
 
@@ -201,8 +203,8 @@ test "prepare execute - 1" {
     {
         const prep_res = try c.prepare(allocator, "CREATE DATABASE testdb2");
         defer prep_res.deinit(allocator);
-        const prep_ok = try expectOk(prep_res.value);
-        const query_res = try c.execute(allocator, &prep_ok);
+        const prep_stmt = try expectOk(prep_res.value);
+        const query_res = try c.execute(allocator, &prep_stmt);
         defer query_res.deinit(allocator);
         _ = try expectOk(query_res.value);
     }
@@ -222,19 +224,19 @@ test "prepare execute - 2" {
 
     const prep_res_1 = try c.prepare(allocator, "CREATE DATABASE testdb3");
     defer prep_res_1.deinit(allocator);
-    const prep_ok_1 = try expectOk(prep_res_1.value);
+    const prep_stmt_1 = try expectOk(prep_res_1.value);
 
     const prep_res_2 = try c.prepare(allocator, "DROP DATABASE testdb3");
     defer prep_res_2.deinit(allocator);
-    const prep_ok_2 = try expectOk(prep_res_2.value);
+    const prep_stmt_2 = try expectOk(prep_res_2.value);
 
     {
-        const query_res = try c.execute(allocator, &prep_ok_1);
+        const query_res = try c.execute(allocator, &prep_stmt_1);
         defer query_res.deinit(allocator);
         _ = try expectOk(query_res.value);
     }
     {
-        const query_res = try c.execute(allocator, &prep_ok_2);
+        const query_res = try c.execute(allocator, &prep_stmt_2);
         defer query_res.deinit(allocator);
         _ = try expectOk(query_res.value);
     }
@@ -246,17 +248,19 @@ test "prepare execute - 2" {
 //
 //     {
 //         const query =
-//             \\SELECT 1,3,5,7
+//             \\SELECT 1,2,3,4,5
 //         ;
 //         const prep_res = try c.prepare(allocator, query);
 //         defer prep_res.deinit(allocator);
 //         const prep_ok = try expectOk(prep_res.value);
-//         const query_res = try c.execute(allocator, &prep_ok);
-//         defer query_res.deinit(allocator);
-//         const rows = (try expectRows(query_res.value)).iter();
-//         while (try rows.next(allocator)) |row| {
-//             defer row.deinit(allocator);
-//         }
+//         _ = prep_ok;
+//         // const query_res = try c.execute(allocator, &prep_ok);
+//         // defer query_res.deinit(allocator);
+//         // const rows = (try expectRows(query_res.value)).iter();
+//         // while (try rows.next(allocator)) |row| {
+//         //     std.debug.print("row: {any}\n", .{row.value.raw});
+//         //     defer row.deinit(allocator);
+//         // }
 //     }
 // }
 
