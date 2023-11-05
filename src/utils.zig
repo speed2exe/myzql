@@ -1,3 +1,6 @@
+const std = @import("std");
+
+// This is a fixed-size byte array to avoid heap allocation.
 pub fn FixedBytes(comptime max: usize) type {
     return struct {
         buf: [max]u8 = undefined,
@@ -6,15 +9,11 @@ pub fn FixedBytes(comptime max: usize) type {
         pub fn get(self: *const FixedBytes(max)) []const u8 {
             return self.buf[0..self.len];
         }
-        pub fn set(self: *FixedBytes(max), s: []const u8) !void {
-            if (s.len > max) {
-                return error.SourceTooLarge;
-            }
-            self.len = 0;
-            for (s) |c| {
-                self.buf[self.len] = c;
-                self.len += 1;
-            }
+
+        pub fn set(self: *FixedBytes(max), src: []const u8) void {
+            std.debug.assert(src.len <= max);
+            var dest = self.buf[0..src.len];
+            @memcpy(dest, src);
         }
     };
 }

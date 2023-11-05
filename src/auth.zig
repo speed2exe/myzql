@@ -1,4 +1,6 @@
 const std = @import("std");
+const FixedBytes = @import("./utils.zig").FixedBytes;
+
 const base64 = std.base64.standard.decoderWithIgnore(" \t\r\n");
 
 pub const AuthPlugin = enum {
@@ -43,7 +45,7 @@ pub const DecodedPublicKey = struct {
     }
 };
 
-pub fn decode_public_key(encoded_bytes: []const u8, allocator: std.mem.Allocator) !DecodedPublicKey {
+pub fn decodePublicKey(encoded_bytes: []const u8, allocator: std.mem.Allocator) !DecodedPublicKey {
     var decoded_pk: DecodedPublicKey = undefined;
 
     const start_marker = "-----BEGIN PUBLIC KEY-----";
@@ -101,6 +103,69 @@ test "decode public key" {
         \\-----END PUBLIC KEY-----
     ;
 
-    const d = try decode_public_key(pk, std.testing.allocator);
+    const d = try decodePublicKey(pk, std.testing.allocator);
     defer d.deinit(std.testing.allocator);
+}
+
+pub fn generate_auth_response(auth_plugin: AuthPlugin, auth_data: []const u8, password: []const u8) !FixedBytes(32) {
+    var result: FixedBytes(32) = .{};
+    switch (auth_plugin) {
+        .caching_sha2_password => if (password.len > 0) {
+            result.set(&scrambleSHA256Password(auth_data, password));
+        },
+        else => {
+            std.log.warn("Unsupported auth plugin: {any}\n", .{auth_plugin});
+            return error.UnsupportedAuthPlugin;
+        },
+    }
+    return result;
+}
+
+// XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))
+fn scrambleSHA256Password(scramble: []const u8, password: []const u8) [32]u8 {
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+
+    var message1 = blk: {
+        var hasher = Sha256.init(.{});
+        hasher.update(password);
+        break :blk hasher.finalResult();
+    };
+    const message2 = blk: {
+        var hasher = Sha256.init(.{});
+        hasher.update(&message1);
+        var temp = hasher.finalResult();
+
+        hasher = Sha256.init(.{});
+        hasher.update(&temp);
+        hasher.update(scramble);
+        hasher.final(&temp);
+        break :blk temp;
+    };
+    for (&message1, message2) |*m1, m2| {
+        m1.* ^= m2;
+    }
+    return message1;
+}
+
+test "scrambleSHA256Password" {
+    const scramble = [_]u8{ 10, 47, 74, 111, 75, 73, 34, 48, 88, 76, 114, 74, 37, 13, 3, 80, 82, 2, 23, 21 };
+    const tests = [_]struct {
+        password: []const u8,
+        expected: [32]u8,
+    }{
+        .{
+            .password = "secret",
+            .expected = .{ 244, 144, 231, 111, 102, 217, 216, 102, 101, 206, 84, 217, 140, 120, 208, 172, 254, 47, 176, 176, 139, 66, 61, 168, 7, 20, 72, 115, 211, 11, 49, 44 },
+        },
+        .{
+            .password = "secret2",
+            .expected = .{ 171, 195, 147, 74, 1, 44, 243, 66, 232, 118, 7, 28, 142, 226, 2, 222, 81, 120, 91, 67, 2, 88, 167, 160, 19, 139, 199, 156, 77, 128, 11, 198 },
+        },
+    };
+
+    for (tests) |t| {
+        const actual = scrambleSHA256Password(&scramble, t.password);
+        // std.debug.print("actual: {x}", .{ std.fmt.fmtSliceHexLower(&actual) });
+        try std.testing.expectEqual(t.expected, actual);
+    }
 }

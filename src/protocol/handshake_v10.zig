@@ -2,7 +2,7 @@ const std = @import("std");
 const Packet = @import("./packet.zig").Packet;
 const PacketReader = @import("./packet_reader.zig").PacketReader;
 const constants = @import("../constants.zig");
-const AuthPlugin = @import("../auth_plugin.zig").AuthPlugin;
+const AuthPlugin = @import("../auth.zig").AuthPlugin;
 
 pub const HandshakeV10 = struct {
     server_version: [:0]const u8,
