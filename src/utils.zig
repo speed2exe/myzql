@@ -14,6 +14,7 @@ pub fn FixedBytes(comptime max: usize) type {
             std.debug.assert(src.len <= max);
             var dest = self.buf[0..src.len];
             @memcpy(dest, src);
+            self.len = src.len;
         }
     };
 }

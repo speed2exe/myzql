@@ -113,6 +113,10 @@ pub fn generate_auth_response(auth_plugin: AuthPlugin, auth_data: []const u8, pa
         .caching_sha2_password => if (password.len > 0) {
             result.set(&scrambleSHA256Password(auth_data, password));
         },
+        .sha256_password => {
+            // need RSA-OAEP encryption
+            return error.PleaseSupportASAP;
+        },
         else => {
             std.log.warn("Unsupported auth plugin: {any}\n", .{auth_plugin});
             return error.UnsupportedAuthPlugin;
