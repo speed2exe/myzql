@@ -35,10 +35,7 @@ pub const caching_sha2_password_full_authentication_start = 0x04;
 
 pub const DecodedPublicKey = struct {
     allocated: []const u8,
-    value: struct {
-        modulus: []const u8,
-        exponent: []const u8,
-    },
+    value: std.crypto.Certificate.rsa.PublicKey,
 
     pub fn deinit(d: *const DecodedPublicKey, allocator: std.mem.Allocator) void {
         allocator.free(d.allocated);
@@ -86,7 +83,7 @@ pub fn decodePublicKey(encoded_bytes: []const u8, allocator: std.mem.Allocator) 
     };
 
     const pk_decoded = try std.crypto.Certificate.rsa.PublicKey.parseDer(bitstring);
-    decoded_pk.value = .{ .modulus = pk_decoded.modulus, .exponent = pk_decoded.exponent };
+    decoded_pk.value = try std.crypto.Certificate.rsa.PublicKey.fromBytes(pk_decoded.exponent, pk_decoded.modulus);
     return decoded_pk;
 }
 

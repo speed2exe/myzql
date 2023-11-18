@@ -205,16 +205,21 @@ pub const Conn = struct {
                                 auth.caching_sha2_password_full_authentication_start => {
                                     // Full Authentication start
 
+                                    // TODO: support TLS
+                                    // // if TLS, send password as plain text
+                                    // try conn.sendBytesAsPacket(config.password);
+
+                                    // Request public key from server
                                     try conn.sendBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
                                     const pk_packet = try conn.readPacket(allocator);
                                     defer pk_packet.deinit(allocator);
 
+                                    // Decode public key
                                     const pub_key = try auth.decodePublicKey(pk_packet.payload, allocator);
                                     defer pub_key.deinit(allocator);
 
-                                    // TODO: support TLS
-                                    // // if TLS, send password as plain text
-                                    // try conn.sendBytesAsPacket(config.password);
+                                    // Encrypt password with public key
+                                    // TODO
                                     const auth_resp = try generate_auth_response(.sha256_password, &auth_data, config.password);
                                     try conn.sendBytesAsPacket(auth_resp.get());
 
@@ -236,8 +241,6 @@ pub const Conn = struct {
                 else => return packet.asError(conn.client_capabilities),
             }
         }
-
-        // Server ack
     }
 
     fn sendPacketUsingSmallPacketWriter(conn: *Conn, packet: anytype) !void {
