@@ -203,7 +203,7 @@ pub const Conn = struct {
                     switch (auth_plugin) {
                         .caching_sha2_password => {
                             switch (more_data[0]) {
-                                auth.caching_sha2_password_fast_auth_success => return, // success (no more action needed)
+                                auth.caching_sha2_password_fast_auth_success => {}, // success (do nothing, wait for next packet)
                                 auth.caching_sha2_password_full_authentication_start => {
                                     // Full Authentication start
 
@@ -224,15 +224,6 @@ pub const Conn = struct {
                                     const encrypted_pw = try encryptPassword(allocator, config.password, &auth_data, &decoded_pk.value);
                                     defer allocator.free(encrypted_pw);
                                     try conn.sendBytesAsPacket(encrypted_pw);
-
-                                    const resp_packet = try conn.readPacket(allocator);
-                                    defer resp_packet.deinit(allocator);
-
-                                    switch (resp_packet.payload[0]) {
-                                        constants.OK => return,
-                                        constants.ERR => return ErrorPacket.initFromPacket(false, &resp_packet, conn.client_capabilities).asError(),
-                                        else => return resp_packet.asError(conn.client_capabilities),
-                                    }
                                 },
                                 else => return error.UnsupportedCachingSha2PasswordMoreData,
                             }
