@@ -28,8 +28,6 @@ const TextResultRow = result.TextResultRow;
 const BinaryResultRow = result.BinaryResultRow;
 const ResultSet = result.ResultSet;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
-const PublicKey = std.crypto.Certificate.rsa.PublicKey;
-const Sha1 = std.crypto.hash.Sha1;
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -221,7 +219,7 @@ pub const Conn = struct {
                                     defer decoded_pk.deinit(allocator);
 
                                     // Encrypt password with public key and send it to server
-                                    const encrypted_pw = try encryptPassword(allocator, config.password, &auth_data, &decoded_pk.value);
+                                    const encrypted_pw = try auth.encryptPassword(allocator, config.password, &auth_data, &decoded_pk.value);
                                     defer allocator.free(encrypted_pw);
                                     try conn.sendBytesAsPacket(encrypted_pw);
                                 },
@@ -277,95 +275,3 @@ pub const Conn = struct {
         return id;
     }
 };
-
-// https://mariadb.com/kb/en/sha256_password-plugin/#rsa-encrypted-password
-// RSA encrypted value of XOR(password, seed) using server public key (RSA_PKCS1_OAEP_PADDING).
-fn encryptPassword(allocator: std.mem.Allocator, password: []const u8, auth_data: *const [20]u8, pk: *const PublicKey) ![]const u8 {
-    var plain = blk: {
-        var plain = try allocator.alloc(u8, password.len + 1);
-        @memcpy(plain.ptr, password);
-        plain[plain.len - 1] = 0;
-        break :blk plain;
-    };
-    defer allocator.free(plain);
-
-    for (plain, 0..) |*c, i| {
-        c.* ^= auth_data[i % 20];
-    }
-
-    return rsaEncryptOAEP(allocator, plain, pk);
-}
-
-fn rsaEncryptOAEP(allocator: std.mem.Allocator, msg: []const u8, pk: *const PublicKey) ![]const u8 {
-    const init_hash = Sha1.init(.{});
-
-    const lHash = blk: {
-        var hash = init_hash;
-        hash.update(&.{});
-        break :blk hash.finalResult();
-    };
-    const digest_len = lHash.len;
-
-    const k = (pk.n.bits() + 7) / 8; //  modulus size in bytes
-
-    var em = try allocator.alloc(u8, k);
-    defer allocator.free(em);
-    @memset(em, 0);
-    var seed = em[1 .. 1 + digest_len];
-    var db = em[1 + digest_len ..];
-
-    @memcpy(db[0..lHash.len], &lHash);
-    db[db.len - msg.len - 1] = 1;
-    @memcpy(db[db.len - msg.len ..], msg);
-    std.crypto.random.bytes(seed);
-
-    mgf1XOR(db, &init_hash, seed);
-    mgf1XOR(seed, &init_hash, db);
-
-    return encryptMsg(allocator, em, pk);
-}
-
-fn encryptMsg(allocator: std.mem.Allocator, msg: []const u8, pk: *const PublicKey) ![]const u8 {
-    // can remove this if it's publicly exposed in std.crypto.Certificate.rsa
-    // for now, just copy it from std.crypto.ff
-    const max_modulus_bits = 4096;
-    const Modulus = std.crypto.ff.Modulus(max_modulus_bits);
-    const Fe = Modulus.Fe;
-
-    const m = try Fe.fromBytes(pk.*.n, msg, .big);
-    const e = try pk.n.powPublic(m, pk.e);
-
-    var res = try allocator.alloc(u8, msg.len);
-    try e.toBytes(res, .big);
-    return res;
-}
-
-// mgf1XOR XORs the bytes in out with a mask generated using the MGF1 function
-// specified in PKCS #1 v2.1.
-fn mgf1XOR(dest: []u8, init_hash: *const Sha1, seed: []const u8) void {
-    var counter: [4]u8 = .{ 0, 0, 0, 0 };
-    var digest: [Sha1.digest_length]u8 = undefined;
-
-    var done: usize = 0;
-    while (done < dest.len) : (incCounter(&counter)) {
-        var hash = init_hash.*;
-        hash.update(seed);
-        hash.update(counter[0..4]);
-        digest = hash.finalResult();
-
-        for (&digest) |*d| {
-            if (done >= dest.len) break;
-            dest[done] ^= d.*;
-            done += 1;
-        }
-    }
-}
-
-// incCounter increments a four byte, big-endian counter.
-fn incCounter(c: *[4]u8) void {
-    inline for (&.{ 3, 2, 1, 0 }) |i| {
-        const res = @addWithOverflow(c[i], 1);
-        c[i] = res[0];
-        if (res[1] == 0) return; // no overflow, so we're done
-    }
-}
