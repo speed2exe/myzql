@@ -220,11 +220,10 @@ pub const Conn = struct {
                                     const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
                                     defer decoded_pk.deinit(allocator);
 
-                                    // Encrypt password with public key
-                                    _ = try encryptPassword(allocator, config.password, &auth_data, &decoded_pk.value);
-                                    // TODO
-                                    const auth_resp = try generate_auth_response(.sha256_password, &auth_data, config.password);
-                                    try conn.sendBytesAsPacket(auth_resp.get());
+                                    // Encrypt password with public key and send it to server
+                                    const encrypted_pw = try encryptPassword(allocator, config.password, &auth_data, &decoded_pk.value);
+                                    defer allocator.free(encrypted_pw);
+                                    try conn.sendBytesAsPacket(encrypted_pw);
 
                                     const resp_packet = try conn.readPacket(allocator);
                                     defer resp_packet.deinit(allocator);
@@ -325,15 +324,22 @@ fn rsaEncryptOAEP(allocator: std.mem.Allocator, msg: []const u8, pk: *const Publ
     mgf1XOR(db, &init_hash, seed);
     mgf1XOR(seed, &init_hash, db);
 
-    return encryptMsg(msg, pk);
+    return encryptMsg(allocator, msg, pk);
 }
 
-fn encryptMsg(msg: []const u8, pk: *const PublicKey) ![]const u8 {
-    _ = msg;
-    _ = pk;
+fn encryptMsg(allocator: std.mem.Allocator, msg: []const u8, pk: *const PublicKey) ![]const u8 {
+    // can remove this if it's publicly exposed in std.crypto.Certificate.rsa
+    // for now, just copy it from std.crypto.ff
+    const max_modulus_bits = 4096;
+    const Modulus = std.crypto.ff.Modulus(max_modulus_bits);
+    const Fe = Modulus.Fe;
 
-    // TODO
-    return error.NotImplemented;
+    const m = try Fe.fromBytes(pk.*.n, msg, .big);
+    const e = try pk.n.powPublic(m, pk.e);
+
+    var res = try allocator.alloc(u8, msg.len);
+    try e.toBytes(res, .big);
+    return res;
 }
 
 // mgf1XOR XORs the bytes in out with a mask generated using the MGF1 function
