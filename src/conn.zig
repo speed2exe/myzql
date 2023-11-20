@@ -28,6 +28,8 @@ const TextResultRow = result.TextResultRow;
 const BinaryResultRow = result.BinaryResultRow;
 const ResultSet = result.ResultSet;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
+const PublicKey = std.crypto.Certificate.rsa.PublicKey;
+const Sha1 = std.crypto.hash.Sha1;
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -215,10 +217,11 @@ pub const Conn = struct {
                                     defer pk_packet.deinit(allocator);
 
                                     // Decode public key
-                                    const pub_key = try auth.decodePublicKey(pk_packet.payload, allocator);
-                                    defer pub_key.deinit(allocator);
+                                    const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
+                                    defer decoded_pk.deinit(allocator);
 
                                     // Encrypt password with public key
+                                    _ = try encryptPassword(allocator, config.password, &auth_data, &decoded_pk.value);
                                     // TODO
                                     const auth_resp = try generate_auth_response(.sha256_password, &auth_data, config.password);
                                     try conn.sendBytesAsPacket(auth_resp.get());
@@ -284,3 +287,81 @@ pub const Conn = struct {
         return id;
     }
 };
+
+// https://mariadb.com/kb/en/sha256_password-plugin/#rsa-encrypted-password
+// RSA encrypted value of XOR(password, seed) using server public key (RSA_PKCS1_OAEP_PADDING).
+fn encryptPassword(allocator: std.mem.Allocator, password: []const u8, auth_data: *const [20]u8, pk: *const PublicKey) ![]const u8 {
+    var plain = try allocator.dupeZ(u8, password);
+    defer allocator.free(plain);
+
+    for (plain, 0..) |*c, i| {
+        c.* ^= auth_data[i % 20];
+    }
+
+    return rsaEncryptOAEP(allocator, plain, pk);
+}
+
+fn rsaEncryptOAEP(allocator: std.mem.Allocator, msg: []const u8, pk: *const PublicKey) ![]const u8 {
+    const init_hash = Sha1.init(.{});
+
+    const lHash = blk: {
+        var hash = init_hash;
+        hash.update(&.{});
+        break :blk hash.finalResult();
+    };
+    const digest_len = lHash.len;
+
+    const k = pk.n.bits();
+    var em = try allocator.alloc(u8, k);
+    defer allocator.free(em);
+    var seed = em[1 .. 1 + digest_len];
+    var db = em[1 + digest_len ..];
+
+    @memcpy(db[0..lHash.len], &lHash);
+    db[db.len - msg.len - 1] = 1;
+    @memcpy(db[db.len - msg.len ..], msg);
+    std.crypto.random.bytes(seed);
+
+    mgf1XOR(db, &init_hash, seed);
+    mgf1XOR(seed, &init_hash, db);
+
+    return encryptMsg(msg, pk);
+}
+
+fn encryptMsg(msg: []const u8, pk: *const PublicKey) ![]const u8 {
+    _ = msg;
+    _ = pk;
+
+    // TODO
+    return error.NotImplemented;
+}
+
+// mgf1XOR XORs the bytes in out with a mask generated using the MGF1 function
+// specified in PKCS #1 v2.1.
+fn mgf1XOR(dest: []u8, init_hash: *const Sha1, seed: []const u8) void {
+    var counter: [4]u8 = .{ 0, 0, 0, 0 };
+    var digest: [Sha1.digest_length]u8 = undefined;
+
+    var done: usize = 0;
+    while (done < dest.len) : (incCounter(&counter)) {
+        var hash = init_hash.*;
+        hash.update(seed);
+        hash.update(counter[0..4]);
+        digest = hash.finalResult();
+
+        for (&digest) |*d| {
+            if (done >= dest.len) break;
+            dest[done] ^= d.*;
+            done += 1;
+        }
+    }
+}
+
+// incCounter increments a four byte, big-endian counter.
+fn incCounter(c: *[4]u8) void {
+    inline for (&.{ 3, 2, 1, 0 }) |i| {
+        const res = @addWithOverflow(c[i], 1);
+        c[i] = res[0];
+        if (res[1] != 0) return;
+    }
+}
