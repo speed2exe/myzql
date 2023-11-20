@@ -2,23 +2,22 @@
 - mysql client in zig
 
 ## Status
-- Not ready
+- MVP
 
 ## Features
-- [x] Connection with no password
 - [x] Ping
 - [x] Query Text Protocol
 - [x] Prepared Statement
+- [x] Password Authentication
 
-## Example
+## Examples
 - Coming soon!
 
-## Task Pool
-- [ ] `caching_sha2_password` full authentication
-- [ ] TLS
+## Tasks
+- [ ] TLS support
 - [ ] Query Text Protocol Input Parameters
-- [ ] Execute Result: Support Data Type
-- [ ] Prepared Statement Parameters
+- [ ] Prepared Statement Input Parameters
+- [ ] Execute Result: Support More Data Type
 
 ## Unit Tests
 - `zig test src/myzql.zig`

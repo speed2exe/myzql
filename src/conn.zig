@@ -201,7 +201,7 @@ pub const Conn = struct {
                     switch (auth_plugin) {
                         .caching_sha2_password => {
                             switch (more_data[0]) {
-                                auth.caching_sha2_password_fast_auth_success => return, // success (no more action needed)
+                                auth.caching_sha2_password_fast_auth_success => {}, // success (do nothing, wait for next packet)
                                 auth.caching_sha2_password_full_authentication_start => {
                                     // Full Authentication start
 
@@ -215,22 +215,13 @@ pub const Conn = struct {
                                     defer pk_packet.deinit(allocator);
 
                                     // Decode public key
-                                    const pub_key = try auth.decodePublicKey(pk_packet.payload, allocator);
-                                    defer pub_key.deinit(allocator);
+                                    const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
+                                    defer decoded_pk.deinit(allocator);
 
-                                    // Encrypt password with public key
-                                    // TODO
-                                    const auth_resp = try generate_auth_response(.sha256_password, &auth_data, config.password);
-                                    try conn.sendBytesAsPacket(auth_resp.get());
-
-                                    const resp_packet = try conn.readPacket(allocator);
-                                    defer resp_packet.deinit(allocator);
-
-                                    switch (resp_packet.payload[0]) {
-                                        constants.OK => _ = OkPacket.initFromPacket(&resp_packet, conn.client_capabilities),
-                                        constants.ERR => return ErrorPacket.initFromPacket(false, &resp_packet, conn.client_capabilities).asError(),
-                                        else => return resp_packet.asError(conn.client_capabilities),
-                                    }
+                                    // Encrypt password with public key and send it to server
+                                    const encrypted_pw = try auth.encryptPassword(allocator, config.password, &auth_data, &decoded_pk.value);
+                                    defer allocator.free(encrypted_pw);
+                                    try conn.sendBytesAsPacket(encrypted_pw);
                                 },
                                 else => return error.UnsupportedCachingSha2PasswordMoreData,
                             }
