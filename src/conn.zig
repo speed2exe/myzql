@@ -229,7 +229,7 @@ pub const Conn = struct {
                                     defer resp_packet.deinit(allocator);
 
                                     switch (resp_packet.payload[0]) {
-                                        constants.OK => _ = OkPacket.initFromPacket(&resp_packet, conn.client_capabilities),
+                                        constants.OK => return,
                                         constants.ERR => return ErrorPacket.initFromPacket(false, &resp_packet, conn.client_capabilities).asError(),
                                         else => return resp_packet.asError(conn.client_capabilities),
                                     }
@@ -290,7 +290,12 @@ pub const Conn = struct {
 // https://mariadb.com/kb/en/sha256_password-plugin/#rsa-encrypted-password
 // RSA encrypted value of XOR(password, seed) using server public key (RSA_PKCS1_OAEP_PADDING).
 fn encryptPassword(allocator: std.mem.Allocator, password: []const u8, auth_data: *const [20]u8, pk: *const PublicKey) ![]const u8 {
-    var plain = try allocator.dupeZ(u8, password);
+    var plain = blk: {
+        var plain = try allocator.alloc(u8, password.len + 1);
+        @memcpy(plain.ptr, password);
+        plain[plain.len - 1] = 0;
+        break :blk plain;
+    };
     defer allocator.free(plain);
 
     for (plain, 0..) |*c, i| {
@@ -310,9 +315,11 @@ fn rsaEncryptOAEP(allocator: std.mem.Allocator, msg: []const u8, pk: *const Publ
     };
     const digest_len = lHash.len;
 
-    const k = pk.n.bits();
+    const k = (pk.n.bits() + 7) / 8; //  modulus size in bytes
+
     var em = try allocator.alloc(u8, k);
     defer allocator.free(em);
+    @memset(em, 0);
     var seed = em[1 .. 1 + digest_len];
     var db = em[1 + digest_len ..];
 
@@ -324,7 +331,7 @@ fn rsaEncryptOAEP(allocator: std.mem.Allocator, msg: []const u8, pk: *const Publ
     mgf1XOR(db, &init_hash, seed);
     mgf1XOR(seed, &init_hash, db);
 
-    return encryptMsg(allocator, msg, pk);
+    return encryptMsg(allocator, em, pk);
 }
 
 fn encryptMsg(allocator: std.mem.Allocator, msg: []const u8, pk: *const PublicKey) ![]const u8 {
@@ -368,6 +375,6 @@ fn incCounter(c: *[4]u8) void {
     inline for (&.{ 3, 2, 1, 0 }) |i| {
         const res = @addWithOverflow(c[i], 1);
         c[i] = res[0];
-        if (res[1] != 0) return;
+        if (res[1] == 0) return; // no overflow, so we're done
     }
 }
