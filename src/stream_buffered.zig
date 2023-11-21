@@ -123,8 +123,8 @@ pub fn writer(stream: std.net.Stream) Writer {
 
 fn copy(dest: []u8, src: []const u8) usize {
     const amount_copied = @min(dest.len, src.len);
-    var final_dest = dest[0..amount_copied];
-    var final_src = src[0..amount_copied];
+    const final_dest = dest[0..amount_copied];
+    const final_src = src[0..amount_copied];
     @memcpy(final_dest, final_src);
     return amount_copied;
 }

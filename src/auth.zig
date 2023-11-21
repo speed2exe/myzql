@@ -57,7 +57,7 @@ pub fn decodePublicKey(encoded_bytes: []const u8, allocator: std.mem.Allocator) 
         break :blk std.mem.trim(u8, encoded_bytes[base64_start..base64_end], " \t\r\n");
     };
 
-    var dest = try allocator.alloc(u8, try base64.calcSizeUpperBound(base64_encoded.len));
+    const dest = try allocator.alloc(u8, try base64.calcSizeUpperBound(base64_encoded.len));
     decoded_pk.allocated = dest;
     errdefer allocator.free(decoded_pk.allocated);
 
@@ -176,7 +176,7 @@ test "scrambleSHA256Password" {
 // https://mariadb.com/kb/en/sha256_password-plugin/#rsa-encrypted-password
 // RSA encrypted value of XOR(password, seed) using server public key (RSA_PKCS1_OAEP_PADDING).
 pub fn encryptPassword(allocator: std.mem.Allocator, password: []const u8, auth_data: *const [20]u8, pk: *const PublicKey) ![]const u8 {
-    var plain = blk: {
+    const plain = blk: {
         var plain = try allocator.alloc(u8, password.len + 1);
         @memcpy(plain.ptr, password);
         plain[plain.len - 1] = 0;
@@ -206,8 +206,8 @@ fn rsaEncryptOAEP(allocator: std.mem.Allocator, msg: []const u8, pk: *const Publ
     var em = try allocator.alloc(u8, k);
     defer allocator.free(em);
     @memset(em, 0);
-    var seed = em[1 .. 1 + digest_len];
-    var db = em[1 + digest_len ..];
+    const seed = em[1 .. 1 + digest_len];
+    const db = em[1 + digest_len ..];
 
     @memcpy(db[0..lHash.len], &lHash);
     db[db.len - msg.len - 1] = 1;
@@ -230,7 +230,7 @@ fn encryptMsg(allocator: std.mem.Allocator, msg: []const u8, pk: *const PublicKe
     const m = try Fe.fromBytes(pk.*.n, msg, .big);
     const e = try pk.n.powPublic(m, pk.e);
 
-    var res = try allocator.alloc(u8, msg.len);
+    const res = try allocator.alloc(u8, msg.len);
     try e.toBytes(res, .big);
     return res;
 }
@@ -259,8 +259,7 @@ fn mgf1XOR(dest: []u8, init_hash: *const Sha1, seed: []const u8) void {
 // incCounter increments a four byte, big-endian counter.
 fn incCounter(c: *[4]u8) void {
     inline for (&.{ 3, 2, 1, 0 }) |i| {
-        const res = @addWithOverflow(c[i], 1);
-        c[i] = res[0];
-        if (res[1] == 0) return; // no overflow, so we're done
+        c[i], const overflow_bit = @addWithOverflow(c[i], 1);
+        if (overflow_bit == 0) return; // no overflow, so we're done
     }
 }

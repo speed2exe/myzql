@@ -12,7 +12,7 @@ pub fn FixedBytes(comptime max: usize) type {
 
         pub fn set(self: *FixedBytes(max), src: []const u8) void {
             std.debug.assert(src.len <= max);
-            var dest = self.buf[0..src.len];
+            const dest = self.buf[0..src.len];
             @memcpy(dest, src);
             self.len = src.len;
         }

@@ -21,7 +21,7 @@ pub const Packet = struct {
         packet.payload_length = try readUInt24(sbr);
         packet.sequence_id = try readUInt8(sbr);
         packet.payload = blk: {
-            var payload = try allocator.alloc(u8, @as(usize, packet.payload_length));
+            const payload = try allocator.alloc(u8, @as(usize, packet.payload_length));
             try sbr.read(payload);
             break :blk payload;
         };

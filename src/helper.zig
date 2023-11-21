@@ -129,7 +129,7 @@ inline fn binResIsNull(null_bitmap: []const u8, col_idx: usize) bool {
 }
 
 test "binResIsNull" {
-    var tests = .{
+    const tests = .{
         .{
             .null_bitmap = &.{0b00000100},
             .col_idx = 0,
@@ -178,7 +178,7 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
         pub fn collect(iter: *const ResultSetIter(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
             var row_acc = std.ArrayList(TextResultRow).init(allocator);
             while (try iter.next(allocator)) |row| {
-                var new_row_ptr = try row_acc.addOne();
+                const new_row_ptr = try row_acc.addOne();
                 new_row_ptr.* = row;
             }
 

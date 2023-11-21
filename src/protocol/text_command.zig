@@ -75,7 +75,7 @@ pub fn nullBits(params: []const ?QueryParam) u8 {
 }
 
 test "writeNullBitmap - 1" {
-    var params: []const ?QueryParam = &.{
+    const params: []const ?QueryParam = &.{
         null,
         .{
             .type_and_flag = .{ 0, 0 },
@@ -98,7 +98,7 @@ test "writeNullBitmap - 1" {
 }
 
 test "writeNullBitmap - 2" {
-    var params: []const ?QueryParam = &.{
+    const params: []const ?QueryParam = &.{
         null, null, null, null,
         null, null, null, null,
         null, null, null, null,

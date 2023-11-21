@@ -201,9 +201,9 @@ fn nullBinaryParam() BinaryParam {
 }
 
 test "writeNullBitmap" {
-    var nn = nonNullBinaryParam();
-    var n = nullBinaryParam();
-    var tests = .{
+    const nn = nonNullBinaryParam();
+    const n = nullBinaryParam();
+    const tests = .{
         .{
             .params = &.{nn},
             .attributes = &.{nn},
