@@ -14,12 +14,14 @@ const ResultSetIter = helper.ResultSetIter;
 
 pub fn QueryResult(comptime ResultRowType: type) type {
     return struct {
-        packet: Packet,
-        value: union(enum) {
+        const Value = union(enum) {
             ok: OkPacket,
             err: ErrorPacket,
             rows: ResultSet(ResultRowType),
-        },
+        };
+
+        packet: Packet,
+        value: Value,
 
         pub fn deinit(q: *const QueryResult(ResultRowType), allocator: std.mem.Allocator) void {
             q.packet.deinit(allocator);
@@ -27,6 +29,28 @@ pub fn QueryResult(comptime ResultRowType: type) type {
                 .rows => |rows| rows.deinit(allocator),
                 else => {},
             }
+        }
+
+        pub fn expect(
+            q: *const QueryResult(ResultRowType),
+            comptime value_variant: std.meta.FieldEnum(Value),
+        ) !std.meta.FieldType(Value, value_variant) {
+            return switch (q.value) {
+                value_variant => @field(q.value, @tagName(value_variant)),
+                else => {
+                    return switch (q.value) {
+                        .err => |err| return err.asError(),
+                        .ok => |ok| {
+                            std.log.err("Unexpected OkPacket: {any}\n", .{ok});
+                            return error.UnexpectedOk;
+                        },
+                        .rows => |rows| {
+                            std.log.err("Unexpected ResultSet: {any}\n", .{rows});
+                            return error.UnexpectedResultSet;
+                        },
+                    };
+                },
+            };
         }
     };
 }
@@ -133,11 +157,13 @@ pub const BinaryResultRow = struct {
 };
 
 pub const PrepareResult = struct {
-    packet: Packet,
-    value: union(enum) {
+    const Value = union(enum) {
         ok: PreparedStatement,
         err: ErrorPacket,
-    },
+    };
+
+    packet: Packet,
+    value: Value,
 
     pub fn deinit(p: *const PrepareResult, allocator: std.mem.Allocator) void {
         p.packet.deinit(allocator);
@@ -145,6 +171,24 @@ pub const PrepareResult = struct {
             .ok => |prep_stmt| prep_stmt.deinit(allocator),
             else => {},
         }
+    }
+
+    pub fn expect(
+        p: *const PrepareResult,
+        comptime value_variant: std.meta.FieldEnum(Value),
+    ) !std.meta.FieldType(Value, value_variant) {
+        return switch (p.value) {
+            value_variant => @field(p.value, @tagName(value_variant)),
+            else => {
+                return switch (p.value) {
+                    .err => |err| return err.asError(),
+                    .ok => |ok| {
+                        std.log.err("Unexpected OkPacket: {any}\n", .{ok});
+                        return error.UnexpectedOk;
+                    },
+                };
+            },
+        };
     }
 };
 

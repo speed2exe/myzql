@@ -11,57 +11,18 @@ test "ping" {
     try c.ping(allocator);
 }
 
-fn expectRows(value: anytype) !@TypeOf(value.rows) {
-    return switch (value) {
-        .rows => |rows| rows,
-        else => errorUnexpectedValue(value),
-    };
-}
-
-fn expectErr(value: anytype) !@TypeOf(value.err) {
-    return switch (value) {
-        .err => |err| err,
-        else => return errorUnexpectedValue(value),
-    };
-}
-
-fn expectOk(value: anytype) !@TypeOf(value.ok) {
-    return switch (value) {
-        .ok => |ok| ok,
-        else => return errorUnexpectedValue(value),
-    };
-}
-
-fn errorUnexpectedValue(value: anytype) error{ ErrorPacket, UnexpectedValue } {
-    switch (value) {
-        .err => |err| return errorErrorPacket(&err),
-        else => |x| {
-            std.log.err("unexpected value: {any}\n", .{x});
-            return error.UnexpectedValue;
-        },
-    }
-}
-
-fn errorErrorPacket(err: *const ErrorPacket) error{ErrorPacket} {
-    std.log.err(
-        "got error packet: (code: {d}, message: {s})",
-        .{ err.error_code, err.error_message },
-    );
-    return error.ErrorPacket;
-}
-
 test "query database create and drop" {
     var c = Client.init(test_config);
     defer c.deinit();
     {
         const qr = try c.query(allocator, "CREATE DATABASE testdb");
         defer qr.deinit(allocator);
-        _ = try expectOk(qr.value);
+        _ = try qr.expect(.ok);
     }
     {
         const qr = try c.query(allocator, "DROP DATABASE testdb");
         defer qr.deinit(allocator);
-        _ = try expectOk(qr.value);
+        _ = try qr.expect(.ok);
     }
 }
 
@@ -71,7 +32,7 @@ test "query syntax error" {
 
     const qr = try c.query(allocator, "garbage query");
     defer qr.deinit(allocator);
-    _ = try expectErr(qr.value);
+    _ = try qr.expect(.err);
 }
 
 test "query text protocol" {
@@ -82,7 +43,7 @@ test "query text protocol" {
         const query_res = try c.query(allocator, "SELECT 1");
         defer query_res.deinit(allocator);
 
-        const rows = (try expectRows(query_res.value)).iter();
+        const rows = (try query_res.expect(.rows)).iter();
         var dest = [_]?[]const u8{undefined};
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
@@ -93,7 +54,7 @@ test "query text protocol" {
     {
         const query_res = try c.query(allocator, "SELECT 3,4");
         defer query_res.deinit(allocator);
-        const rows = (try expectRows(query_res.value)).iter();
+        const rows = (try query_res.expect(.rows)).iter();
 
         var dest = [_]?[]const u8{ undefined, undefined };
         while (try rows.next(allocator)) |row| {
@@ -106,7 +67,7 @@ test "query text protocol" {
     {
         const query_res = try c.query(allocator, "SELECT 5,null,7");
         defer query_res.deinit(allocator);
-        const rows = (try expectRows(query_res.value)).iter();
+        const rows = (try query_res.expect(.rows)).iter();
         var dest = [_]?[]const u8{ undefined, undefined, undefined };
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
@@ -119,7 +80,7 @@ test "query text protocol" {
     {
         const query_res = try c.query(allocator, "SELECT 8,9 UNION ALL SELECT 10,11");
         defer query_res.deinit(allocator);
-        const rows = try expectRows(query_res.value);
+        const rows = try query_res.expect(.rows);
 
         var dest = [_]?[]const u8{ undefined, undefined };
         {
@@ -141,8 +102,8 @@ test "query text protocol" {
             defer row.deinit(std.testing.allocator);
             switch (row.value) {
                 .eof => {},
-                .err => return errorUnexpectedValue(row.value),
-                .raw => return errorUnexpectedValue(row.value),
+                .err => |err| return err.asError(),
+                .raw => @panic("unexpected raw"),
             }
         }
     }
@@ -155,7 +116,7 @@ test "query text table" {
     {
         const query_res = try c.query(allocator, "SELECT 1,2,3 UNION ALL SELECT 4,null,6");
         defer query_res.deinit(allocator);
-        const iter = (try expectRows(query_res.value)).iter();
+        const iter = (try query_res.expect(.rows)).iter();
         const table = try iter.collect(allocator);
         defer table.deinit(allocator);
         try std.testing.expectEqual(table.rows.len, 2);
@@ -180,7 +141,7 @@ test "prepare check" {
     { // prepare no execute
         const prep_res = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
         defer prep_res.deinit(allocator);
-        _ = try expectOk(prep_res.value);
+        _ = try prep_res.expect(.ok);
     }
     { // prepare with params
         const prep_res = try c.prepare(allocator, "SELECT CONCAT(?, ?) as my_col");
@@ -191,7 +152,7 @@ test "prepare check" {
                 try std.testing.expectEqual(prep_stmt.prep_ok.num_params, 2);
                 try std.testing.expectEqual(prep_stmt.prep_ok.num_columns, 1);
             },
-            else => return errorUnexpectedValue(prep_res.value),
+            .err => |err| return err.asError(),
         }
         try std.testing.expectEqual(c.conn.reader.pos, c.conn.reader.len);
     }
@@ -203,18 +164,18 @@ test "prepare execute - 1" {
     {
         const prep_res = try c.prepare(allocator, "CREATE DATABASE testdb2");
         defer prep_res.deinit(allocator);
-        const prep_stmt = try expectOk(prep_res.value);
+        const prep_stmt = try prep_res.expect(.ok);
         const query_res = try c.execute(allocator, &prep_stmt);
         defer query_res.deinit(allocator);
-        _ = try expectOk(query_res.value);
+        _ = try query_res.expect(.ok);
     }
     {
         const prep_res = try c.prepare(allocator, "DROP DATABASE testdb2");
         defer prep_res.deinit(allocator);
-        const prep_ok = try expectOk(prep_res.value);
+        const prep_ok = try prep_res.expect(.ok);
         const query_res = try c.execute(allocator, &prep_ok);
         defer query_res.deinit(allocator);
-        _ = try expectOk(query_res.value);
+        _ = try query_res.expect(.ok);
     }
 }
 
@@ -224,21 +185,21 @@ test "prepare execute - 2" {
 
     const prep_res_1 = try c.prepare(allocator, "CREATE DATABASE testdb3");
     defer prep_res_1.deinit(allocator);
-    const prep_stmt_1 = try expectOk(prep_res_1.value);
+    const prep_stmt_1 = try prep_res_1.expect(.ok);
 
     const prep_res_2 = try c.prepare(allocator, "DROP DATABASE testdb3");
     defer prep_res_2.deinit(allocator);
-    const prep_stmt_2 = try expectOk(prep_res_2.value);
+    const prep_stmt_2 = try prep_res_2.expect(.ok);
 
     {
         const query_res = try c.execute(allocator, &prep_stmt_1);
         defer query_res.deinit(allocator);
-        _ = try expectOk(query_res.value);
+        _ = try query_res.expect(.ok);
     }
     {
         const query_res = try c.execute(allocator, &prep_stmt_2);
         defer query_res.deinit(allocator);
-        _ = try expectOk(query_res.value);
+        _ = try query_res.expect(.ok);
     }
 }
 
@@ -252,10 +213,10 @@ test "prepare execute with result" {
         ;
         const prep_res = try c.prepare(allocator, query);
         defer prep_res.deinit(allocator);
-        const prep_stmt = try expectOk(prep_res.value);
+        const prep_stmt = try prep_res.expect(.ok);
         const query_res = try c.execute(allocator, &prep_stmt);
         defer query_res.deinit(allocator);
-        const rows = (try expectRows(query_res.value)).iter();
+        const rows = (try query_res.expect(.rows)).iter();
 
         const MyType = struct {
             a: ?u8,
@@ -277,4 +238,55 @@ test "prepare execute with result" {
     }
 }
 
-// SELECT CONCAT(?, ?) AS col1
+//test "binary data types" {
+//    var c = Client.init(test_config);
+//    defer c.deinit();
+//
+//    {
+//        const query =
+//            \\CREATE TABLE int_types_example (
+//            \\    tinyint_col TINYINT,
+//            \\    smallint_col SMALLINT,
+//            \\    mediumint_col MEDIUMINT,
+//            \\    int_col INT,
+//            \\    bigint_col BIGINT,
+//            \\    tinyint_unsigned_col TINYINT UNSIGNED,
+//            \\    smallint_unsigned_col SMALLINT UNSIGNED,
+//            \\    mediumint_unsigned_col MEDIUMINT UNSIGNED,
+//            \\    int_unsigned_col INT UNSIGNED,
+//            \\    bigint_unsigned_col BIGINT UNSIGNED
+//            \\);
+//        ;
+//
+//        const res = try c.query(allocator, query);
+//        defer res.deinit(allocator);
+//
+//
+//        const prep_res = try c.prepare(allocator, query);
+//        defer prep_res.deinit(allocator);
+//        const prep_stmt = try expectOk(prep_res.value);
+//        const query_res = try c.execute(allocator, &prep_stmt);
+//        defer query_res.deinit(allocator);
+//        const rows = (try expectRows(query_res.value)).iter();
+//
+//        const MyType = struct {
+//            a: u8,
+//            b: u16,
+//            // b: f64,
+//        };
+//        const expected = MyType{
+//            .a = 2,
+//            .b = 3,
+//            // .b = 0.4,
+//        };
+//
+//        var dest: MyType = undefined;
+//        while (try rows.next(allocator)) |row| {
+//            defer row.deinit(allocator);
+//            try row.scanStruct(&dest);
+//            try std.testing.expectEqualDeep(expected, dest);
+//        }
+//    }
+//}
+//
+//// SELECT CONCAT(?, ?) AS col1

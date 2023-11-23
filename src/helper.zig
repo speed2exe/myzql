@@ -66,10 +66,10 @@ pub fn scanBinResRowtoStruct(dest: anytype, raw: []const u8, col_defs: []ColumnD
     std.debug.assert(reader.finished());
 }
 
-inline fn logConversionError(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, col_type: EnumFieldType) void {
+inline fn logConversionError(comptime FieldType: type, field_name: []const u8, col_name: []const u8, col_type: EnumFieldType) void {
     std.log.err(
-        "cannot convert to type({any}) of field({s}) from column({s}) of type({any})\n",
-        .{ FieldType, field_name, col_def.name, col_type },
+        "cannot convert from column(name: {s}, type: {any}) to field(name: {s}, type: {any})\n",
+        .{ col_name, col_type, field_name, FieldType },
     );
 }
 
@@ -104,19 +104,25 @@ inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_d
                 else => {},
             }
         },
-        .Int => |int| {
-            _ = int;
-            switch (col_type) {
-                .MYSQL_TYPE_LONGLONG => {
-                    return @intCast(reader.readUInt64());
-                },
-                else => {},
-            }
+        .Int => switch (col_type) {
+            .MYSQL_TYPE_LONGLONG => return @intCast(reader.readUInt64()),
+
+            .MYSQL_TYPE_LONG,
+            .MYSQL_TYPE_INT24,
+            => return @intCast(reader.readUInt32()),
+
+            .MYSQL_TYPE_SHORT,
+            .MYSQL_TYPE_YEAR,
+            => return @intCast(reader.readUInt16()),
+
+            .MYSQL_TYPE_TINY => return @intCast(reader.readUInt16()),
+
+            else => {},
         },
         else => {},
     }
 
-    logConversionError(FieldType, field_name, col_def, col_type);
+    logConversionError(FieldType, field_name, col_def.name, col_type);
     unreachable;
 }
 
