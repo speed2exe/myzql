@@ -88,16 +88,14 @@ pub const Conn = struct {
         };
     }
 
-    // TODO: add options
-    pub fn execute(conn: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement) !QueryResult(BinaryResultRow) {
+    pub fn execute(conn: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
         std.debug.assert(conn.state == .connected);
         conn.sequence_id = 0;
         const execute_request: ExecuteRequest = .{
             .capabilities = conn.client_capabilities,
-            .stmt_id = prep_stmt.prep_ok.statement_id,
-            .num_params = prep_stmt.prep_ok.num_params,
+            .prep_stmt = prep_stmt,
         };
-        try conn.sendPacketUsingSmallPacketWriter(execute_request);
+        try conn.sendPacketUsingSmallPacketWriterWithParams(execute_request, params);
 
         const response_packet = try conn.readPacket(allocator);
         return .{
@@ -236,9 +234,15 @@ pub const Conn = struct {
 
     fn sendPacketUsingSmallPacketWriter(conn: *Conn, packet: anytype) !void {
         std.debug.assert(conn.state == .connected);
-        var writer = conn.writer;
-        var small_packet_writer = stream_buffered.SmallPacketWriter.init(&writer, conn.generateSequenceId());
+        var small_packet_writer = stream_buffered.SmallPacketWriter.init(&conn.writer, conn.generateSequenceId());
         try packet.write(&small_packet_writer);
+        try small_packet_writer.flush();
+    }
+
+    fn sendPacketUsingSmallPacketWriterWithParams(conn: *Conn, packet: anytype, params: anytype) !void {
+        std.debug.assert(conn.state == .connected);
+        var small_packet_writer = stream_buffered.SmallPacketWriter.init(&conn.writer, conn.generateSequenceId());
+        try packet.writeWithParams(&small_packet_writer, params);
         try small_packet_writer.flush();
     }
 

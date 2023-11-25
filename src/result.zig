@@ -193,21 +193,22 @@ pub const PrepareResult = struct {
 };
 
 pub const PreparedStatement = struct {
+    // TODO: use const instead
     prep_ok: PrepareOk,
     packets: []Packet,
-    params: []ColumnDefinition41,
-    col_defs: []ColumnDefinition41,
+    params: []ColumnDefinition41, // parameters that would be passed when executing the query
+    res_cols: []ColumnDefinition41, // columns that would be returned when executing the query
 
     pub fn initFromPacket(resp_packet: *const Packet, conn: *Conn, allocator: std.mem.Allocator) !PreparedStatement {
         const prep_ok = PrepareOk.initFromPacket(resp_packet, conn.client_capabilities);
-        var prep_stmt: PreparedStatement = .{ .prep_ok = prep_ok, .packets = &.{}, .params = &.{}, .col_defs = &.{} };
+        var prep_stmt: PreparedStatement = .{ .prep_ok = prep_ok, .packets = &.{}, .params = &.{}, .res_cols = &.{} };
         errdefer prep_stmt.deinit(allocator);
 
         prep_stmt.packets = try allocator.alloc(Packet, prep_ok.num_params + prep_ok.num_columns);
         @memset(prep_stmt.packets, Packet.safe_deinit());
 
         prep_stmt.params = try allocator.alloc(ColumnDefinition41, prep_ok.num_params);
-        prep_stmt.col_defs = try allocator.alloc(ColumnDefinition41, prep_ok.num_columns);
+        prep_stmt.res_cols = try allocator.alloc(ColumnDefinition41, prep_ok.num_columns);
 
         if (prep_ok.num_params > 0) {
             for (prep_stmt.packets[0..prep_ok.num_params], prep_stmt.params) |*packet, *param| {
@@ -218,9 +219,9 @@ pub const PreparedStatement = struct {
         }
 
         if (prep_ok.num_columns > 0) {
-            for (prep_stmt.packets[prep_ok.num_params..], prep_stmt.col_defs) |*packet, *col_def| {
+            for (prep_stmt.packets[prep_ok.num_params..], prep_stmt.res_cols) |*packet, *res_col| {
                 packet.* = try conn.readPacket(allocator);
-                col_def.* = ColumnDefinition41.initFromPacket(packet);
+                res_col.* = ColumnDefinition41.initFromPacket(packet);
             }
             try discardEofPacket(conn, allocator);
         }
@@ -230,7 +231,7 @@ pub const PreparedStatement = struct {
 
     pub fn deinit(prep_stmt: *const PreparedStatement, allocator: std.mem.Allocator) void {
         allocator.free(prep_stmt.params);
-        allocator.free(prep_stmt.col_defs);
+        allocator.free(prep_stmt.res_cols);
         for (prep_stmt.packets) |packet| {
             packet.deinit(allocator);
         }

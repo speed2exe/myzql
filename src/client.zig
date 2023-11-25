@@ -40,9 +40,9 @@ pub const Client = struct {
         return client.conn.prepare(allocator, query_string);
     }
 
-    pub fn execute(client: *Client, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement) !QueryResult(BinaryResultRow) {
+    pub fn execute(client: *Client, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
         try client.connectIfNotConnected(allocator);
-        return client.conn.execute(allocator, prep_stmt);
+        return client.conn.execute(allocator, prep_stmt, params);
     }
 
     fn connectIfNotConnected(c: *Client, allocator: std.mem.Allocator) !void {
