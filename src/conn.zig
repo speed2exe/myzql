@@ -235,6 +235,7 @@ pub const Conn = struct {
     fn sendPacketUsingSmallPacketWriter(conn: *Conn, packet: anytype) !void {
         std.debug.assert(conn.state == .connected);
         var small_packet_writer = stream_buffered.SmallPacketWriter.init(&conn.writer, conn.generateSequenceId());
+        errdefer conn.writer.reset();
         try packet.write(&small_packet_writer);
         try small_packet_writer.flush();
     }
@@ -242,6 +243,7 @@ pub const Conn = struct {
     fn sendPacketUsingSmallPacketWriterWithParams(conn: *Conn, packet: anytype, params: anytype) !void {
         std.debug.assert(conn.state == .connected);
         var small_packet_writer = stream_buffered.SmallPacketWriter.init(&conn.writer, conn.generateSequenceId());
+        errdefer conn.writer.reset();
         try packet.writeWithParams(&small_packet_writer, params);
         try small_packet_writer.flush();
     }

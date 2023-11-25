@@ -8,7 +8,115 @@ const TextResultRow = result.TextResultRow;
 const Options = result.BinaryResultRow.Options;
 const protocol = @import("./protocol.zig");
 const PacketReader = protocol.packet_reader.PacketReader;
+const packet_writer = protocol.packet_writer;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
+
+fn comptimeIntToUInt(
+    comptime Unsigned: type,
+    comptime Signed: type,
+    comptime int: comptime_int,
+) Unsigned {
+    return blk: {
+        if (comptime (int < 0)) {
+            break :blk @bitCast(@as(Signed, int));
+        } else {
+            break :blk int;
+        }
+    };
+}
+
+// https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_binary_resultset.html#sect_protocol_binary_resultset_row_value
+// https://mariadb.com/kb/en/com_stmt_execute/#binary-parameter-encoding
+pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, writer: anytype) !void {
+    const param_type_info = @typeInfo(@TypeOf(param));
+    const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
+
+    switch (param_type_info) {
+        .Int => |int| {
+            switch (col_type) {
+                .MYSQL_TYPE_LONGLONG => {
+                    if (int.bits == 64) {
+                        return try packet_writer.writeUInt64(writer, @bitCast(param));
+                    }
+                },
+                .MYSQL_TYPE_LONG,
+                .MYSQL_TYPE_INT24,
+                => {
+                    if (int.bits == 32) {
+                        return try packet_writer.writeUInt32(writer, @bitCast(param));
+                    }
+                },
+                .MYSQL_TYPE_SHORT,
+                .MYSQL_TYPE_YEAR,
+                => {
+                    if (int.bits == 16) {
+                        return try packet_writer.writeUInt16(writer, @bitCast(param));
+                    }
+                },
+                .MYSQL_TYPE_TINY => {
+                    if (int.bits == 8) {
+                        return try packet_writer.writeUInt8(writer, @bitCast(param));
+                    }
+                },
+                else => {},
+            }
+        },
+        .ComptimeInt => {
+            switch (col_type) {
+                .MYSQL_TYPE_LONGLONG => {
+                    const value: u64 = comptimeIntToUInt(u64, i64, param);
+                    return try packet_writer.writeUInt64(writer, value);
+                },
+                .MYSQL_TYPE_LONG,
+                .MYSQL_TYPE_INT24,
+                => {
+                    const value: u32 = comptimeIntToUInt(u32, i32, param);
+                    return try packet_writer.writeUInt32(writer, value);
+                },
+                // .MYSQL_TYPE_SHORT,
+                // .MYSQL_TYPE_YEAR,
+                // => {
+                //     const value: u16 = comptimeIntToUInt(u16, i16, param);
+                //     return try packet_writer.writeUInt16(writer, value);
+                // },
+                else => {},
+            }
+        },
+
+        .Pointer => |pointer| {
+            switch (@typeInfo(pointer.child)) {
+                .Int => |int| {
+                    if (int.bits == 8) {
+                        switch (col_type) {
+                            .MYSQL_TYPE_STRING,
+                            .MYSQL_TYPE_VARCHAR,
+                            .MYSQL_TYPE_VAR_STRING,
+                            .MYSQL_TYPE_ENUM,
+                            .MYSQL_TYPE_SET,
+                            .MYSQL_TYPE_LONG_BLOB,
+                            .MYSQL_TYPE_MEDIUM_BLOB,
+                            .MYSQL_TYPE_BLOB,
+                            .MYSQL_TYPE_TINY_BLOB,
+                            .MYSQL_TYPE_GEOMETRY,
+                            .MYSQL_TYPE_BIT,
+                            .MYSQL_TYPE_DECIMAL,
+                            .MYSQL_TYPE_NEWDECIMAL,
+                            => return try packet_writer.writeLengthEncodedString(writer, param),
+                            else => {},
+                        }
+                    }
+                },
+                else => {},
+            }
+        },
+        else => {},
+    }
+
+    // comptime FieldType: type, field_name: []const u8, col_name: []const u8, col_type: EnumFieldType)
+    // TODO: insert field name if struct is passed in
+    logConversionError(@TypeOf(param), "", col_def.name, col_type);
+    return error.InvalidConversion;
+}
 
 pub fn scanTextResultRow(raw: []const u8, dest: []?[]const u8) !void {
     var packet_reader = PacketReader.initFromPayload(raw);
@@ -68,7 +176,7 @@ pub fn scanBinResRowtoStruct(dest: anytype, raw: []const u8, col_defs: []ColumnD
 
 inline fn logConversionError(comptime FieldType: type, field_name: []const u8, col_name: []const u8, col_type: EnumFieldType) void {
     std.log.err(
-        "cannot convert from column(name: {s}, type: {any}) to field(name: {s}, type: {any})\n",
+        "MySQL Column: (name: {s}, type: {any}), Zig Value: (name: {s}, type: {any})\n",
         .{ col_name, col_type, field_name, FieldType },
     );
 }

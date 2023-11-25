@@ -43,6 +43,11 @@ pub const Writer = struct {
     len: usize = 0,
     stream: std.net.Stream,
 
+    // invalidates all previous writes
+    pub fn reset(w: *Writer) void {
+        w.len = 0;
+    }
+
     // write all behavior
     pub fn write(w: *Writer, buffer: []const u8) !void {
         var already_written: usize = 0;

@@ -252,31 +252,57 @@ test "binary data types" {
     try queryExpectOk(&c, "CREATE DATABASE test");
     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
 
-    try queryExpectOk(
-        &c,
+    try queryExpectOk(&c,
         \\
         \\CREATE TABLE test.int_types_example (
         \\    tinyint_col TINYINT,
         \\    smallint_col SMALLINT,
         \\    mediumint_col MEDIUMINT,
-        \\    int_col INT,
-        \\    bigint_col BIGINT,
-        \\    tinyint_unsigned_col TINYINT UNSIGNED,
-        \\    smallint_unsigned_col SMALLINT UNSIGNED,
-        \\    mediumint_unsigned_col MEDIUMINT UNSIGNED,
-        \\    int_unsigned_col INT UNSIGNED,
-        \\    bigint_unsigned_col BIGINT UNSIGNED
+        \\    int_col INT
+        // \\    bigint_col BIGINT,
+        // \\    tinyint_unsigned_col TINYINT UNSIGNED,
+        // \\    smallint_unsigned_col SMALLINT UNSIGNED,
+        // \\    mediumint_unsigned_col MEDIUMINT UNSIGNED,
+        // \\    int_unsigned_col INT UNSIGNED,
+        // \\    bigint_unsigned_col BIGINT UNSIGNED
         \\)
-        ,
     );
     defer queryExpectOk(&c, "DROP TABLE test.int_types_example") catch {};
 
-    // const prep_res = try c.prepare(allocator, "INSERT INTO int_types_example VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    // defer prep_res.deinit(allocator);
-    // const prep_stmt = try prep_res.expect(.ok);
-    // const exe_res = try c.execute(allocator, prep_stmt, .{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
-    // defer exe_res.deinit(allocator);
-    // _ = try exe_res.expect(.ok);
+    const prep_res = try c.prepare(
+        allocator,
+        "INSERT INTO test.int_types_example VALUES (?, ?, ?, ?)",
+    );
+    defer prep_res.deinit(allocator);
+    const prep_stmt = try prep_res.expect(.ok);
+
+    const params = .{
+        .{ -128, -32768, -8388608, -2147483648 },
+        .{ 0, 0, 0, 0 },
+        .{ 127, 32767, 8388607, 2147483647 },
+    };
+    inline for (params) |param| {
+        const exe_res = try c.execute(allocator, &prep_stmt, param);
+        defer exe_res.deinit(allocator);
+        _ = try exe_res.expect(.ok);
+    }
+
+    {
+        const res = try c.query(allocator, "SELECT * FROM test.int_types_example");
+        defer res.deinit(allocator);
+        const rows_iter = (try res.expect(.rows)).iter();
+
+        const table = try rows_iter.collect(allocator);
+        defer table.deinit(allocator);
+
+        const expected: []const []const ?[]const u8 = &.{
+            &.{ "-128", "-32768", "-8388608", "-2147483648" },
+            &.{ "0", "0", "0", "0" },
+            &.{ "127", "32767", "8388607", "2147483647" },
+        };
+        // std.debug.print("\n{?s}\n", .{table.rows[2][2]});
+        try std.testing.expectEqualDeep(expected, table.rows);
+    }
 }
 
 //

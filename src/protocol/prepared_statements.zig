@@ -5,6 +5,8 @@ const constants = @import("../constants.zig");
 const Packet = @import("./packet.zig").Packet;
 const PacketReader = @import("./packet_reader.zig").PacketReader;
 const PreparedStatement = @import("./../result.zig").PreparedStatement;
+const ColumnDefinition41 = @import("./column_definition.zig").ColumnDefinition41;
+const helper = @import("./../helper.zig");
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query.html
 pub const PrepareRequest = struct {
@@ -95,10 +97,11 @@ pub const ExecuteRequest = struct {
             // send type to server (0 / 1)
             try packet_writer.writeLengthEncodedInteger(writer, e.new_params_bind_flag);
             if (e.new_params_bind_flag > 0) {
-                for (e.prep_stmt.params) |p| {
-                    try packet_writer.writeUInt16(writer, p.flags);
+                for (e.prep_stmt.params) |col_def| {
+                    try packet_writer.writeUInt8(writer, col_def.column_type);
+                    try packet_writer.writeUInt8(writer, 0);
                     if (e.capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) {
-                        try packet_writer.writeLengthEncodedString(writer, p.name);
+                        try packet_writer.writeLengthEncodedString(writer, col_def.name);
                     }
                 }
                 if (has_attributes_to_write) {
@@ -110,24 +113,24 @@ pub const ExecuteRequest = struct {
             }
 
             // TODO: Write params and attr as binary values
-            // // Write params as binary values
-            // for (params) |b| {
-            //     try writeBinaryParam(b, writer);
-            // }
-            // if (has_attributes_to_write) {
-            //     for (e.attributes) |b| {
-            //         try writeBinaryParam(b, writer);
-            //     }
-            // }
+            // Write params as binary values
+            inline for (params, e.prep_stmt.params) |param, *col_def| {
+                try helper.encodeBinaryParam(param, col_def, writer);
+            }
+            if (has_attributes_to_write) {
+                for (e.attributes) |b| {
+                    try writeAttr(b, writer);
+                }
+            }
         }
     }
 };
 
-// fn writeBinaryParam(param: BinaryParam, writer: anytype) !void {
-//     _ = writer;
-//     _ = param;
-//     @panic("TODO");
-// }
+fn writeAttr(param: BinaryParam, writer: anytype) !void {
+    _ = writer;
+    _ = param;
+    @panic("TODO: support mysql attributes");
+}
 
 fn writeNullBitmap(params: anytype, attributes: []const BinaryParam, writer: anytype) !void {
     const byte_count = (params.len + attributes.len + 7) / 8;
