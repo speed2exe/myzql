@@ -32,6 +32,40 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
     const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
 
     switch (param_type_info) {
+        .Null => {
+            switch (col_type) {
+                .MYSQL_TYPE_LONGLONG => return try writer.writer.advance(8),
+                .MYSQL_TYPE_LONG,
+                .MYSQL_TYPE_INT24,
+                => return try writer.writer.advance(4),
+                .MYSQL_TYPE_SHORT,
+                .MYSQL_TYPE_YEAR,
+                => return try writer.writer.advance(2),
+                .MYSQL_TYPE_TINY => return try writer.writer.advance(1),
+                .MYSQL_TYPE_STRING,
+                .MYSQL_TYPE_VARCHAR,
+                .MYSQL_TYPE_VAR_STRING,
+                .MYSQL_TYPE_ENUM,
+                .MYSQL_TYPE_SET,
+                .MYSQL_TYPE_LONG_BLOB,
+                .MYSQL_TYPE_MEDIUM_BLOB,
+                .MYSQL_TYPE_BLOB,
+                .MYSQL_TYPE_TINY_BLOB,
+                .MYSQL_TYPE_GEOMETRY,
+                .MYSQL_TYPE_BIT,
+                .MYSQL_TYPE_DECIMAL,
+                .MYSQL_TYPE_NEWDECIMAL,
+                => return try packet_writer.writeLengthEncodedString(writer, ""),
+                else => {},
+            }
+        },
+        .Optional => {
+            if (param) |p| {
+                return encodeBinaryParam(p, col_def, writer);
+            } else {
+                return encodeBinaryParam(null, col_def, writer);
+            }
+        },
         .Int => |int| {
             switch (col_type) {
                 .MYSQL_TYPE_LONGLONG => {

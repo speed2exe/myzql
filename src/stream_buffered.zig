@@ -61,6 +61,14 @@ pub const Writer = struct {
         }
     }
 
+    // increase the length of the buffer as if it was written to
+    pub fn advance(w: *Writer, offset: usize) !void {
+        if (w.len + offset > w.buf.len) {
+            return error.BufferNotEnoughSpace;
+        }
+        w.len += offset;
+    }
+
     // if the buffer is full
     inline fn full(w: *Writer) bool {
         return w.len == w.buf.len;

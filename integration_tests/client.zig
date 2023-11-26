@@ -280,6 +280,7 @@ test "binary data types" {
         .{ -(1 << 7), -(1 << 15), -(1 << 23), -(1 << 31), -(1 << 63), 0, 0, 0, 0, 0 },
         .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
         .{ (1 << 7) - 1, (1 << 15) - 1, (1 << 23) - 1, (1 << 31) - 1, (1 << 63) - 1, (1 << 8) - 1, (1 << 16) - 1, (1 << 24) - 1, (1 << 32) - 1, (1 << 64) - 1 },
+        .{ null, null, null, null, null, null, null, null, null, null },
     };
     inline for (params) |param| {
         const exe_res = try c.execute(allocator, &prep_stmt, param);
@@ -299,6 +300,7 @@ test "binary data types" {
             &.{ "-128", "-32768", "-8388608", "-2147483648", "-9223372036854775808", "0", "0", "0", "0", "0" },
             &.{ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" },
             &.{ "127", "32767", "8388607", "2147483647", "9223372036854775807", "255", "65535", "16777215", "4294967295", "18446744073709551615" },
+            &.{ null, null, null, null, null, null, null, null, null, null },
         };
         // std.debug.print("\n{?s}\n", .{table.rows[2][9]});
         try std.testing.expectEqualDeep(expected, table.rows);
