@@ -374,5 +374,62 @@ test "binary data types - float" {
     }
 }
 
+test "binary data types - string" {
+    var c = Client.init(test_config);
+    defer c.deinit();
+
+    try queryExpectOk(&c, "CREATE DATABASE test");
+    defer queryExpectOk(&c, "DROP DATABASE test") catch {};
+
+    try queryExpectOk(&c,
+        \\
+        \\CREATE TABLE test.string_types_example (
+        \\    varchar_col VARCHAR(255),
+        \\    not_null_varchar_col VARCHAR(255) NOT NULL,
+        \\    enum_col ENUM('a', 'b', 'c'),
+        \\    not_null_enum_col ENUM('a', 'b', 'c') NOT NULL
+        \\)
+    );
+    defer queryExpectOk(&c, "DROP TABLE test.string_types_example") catch {};
+
+    const prep_res = try c.prepare(allocator, "INSERT INTO test.string_types_example VALUES (?, ?, ?, ?)");
+    defer prep_res.deinit(allocator);
+    const prep_stmt = try prep_res.expect(.ok);
+
+    const params = .{
+        .{ "hello", "world", "a", "b" },
+        .{ null, "foo", null, "c" },
+        .{ null, "", null, "a" },
+        .{
+            @as(?*const [3]u8, "baz"),
+            @as([*:0]const u8, "bar"),
+            @as(?[]const u8, null),
+            @as([:0]const u8, "c"),
+        },
+    };
+    inline for (params) |param| {
+        const exe_res = try c.execute(allocator, &prep_stmt, param);
+        defer exe_res.deinit(allocator);
+        _ = try exe_res.expect(.ok);
+    }
+
+    {
+        const res = try c.query(allocator, "SELECT * FROM test.string_types_example");
+        defer res.deinit(allocator);
+        const rows_iter = (try res.expect(.rows)).iter();
+
+        const table = try rows_iter.collect(allocator);
+        defer table.deinit(allocator);
+
+        const expected: []const []const ?[]const u8 = &.{
+            &.{ "hello", "world", "a", "b" },
+            &.{ null, "foo", null, "c" },
+            &.{ null, "", null, "a" },
+            &.{ "baz", "bar", null, "c" },
+        };
+        try std.testing.expectEqualDeep(expected, table.rows);
+    }
+}
+
 //
 //// SELECT CONCAT(?, ?) AS col1

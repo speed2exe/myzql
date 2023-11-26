@@ -32,40 +32,12 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
     const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
 
     switch (param_type_info) {
-        .Null => {
-            switch (col_type) {
-                .MYSQL_TYPE_LONGLONG => return try writer.writer.advance(8),
-                .MYSQL_TYPE_LONG,
-                .MYSQL_TYPE_INT24,
-                => return try writer.writer.advance(4),
-                .MYSQL_TYPE_SHORT,
-                .MYSQL_TYPE_YEAR,
-                => return try writer.writer.advance(2),
-                .MYSQL_TYPE_TINY => return try writer.writer.advance(1),
-                .MYSQL_TYPE_STRING,
-                .MYSQL_TYPE_VARCHAR,
-                .MYSQL_TYPE_VAR_STRING,
-                .MYSQL_TYPE_ENUM,
-                .MYSQL_TYPE_SET,
-                .MYSQL_TYPE_LONG_BLOB,
-                .MYSQL_TYPE_MEDIUM_BLOB,
-                .MYSQL_TYPE_BLOB,
-                .MYSQL_TYPE_TINY_BLOB,
-                .MYSQL_TYPE_GEOMETRY,
-                .MYSQL_TYPE_BIT,
-                .MYSQL_TYPE_DECIMAL,
-                .MYSQL_TYPE_NEWDECIMAL,
-                => return try packet_writer.writeLengthEncodedString(writer, ""),
-                .MYSQL_TYPE_FLOAT => return try writer.writer.advance(4),
-                .MYSQL_TYPE_DOUBLE => return try writer.writer.advance(8),
-                else => {},
-            }
-        },
+        .Null => return,
         .Optional => {
             if (param) |p| {
                 return encodeBinaryParam(p, col_def, writer);
             } else {
-                return encodeBinaryParam(null, col_def, writer);
+                return;
             }
         },
         .Int => |int| {
@@ -162,8 +134,37 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
                 else => {},
             }
         },
-
+        .Array => |array| {
+            switch (@typeInfo(array.child)) {
+                .Int => |int| {
+                    if (int.bits == 8) {
+                        switch (col_type) {
+                            .MYSQL_TYPE_STRING,
+                            .MYSQL_TYPE_VARCHAR,
+                            .MYSQL_TYPE_VAR_STRING,
+                            .MYSQL_TYPE_ENUM,
+                            .MYSQL_TYPE_SET,
+                            .MYSQL_TYPE_LONG_BLOB,
+                            .MYSQL_TYPE_MEDIUM_BLOB,
+                            .MYSQL_TYPE_BLOB,
+                            .MYSQL_TYPE_TINY_BLOB,
+                            .MYSQL_TYPE_GEOMETRY,
+                            .MYSQL_TYPE_BIT,
+                            .MYSQL_TYPE_DECIMAL,
+                            .MYSQL_TYPE_NEWDECIMAL,
+                            => return try packet_writer.writeLengthEncodedString(writer, &param),
+                            else => {},
+                        }
+                    }
+                },
+                else => {},
+            }
+        },
         .Pointer => |pointer| {
+            switch (pointer.size) {
+                .One => return encodeBinaryParam(param.*, col_def, writer),
+                else => {},
+            }
             switch (@typeInfo(pointer.child)) {
                 .Int => |int| {
                     if (int.bits == 8) {
@@ -181,7 +182,11 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
                             .MYSQL_TYPE_BIT,
                             .MYSQL_TYPE_DECIMAL,
                             .MYSQL_TYPE_NEWDECIMAL,
-                            => return try packet_writer.writeLengthEncodedString(writer, param),
+                            => switch (pointer.size) {
+                                .C, .Many => return try packet_writer.writeLengthEncodedString(writer, std.mem.span(param)),
+                                .Slice => return try packet_writer.writeLengthEncodedString(writer, param),
+                                else => {},
+                            },
                             else => {},
                         }
                     }
