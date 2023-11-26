@@ -247,7 +247,7 @@ test "prepare execute with result" {
     }
 }
 
-test "binary data types" {
+test "binary data types - int" {
     var c = Client.init(test_config);
     defer c.deinit();
 
@@ -311,6 +311,64 @@ test "binary data types" {
             &.{ "-128", "-32768", "-8388608", "-2147483648", "-9223372036854775808", "0", "0", "0", "0", "0" },
             &.{ "127", "32767", "8388607", "2147483647", "9223372036854775807", "255", "65535", "16777215", "4294967295", "18446744073709551615" },
             &.{ null, null, null, null, null, null, null, null, null, null },
+        };
+        try std.testing.expectEqualDeep(expected, table.rows);
+    }
+}
+
+test "binary data types - float" {
+    var c = Client.init(test_config);
+    defer c.deinit();
+
+    try queryExpectOk(&c, "CREATE DATABASE test");
+    defer queryExpectOk(&c, "DROP DATABASE test") catch {};
+
+    try queryExpectOk(&c,
+        \\
+        \\CREATE TABLE test.float_types_example (
+        \\    float_col FLOAT,
+        \\    double_col DOUBLE
+        \\)
+    );
+    defer queryExpectOk(&c, "DROP TABLE test.float_types_example") catch {};
+
+    const prep_res = try c.prepare(allocator, "INSERT INTO test.float_types_example VALUES (?, ?)");
+    defer prep_res.deinit(allocator);
+    const prep_stmt = try prep_res.expect(.ok);
+
+    const params = .{
+        .{ 0.0, 0.0 },
+        .{ -1.23, -1.23 },
+        .{ 1.23, 1.23 },
+        .{ null, null },
+        .{ @as(?f32, 0), @as(?f64, 0) },
+        .{ @as(f32, -1.23), @as(f64, -1.23) },
+        .{ @as(f32, 1.23), @as(f64, 1.23) },
+        .{ @as(?f32, null), @as(?f64, null) },
+    };
+    inline for (params) |param| {
+        const exe_res = try c.execute(allocator, &prep_stmt, param);
+        defer exe_res.deinit(allocator);
+        _ = try exe_res.expect(.ok);
+    }
+
+    {
+        const res = try c.query(allocator, "SELECT * FROM test.float_types_example");
+        defer res.deinit(allocator);
+        const rows_iter = (try res.expect(.rows)).iter();
+
+        const table = try rows_iter.collect(allocator);
+        defer table.deinit(allocator);
+
+        const expected: []const []const ?[]const u8 = &.{
+            &.{ "0", "0" },
+            &.{ "-1.23", "-1.23" },
+            &.{ "1.23", "1.23" },
+            &.{ null, null },
+            &.{ "0", "0" },
+            &.{ "-1.23", "-1.23" },
+            &.{ "1.23", "1.23" },
+            &.{ null, null },
         };
         try std.testing.expectEqualDeep(expected, table.rows);
     }

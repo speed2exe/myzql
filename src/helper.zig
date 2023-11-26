@@ -56,6 +56,8 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
                 .MYSQL_TYPE_DECIMAL,
                 .MYSQL_TYPE_NEWDECIMAL,
                 => return try packet_writer.writeLengthEncodedString(writer, ""),
+                .MYSQL_TYPE_FLOAT => return try writer.writer.advance(4),
+                .MYSQL_TYPE_DOUBLE => return try writer.writer.advance(8),
                 else => {},
             }
         },
@@ -130,6 +132,32 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
                         const value: u8 = comptimeIntToUInt(u8, i8, param);
                         return try packet_writer.writeUInt8(writer, value);
                     }
+                },
+                else => {},
+            }
+        },
+        .Float => |float| {
+            switch (col_type) {
+                .MYSQL_TYPE_DOUBLE => {
+                    if (float.bits <= 64) {
+                        return try packet_writer.writeUInt64(writer, @bitCast(@as(f64, param)));
+                    }
+                },
+                .MYSQL_TYPE_FLOAT => {
+                    if (float.bits <= 32) {
+                        return try packet_writer.writeUInt32(writer, @bitCast(@as(f32, param)));
+                    }
+                },
+                else => {},
+            }
+        },
+        .ComptimeFloat => {
+            switch (col_type) {
+                .MYSQL_TYPE_DOUBLE => {
+                    return try packet_writer.writeUInt64(writer, @bitCast(@as(f64, param)));
+                },
+                .MYSQL_TYPE_FLOAT => {
+                    return try packet_writer.writeUInt32(writer, @bitCast(@as(f32, param)));
                 },
                 else => {},
             }
