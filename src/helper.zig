@@ -67,29 +67,35 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
             }
         },
         .Int => |int| {
+            const UnsignedInt: type = comptime blk: {
+                var int_type_info = @typeInfo(@TypeOf(param));
+                int_type_info.Int.signedness = .unsigned;
+                break :blk @Type(int_type_info);
+            };
+
             switch (col_type) {
                 .MYSQL_TYPE_LONGLONG => {
-                    if (int.bits == 64) {
-                        return try packet_writer.writeUInt64(writer, @bitCast(param));
+                    if (int.bits <= 64) {
+                        return try packet_writer.writeUInt64(writer, @as(UnsignedInt, @bitCast(param)));
                     }
                 },
                 .MYSQL_TYPE_LONG,
                 .MYSQL_TYPE_INT24,
                 => {
-                    if (int.bits == 32) {
-                        return try packet_writer.writeUInt32(writer, @bitCast(param));
+                    if (int.bits <= 32) {
+                        return try packet_writer.writeUInt32(writer, @as(UnsignedInt, @bitCast(param)));
                     }
                 },
                 .MYSQL_TYPE_SHORT,
                 .MYSQL_TYPE_YEAR,
                 => {
-                    if (int.bits == 16) {
-                        return try packet_writer.writeUInt16(writer, @bitCast(param));
+                    if (int.bits <= 16) {
+                        return try packet_writer.writeUInt16(writer, @as(UnsignedInt, @bitCast(param)));
                     }
                 },
                 .MYSQL_TYPE_TINY => {
-                    if (int.bits == 8) {
-                        return try packet_writer.writeUInt8(writer, @bitCast(param));
+                    if (int.bits <= 8) {
+                        return try packet_writer.writeUInt8(writer, @as(UnsignedInt, @bitCast(param)));
                     }
                 },
                 else => {},

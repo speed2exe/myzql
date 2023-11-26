@@ -3,6 +3,8 @@ const Client = @import("../src/client.zig").Client;
 const test_config = @import("./config.zig").test_config;
 const allocator = std.testing.allocator;
 const ErrorPacket = @import("../src/protocol.zig").generic_response.ErrorPacket;
+const minInt = std.math.minInt;
+const maxInt = std.math.maxInt;
 
 // convenient function for testing
 fn queryExpectOk(c: *Client, query: []const u8) !void {
@@ -277,10 +279,14 @@ test "binary data types" {
     const prep_stmt = try prep_res.expect(.ok);
 
     const params = .{
-        .{ -(1 << 7), -(1 << 15), -(1 << 23), -(1 << 31), -(1 << 63), 0, 0, 0, 0, 0 },
         .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        .{ -(1 << 7), -(1 << 15), -(1 << 23), -(1 << 31), -(1 << 63), 0, 0, 0, 0, 0 },
         .{ (1 << 7) - 1, (1 << 15) - 1, (1 << 23) - 1, (1 << 31) - 1, (1 << 63) - 1, (1 << 8) - 1, (1 << 16) - 1, (1 << 24) - 1, (1 << 32) - 1, (1 << 64) - 1 },
         .{ null, null, null, null, null, null, null, null, null, null },
+        .{ @as(?i8, 0), @as(?i16, 0), @as(?i32, 0), @as(?i64, 0), @as(?u8, 0), @as(?u16, 0), @as(?u32, 0), @as(?u64, 0), @as(?u8, 0), @as(?u64, 0) },
+        // .{ minInt(i8), minInt(i16), minInt(i32), minInt(i64), minInt(u8), minInt(u16), minInt(u32), minInt(u64), minInt(u8), minInt(u64) },
+        // .{ maxInt(i8), maxInt(i16), maxInt(i32), maxInt(i64), maxInt(u8), maxInt(u16), maxInt(u32), maxInt(u64), maxInt(u8), maxInt(u64) },
+        // .{ @as(?i8, null), @as(?i16, null), @as(?i32, null), @as(?i64, null), @as(?u8, null), @as(?u16, null), @as(?u32, null), @as(?u64, null), @as(?u8, null), @as(?u64, null) },
     };
     inline for (params) |param| {
         const exe_res = try c.execute(allocator, &prep_stmt, param);
@@ -297,10 +303,14 @@ test "binary data types" {
         defer table.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
-            &.{ "-128", "-32768", "-8388608", "-2147483648", "-9223372036854775808", "0", "0", "0", "0", "0" },
             &.{ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" },
+            &.{ "-128", "-32768", "-8388608", "-2147483648", "-9223372036854775808", "0", "0", "0", "0", "0" },
             &.{ "127", "32767", "8388607", "2147483647", "9223372036854775807", "255", "65535", "16777215", "4294967295", "18446744073709551615" },
             &.{ null, null, null, null, null, null, null, null, null, null },
+            &.{ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" },
+            // &.{ "-128", "-32768", "-8388608", "-2147483648", "-9223372036854775808", "0", "0", "0", "0", "0" },
+            // &.{ "127", "32767", "8388607", "2147483647", "9223372036854775807", "255", "65535", "16777215", "4294967295", "18446744073709551615" },
+            // &.{ null, null, null, null, null, null, null, null, null, null },
         };
         // std.debug.print("\n{?s}\n", .{table.rows[2][9]});
         try std.testing.expectEqualDeep(expected, table.rows);
