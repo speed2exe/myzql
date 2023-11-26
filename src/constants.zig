@@ -61,7 +61,7 @@ pub const CLIENT_CAPABILITY_EXTENSION:           u32 = 1 << 29;
 pub const CLIENT_SSL_VERIFY_SERVER_CERT:         u32 = 1 << 30;
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query.html
-pub const COM_QUERY            :u8 = 0x03;
+pub const COM_QUERY:        u8 = 0x03;
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_command_phase_ps.html
 pub const COM_STMT_PREPARE: u8 = 0x16;
@@ -122,6 +122,40 @@ pub const COM_PING:             u8 = 0x0e;
 pub const COM_CHANGE_USER:      u8 = 0x11;
 pub const COM_RESET_CONNECTION: u8 = 0x1f;
 pub const COM_SET_OPTION:       u8 = 0x1a;
+
+// https://dev.mysql.com/doc/dev/mysql-server/latest/group__group__cs__column__definition__flags.html
+pub const NOT_NULL_FLAG:                  u16 = 1;
+pub const PRI_KEY_FLAG:                   u16 = 2;
+pub const UNIQUE_KEY_FLAG:                u16 = 4;
+pub const MULTIPLE_KEY_FLAG:              u16 = 8;
+pub const BLOB_FLAG:                      u16 = 16;
+pub const UNSIGNED_FLAG:                  u16 = 32;
+pub const ZEROFILL_FLAG:                  u16 = 64;
+pub const BINARY_FLAG:                    u16 = 128;
+pub const ENUM_FLAG:                      u16 = 256;
+pub const AUTO_INCREMENT_FLAG:            u16 = 512;
+pub const TIMESTAMP_FLAG:                 u16 = 1024;
+pub const SET_FLAG:                       u16 = 2048;
+pub const NO_DEFAULT_VALUE_FLAG:          u16 = 4096;
+pub const ON_UPDATE_NOW_FLAG:             u16 = 8192;
+pub const NUM_FLAG:                       u16 = 32768;
+
+pub const PART_KEY_FLAG:                  u16 = 16384;
+pub const GROUP_FLAG:                     u16 = 32768;
+pub const UNIQUE_FLAG:                    u16 = 65536;
+pub const BINCMP_FLAG:                    u32 = 131072;
+pub const GET_FIXED_FIELDS_FLAG:          u32 = (1 << 18);
+pub const FIELD_IN_PART_FUNC_FLAG:        u32 = (1 << 19);
+pub const FIELD_IN_ADD_INDEX:             u32 = (1 << 20);
+pub const FIELD_IS_RENAMED:               u32 = (1 << 21);
+pub const FIELD_FLAGS_STORAGE_MEDIA:      u32 = 22;
+pub const FIELD_FLAGS_STORAGE_MEDIA_MASK: u32 = (3 << FIELD_FLAGS_STORAGE_MEDIA);
+pub const FIELD_FLAGS_COLUMN_FORMAT:      u32 = 24;
+pub const FIELD_FLAGS_COLUMN_FORMAT_MASK: u32 = (3 << FIELD_FLAGS_COLUMN_FORMAT);
+pub const FIELD_IS_DROPPED:               u32 = (1 << 26);
+pub const EXPLICIT_NULL_FLAG:             u32 = (1 << 27);
+pub const NOT_SECONDARY_FLAG:             u32 = (1 << 29);
+pub const FIELD_IS_INVISIBLE:             u32 = (1 << 30);
 
 // Derive from:
 // SELECT COLLATION_NAME, ID FROM information_schema.COLLATIONS WHERE ID < 256 ORDER BY ID

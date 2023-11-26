@@ -258,28 +258,28 @@ test "binary data types" {
         \\    tinyint_col TINYINT,
         \\    smallint_col SMALLINT,
         \\    mediumint_col MEDIUMINT,
-        \\    int_col INT
-        // \\    bigint_col BIGINT,
-        // \\    tinyint_unsigned_col TINYINT UNSIGNED,
-        // \\    smallint_unsigned_col SMALLINT UNSIGNED,
-        // \\    mediumint_unsigned_col MEDIUMINT UNSIGNED,
-        // \\    int_unsigned_col INT UNSIGNED,
-        // \\    bigint_unsigned_col BIGINT UNSIGNED
+        \\    int_col INT,
+        \\    bigint_col BIGINT,
+        \\    tinyint_unsigned_col TINYINT UNSIGNED,
+        \\    smallint_unsigned_col SMALLINT UNSIGNED,
+        \\    mediumint_unsigned_col MEDIUMINT UNSIGNED,
+        \\    int_unsigned_col INT UNSIGNED,
+        \\    bigint_unsigned_col BIGINT UNSIGNED
         \\)
     );
     defer queryExpectOk(&c, "DROP TABLE test.int_types_example") catch {};
 
     const prep_res = try c.prepare(
         allocator,
-        "INSERT INTO test.int_types_example VALUES (?, ?, ?, ?)",
+        "INSERT INTO test.int_types_example VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     defer prep_res.deinit(allocator);
     const prep_stmt = try prep_res.expect(.ok);
 
     const params = .{
-        .{ -128, -32768, -8388608, -2147483648 },
-        .{ 0, 0, 0, 0 },
-        .{ 127, 32767, 8388607, 2147483647 },
+        .{ -(1 << 7), -(1 << 15), -(1 << 23), -(1 << 31), -(1 << 63), 0, 0, 0, 0, 0 },
+        .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        .{ (1 << 7) - 1, (1 << 15) - 1, (1 << 23) - 1, (1 << 31) - 1, (1 << 63) - 1, (1 << 8) - 1, (1 << 16) - 1, (1 << 24) - 1, (1 << 32) - 1, (1 << 64) - 1 },
     };
     inline for (params) |param| {
         const exe_res = try c.execute(allocator, &prep_stmt, param);
@@ -296,11 +296,11 @@ test "binary data types" {
         defer table.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
-            &.{ "-128", "-32768", "-8388608", "-2147483648" },
-            &.{ "0", "0", "0", "0" },
-            &.{ "127", "32767", "8388607", "2147483647" },
+            &.{ "-128", "-32768", "-8388608", "-2147483648", "-9223372036854775808", "0", "0", "0", "0", "0" },
+            &.{ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" },
+            &.{ "127", "32767", "8388607", "2147483647", "9223372036854775807", "255", "65535", "16777215", "4294967295", "18446744073709551615" },
         };
-        // std.debug.print("\n{?s}\n", .{table.rows[2][2]});
+        // std.debug.print("\n{?s}\n", .{table.rows[2][9]});
         try std.testing.expectEqualDeep(expected, table.rows);
     }
 }

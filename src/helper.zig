@@ -64,21 +64,33 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
         .ComptimeInt => {
             switch (col_type) {
                 .MYSQL_TYPE_LONGLONG => {
-                    const value: u64 = comptimeIntToUInt(u64, i64, param);
-                    return try packet_writer.writeUInt64(writer, value);
+                    if (param <= std.math.maxInt(u64) and param >= std.math.minInt(i64)) {
+                        const value: u64 = comptimeIntToUInt(u64, i64, param);
+                        return try packet_writer.writeUInt64(writer, value);
+                    }
                 },
                 .MYSQL_TYPE_LONG,
                 .MYSQL_TYPE_INT24,
                 => {
-                    const value: u32 = comptimeIntToUInt(u32, i32, param);
-                    return try packet_writer.writeUInt32(writer, value);
+                    if (param <= std.math.maxInt(u32) and param >= std.math.minInt(i32)) {
+                        const value: u32 = comptimeIntToUInt(u32, i32, param);
+                        return try packet_writer.writeUInt32(writer, value);
+                    }
                 },
-                // .MYSQL_TYPE_SHORT,
-                // .MYSQL_TYPE_YEAR,
-                // => {
-                //     const value: u16 = comptimeIntToUInt(u16, i16, param);
-                //     return try packet_writer.writeUInt16(writer, value);
-                // },
+                .MYSQL_TYPE_SHORT,
+                .MYSQL_TYPE_YEAR,
+                => {
+                    if (param <= std.math.maxInt(u16) and param >= std.math.minInt(i16)) {
+                        const value: u16 = comptimeIntToUInt(u16, i16, param);
+                        return try packet_writer.writeUInt16(writer, value);
+                    }
+                },
+                .MYSQL_TYPE_TINY => {
+                    if (param <= std.math.maxInt(u8) and param >= std.math.minInt(i8)) {
+                        const value: u8 = comptimeIntToUInt(u8, i8, param);
+                        return try packet_writer.writeUInt8(writer, value);
+                    }
+                },
                 else => {},
             }
         },

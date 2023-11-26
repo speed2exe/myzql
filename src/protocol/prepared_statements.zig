@@ -99,7 +99,13 @@ pub const ExecuteRequest = struct {
             if (e.new_params_bind_flag > 0) {
                 for (e.prep_stmt.params) |col_def| {
                     try packet_writer.writeUInt8(writer, col_def.column_type);
-                    try packet_writer.writeUInt8(writer, 0);
+
+                    if (col_def.flags & constants.UNSIGNED_FLAG > 0) {
+                        try packet_writer.writeUInt8(writer, 0x80);
+                    } else {
+                        try packet_writer.writeUInt8(writer, 0);
+                    }
+
                     if (e.capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) {
                         try packet_writer.writeLengthEncodedString(writer, col_def.name);
                     }
