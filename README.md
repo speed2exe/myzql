@@ -10,15 +10,16 @@
 - [x] Prepared Statement
 - [x] Password Authentication
 
-### Types support
-
-#### Prepared Statement
-1. Integer Types
-2. []u8
-
-#### Binary Protocol Result
-1. Integer Types
-2. []u8
+### Binary Column Types support
+- Output Encoding
+```
+- Null -> ?T
+- Int -> u64, u32, u16, u8
+- Float -> f32, f64
+- String -> []u8
+```
+- Input
+WIP
 
 ## Examples
 - Coming soon!
@@ -28,7 +29,6 @@
 - [ ] Slice as param input
 - [ ] Struct as param input
 - [ ] Connection Pooling
-- [ ] Float data types
 
 ## Unit Tests
 - `zig test src/myzql.zig`
