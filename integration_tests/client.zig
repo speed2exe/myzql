@@ -432,58 +432,60 @@ test "binary data types - string" {
     }
 }
 
-// test "binary data types - temporal" {
-//     var c = Client.init(test_config);
-//     defer c.deinit();
-//
-//     try queryExpectOk(&c, "CREATE DATABASE test");
-//     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
-//
-//     try queryExpectOk(&c,
-//         \\
-//         \\CREATE TABLE test.temporal_types_example (
-//         \\    event_time DATETIME(6) NOT NULL
-//         \\)
-//     );
-//     defer queryExpectOk(&c, "DROP TABLE test.temporal_types_example") catch {};
-//
-//     const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?)");
-//     defer prep_res.deinit(allocator);
-//     const prep_stmt = try prep_res.expect(.ok);
-//
-//     const params = .{
-//         .{
-//             @as(DateTime, .{
-//                 .year = 2023,
-//                 .month = 11,
-//                 .day = 30,
-//                 .hour = 6,
-//                 .minute = 50,
-//                 .second = 58,
-//                 .microsecond = 123456,
-//             }),
-//         },
-//     };
-//     inline for (params) |param| {
-//         const exe_res = try c.execute(allocator, &prep_stmt, param);
-//         defer exe_res.deinit(allocator);
-//         _ = try exe_res.expect(.ok);
-//     }
-//
-//     {
-//         const res = try c.query(allocator, "SELECT * FROM test.temporal_types_example");
-//         defer res.deinit(allocator);
-//         const rows_iter = (try res.expect(.rows)).iter();
-//
-//         const table = try rows_iter.collect(allocator);
-//         defer table.deinit(allocator);
-//
-//         const expected: []const []const ?[]const u8 = &.{
-//             &.{""},
-//         };
-//         try std.testing.expectEqualDeep(expected, table.rows);
-//     }
-// }
+test "binary data types - temporal" {
+    var c = Client.init(test_config);
+    defer c.deinit();
+
+    try queryExpectOk(&c, "CREATE DATABASE test");
+    defer queryExpectOk(&c, "DROP DATABASE test") catch {};
+
+    try queryExpectOk(&c,
+        \\
+        \\CREATE TABLE test.temporal_types_example (
+        \\    event_time DATETIME(6) NOT NULL
+        \\)
+    );
+    defer queryExpectOk(&c, "DROP TABLE test.temporal_types_example") catch {};
+
+    const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?)");
+    defer prep_res.deinit(allocator);
+    const prep_stmt = try prep_res.expect(.ok);
+
+    const params = .{
+        .{
+            @as(DateTime, .{
+                .year = 2023,
+                .month = 11,
+                .day = 30,
+                .hour = 6,
+                .minute = 50,
+                .second = 58,
+                .microsecond = 123456,
+            }),
+        },
+    };
+
+    inline for (params) |param| {
+        const exe_res = try c.execute(allocator, &prep_stmt, param);
+        defer exe_res.deinit(allocator);
+        _ = try exe_res.expect(.ok);
+    }
+
+    {
+        const res = try c.query(allocator, "SELECT * FROM test.temporal_types_example");
+        defer res.deinit(allocator);
+        const rows_iter = (try res.expect(.rows)).iter();
+
+        const table = try rows_iter.collect(allocator);
+        defer table.deinit(allocator);
+
+        const expected: []const []const ?[]const u8 = &.{
+            &.{"2023-11-30 06:50:58.123456"},
+        };
+
+        try std.testing.expectEqualDeep(expected, table.rows);
+    }
+}
 
 //
 // SELECT CONCAT(?, ?) AS col1

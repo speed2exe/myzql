@@ -10,6 +10,7 @@ const protocol = @import("./protocol.zig");
 const PacketReader = protocol.packet_reader.PacketReader;
 const packet_writer = protocol.packet_writer;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
+const DateTime = @import("./temporal.zig").DateTime;
 
 fn comptimeIntToUInt(
     comptime Unsigned: type,
@@ -32,6 +33,14 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
     const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
 
     switch (param_type_info) {
+        .Struct => {
+            switch (col_type) {
+                .MYSQL_TYPE_DATETIME => {
+                    return try encodeDateTime(param, writer);
+                },
+                else => {},
+            }
+        },
         .Null => return,
         .Optional => {
             if (param) |p| {
@@ -201,6 +210,39 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
     // TODO: insert field name if struct is passed in
     logConversionError(@TypeOf(param), "", col_def.name, col_type);
     return error.InvalidConversion;
+}
+
+// To save space the packet can be compressed:
+// if year, month, day, hour, minutes, seconds and microseconds are all 0, length is 0 and no other field is sent.
+// if hour, seconds and microseconds are all 0, length is 4 and no other field is sent.
+// if microseconds is 0, length is 7 and micro_seconds is not sent.
+// otherwise the length is 11
+fn encodeDateTime(dt: DateTime, writer: anytype) !void {
+    if (dt.microsecond > 0) {
+        try packet_writer.writeUInt8(writer, 11);
+        try packet_writer.writeUInt16(writer, dt.year);
+        try packet_writer.writeUInt8(writer, dt.month);
+        try packet_writer.writeUInt8(writer, dt.day);
+        try packet_writer.writeUInt8(writer, dt.hour);
+        try packet_writer.writeUInt8(writer, dt.minute);
+        try packet_writer.writeUInt8(writer, dt.second);
+        try packet_writer.writeUInt32(writer, dt.microsecond);
+    } else if (dt.hour > 0 or dt.minute > 0 or dt.second > 0) {
+        try packet_writer.writeUInt8(writer, 7);
+        try packet_writer.writeUInt16(writer, dt.year);
+        try packet_writer.writeUInt8(writer, dt.month);
+        try packet_writer.writeUInt8(writer, dt.day);
+        try packet_writer.writeUInt8(writer, dt.hour);
+        try packet_writer.writeUInt8(writer, dt.minute);
+        try packet_writer.writeUInt8(writer, dt.second);
+    } else if (dt.year > 0 or dt.month > 0 or dt.day > 0) {
+        try packet_writer.writeUInt8(writer, 4);
+        try packet_writer.writeUInt16(writer, dt.year);
+        try packet_writer.writeUInt8(writer, dt.month);
+        try packet_writer.writeUInt8(writer, dt.day);
+    } else {
+        try packet_writer.writeUInt8(writer, 0);
+    }
 }
 
 pub fn scanTextResultRow(raw: []const u8, dest: []?[]const u8) !void {

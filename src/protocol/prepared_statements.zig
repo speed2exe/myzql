@@ -70,7 +70,7 @@ pub const ExecuteRequest = struct {
     iteration_count: u32 = 1, // Always 1
     new_params_bind_flag: u8 = 1,
 
-    attributes: []const BinaryParam = &.{},
+    attributes: []const BinaryParam = &.{}, // Not supported yet
 
     pub fn writeWithParams(e: *const ExecuteRequest, writer: anytype, params: anytype) !void {
         try packet_writer.writeUInt8(writer, constants.COM_STMT_EXECUTE);
@@ -92,12 +92,18 @@ pub const ExecuteRequest = struct {
                 try writeNullBitmap(params, &.{}, writer);
             }
 
+            const col_defs = e.prep_stmt.params;
+            if (params.len != col_defs.len) {
+                std.log.err("expected column count: {d}, but got {d}", .{ col_defs.len, params.len });
+                return error.ParamsCountNotMatch;
+            }
+
             // If a statement is re-executed without changing the params types,
             // the types do not need to be sent to the server again.
             // send type to server (0 / 1)
             try packet_writer.writeLengthEncodedInteger(writer, e.new_params_bind_flag);
             if (e.new_params_bind_flag > 0) {
-                for (e.prep_stmt.params) |col_def| {
+                for (col_defs) |col_def| {
                     try packet_writer.writeUInt8(writer, col_def.column_type);
 
                     if (col_def.flags & constants.UNSIGNED_FLAG > 0) {
@@ -120,7 +126,7 @@ pub const ExecuteRequest = struct {
 
             // TODO: Write params and attr as binary values
             // Write params as binary values
-            inline for (params, e.prep_stmt.params) |param, *col_def| {
+            inline for (params, col_defs) |param, *col_def| {
                 try helper.encodeBinaryParam(param, col_def, writer);
             }
             if (has_attributes_to_write) {
