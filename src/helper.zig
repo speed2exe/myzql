@@ -11,6 +11,7 @@ const PacketReader = protocol.packet_reader.PacketReader;
 const packet_writer = protocol.packet_writer;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 const DateTime = @import("./temporal.zig").DateTime;
+const Duration = @import("./temporal.zig").Duration;
 
 fn comptimeIntToUInt(
     comptime Unsigned: type,
@@ -32,8 +33,8 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
     const param_type_info = @typeInfo(@TypeOf(param));
     const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
 
-    switch (param_type_info) {
-        .Struct => {
+    switch (@TypeOf(param)) {
+        DateTime => {
             switch (col_type) {
                 .MYSQL_TYPE_DATE,
                 .MYSQL_TYPE_DATETIME,
@@ -44,6 +45,18 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
                 else => {},
             }
         },
+        Duration => {
+            switch (col_type) {
+                .MYSQL_TYPE_TIME => {
+                    return try encodeDuration(param, writer);
+                },
+                else => {},
+            }
+        },
+        else => {},
+    }
+
+    switch (param_type_info) {
         .Null => return,
         .Optional => {
             if (param) |p| {
@@ -243,6 +256,31 @@ fn encodeDateTime(dt: DateTime, writer: anytype) !void {
         try packet_writer.writeUInt16(writer, dt.year);
         try packet_writer.writeUInt8(writer, dt.month);
         try packet_writer.writeUInt8(writer, dt.day);
+    } else {
+        try packet_writer.writeUInt8(writer, 0);
+    }
+}
+
+// To save space the packet can be compressed:
+// if day, hour, minutes, seconds and microseconds are all 0, length is 0 and no other field is sent.
+// if microseconds is 0, length is 8 and micro_seconds is not sent.
+// otherwise the length is 12
+fn encodeDuration(d: Duration, writer: anytype) !void {
+    if (d.microseconds > 0) {
+        try packet_writer.writeUInt8(writer, 12);
+        try packet_writer.writeUInt8(writer, d.is_negative);
+        try packet_writer.writeUInt32(writer, d.days);
+        try packet_writer.writeUInt8(writer, d.hours);
+        try packet_writer.writeUInt8(writer, d.minutes);
+        try packet_writer.writeUInt8(writer, d.seconds);
+        try packet_writer.writeUInt32(writer, d.microseconds);
+    } else if (d.days > 0 or d.hours > 0 or d.minutes > 0 or d.seconds > 0) {
+        try packet_writer.writeUInt8(writer, 8);
+        try packet_writer.writeUInt8(writer, d.is_negative);
+        try packet_writer.writeUInt32(writer, d.days);
+        try packet_writer.writeUInt8(writer, d.hours);
+        try packet_writer.writeUInt8(writer, d.minutes);
+        try packet_writer.writeUInt8(writer, d.seconds);
     } else {
         try packet_writer.writeUInt8(writer, 0);
     }

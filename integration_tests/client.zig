@@ -6,6 +6,7 @@ const ErrorPacket = @import("../src/protocol.zig").generic_response.ErrorPacket;
 const minInt = std.math.minInt;
 const maxInt = std.math.maxInt;
 const DateTime = @import("../src/temporal.zig").DateTime;
+const Duration = @import("../src/temporal.zig").Duration;
 
 // convenient function for testing
 fn queryExpectOk(c: *Client, query: []const u8) !void {
@@ -444,12 +445,15 @@ test "binary data types - temporal" {
         \\CREATE TABLE test.temporal_types_example (
         \\    event_time DATETIME(6) NOT NULL,
         \\    event_time2 DATETIME(2) NOT NULL,
-        \\    event_time3 DATETIME NOT NULL
+        \\    event_time3 DATETIME NOT NULL,
+        \\    duration TIME(6) NOT NULL,
+        \\    duration2 TIME(4) NOT NULL,
+        \\    duration3 TIME NOT NULL
         \\)
     );
     defer queryExpectOk(&c, "DROP TABLE test.temporal_types_example") catch {};
 
-    const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?, ?, ?)");
+    const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?, ?, ?, ?, ?, ?)");
     defer prep_res.deinit(allocator);
     const prep_stmt = try prep_res.expect(.ok);
 
@@ -462,7 +466,7 @@ test "binary data types - temporal" {
         .second = 58,
         .microsecond = 123456,
     };
-    const without_ms: DateTime = .{
+    const datetime_no_ms: DateTime = .{
         .year = 2023,
         .month = 11,
         .day = 30,
@@ -475,11 +479,25 @@ test "binary data types - temporal" {
         .month = 11,
         .day = 30,
     };
+    const my_duration: Duration = .{
+        .days = 1,
+        .hours = 23,
+        .minutes = 59,
+        .seconds = 59,
+        .microseconds = 123456,
+    };
+    const duration_no_ms: Duration = .{
+        .days = 1,
+        .hours = 23,
+        .minutes = 59,
+        .seconds = 59,
+    };
+    const duration_zero: Duration = .{};
 
     const params = .{
-        .{ my_time, my_time, my_time },
-        .{ without_ms, without_ms, without_ms },
-        .{ only_day, only_day, only_day },
+        .{ my_time, my_time, my_time, my_duration, my_duration, my_duration },
+        .{ datetime_no_ms, datetime_no_ms, datetime_no_ms, duration_no_ms, duration_no_ms, duration_no_ms },
+        .{ only_day, only_day, only_day, duration_zero, duration_zero, duration_zero },
     };
 
     inline for (params) |param| {
@@ -497,9 +515,9 @@ test "binary data types - temporal" {
         defer table.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
-            &.{ "2023-11-30 06:50:58.123456", "2023-11-30 06:50:58.12", "2023-11-30 06:50:58" },
-            &.{ "2023-11-30 06:50:58.000000", "2023-11-30 06:50:58.00", "2023-11-30 06:50:58" },
-            &.{ "2023-11-30 00:00:00.000000", "2023-11-30 00:00:00.00", "2023-11-30 00:00:00" },
+            &.{ "2023-11-30 06:50:58.123456", "2023-11-30 06:50:58.12", "2023-11-30 06:50:58", "47:59:59.123456", "47:59:59.1235", "47:59:59" },
+            &.{ "2023-11-30 06:50:58.000000", "2023-11-30 06:50:58.00", "2023-11-30 06:50:58", "47:59:59.000000", "47:59:59.0000", "47:59:59" },
+            &.{ "2023-11-30 00:00:00.000000", "2023-11-30 00:00:00.00", "2023-11-30 00:00:00", "00:00:00.000000", "00:00:00.0000", "00:00:00" },
         };
 
         try std.testing.expectEqualDeep(expected, table.rows);

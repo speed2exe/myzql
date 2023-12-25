@@ -14,9 +14,10 @@ pub const DateTime = struct {
 // `Time` is ambigious and confusing, `Duration` was chosen as the name instead
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_binary_resultset.html#sect_protocol_binary_resultset_row_value_time
 pub const Duration = struct {
+    is_negative: u8 = 0, // 1 if minus, 0 for plus
     days: u32 = 0,
-    hour: u8 = 0,
-    minute: u8 = 0,
-    second: u8 = 0,
-    microsecond: u32 = 0,
+    hours: u8 = 0,
+    minutes: u8 = 0,
+    seconds: u8 = 0,
+    microseconds: u32 = 0,
 };
