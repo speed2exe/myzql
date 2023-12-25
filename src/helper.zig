@@ -35,7 +35,10 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
     switch (param_type_info) {
         .Struct => {
             switch (col_type) {
-                .MYSQL_TYPE_DATETIME => {
+                .MYSQL_TYPE_DATE,
+                .MYSQL_TYPE_DATETIME,
+                .MYSQL_TYPE_TIMESTAMP,
+                => {
                     return try encodeDateTime(param, writer);
                 },
                 else => {},
@@ -453,5 +456,18 @@ pub const TableTexts = struct {
         allocator.free(t.result_rows);
         allocator.free(t.rows);
         allocator.free(t.elems);
+    }
+
+    pub fn debugPrint(t: *const TableTexts) void {
+        const print = std.debug.print;
+        for (t.rows, 0..) |row, i| {
+            print("row: {d} -> ", .{i});
+            print("|", .{});
+            for (row) |elem| {
+                print("{?s}", .{elem});
+                print("|", .{});
+            }
+            print("\n", .{});
+        }
     }
 };

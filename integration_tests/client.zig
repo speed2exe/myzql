@@ -442,27 +442,44 @@ test "binary data types - temporal" {
     try queryExpectOk(&c,
         \\
         \\CREATE TABLE test.temporal_types_example (
-        \\    event_time DATETIME(6) NOT NULL
+        \\    event_time DATETIME(6) NOT NULL,
+        \\    event_time2 DATETIME(2) NOT NULL,
+        \\    event_time3 DATETIME NOT NULL
         \\)
     );
     defer queryExpectOk(&c, "DROP TABLE test.temporal_types_example") catch {};
 
-    const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?)");
+    const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?, ?, ?)");
     defer prep_res.deinit(allocator);
     const prep_stmt = try prep_res.expect(.ok);
 
+    const my_time: DateTime = .{
+        .year = 2023,
+        .month = 11,
+        .day = 30,
+        .hour = 6,
+        .minute = 50,
+        .second = 58,
+        .microsecond = 123456,
+    };
+    const without_ms: DateTime = .{
+        .year = 2023,
+        .month = 11,
+        .day = 30,
+        .hour = 6,
+        .minute = 50,
+        .second = 58,
+    };
+    const only_day: DateTime = .{
+        .year = 2023,
+        .month = 11,
+        .day = 30,
+    };
+
     const params = .{
-        .{
-            @as(DateTime, .{
-                .year = 2023,
-                .month = 11,
-                .day = 30,
-                .hour = 6,
-                .minute = 50,
-                .second = 58,
-                .microsecond = 123456,
-            }),
-        },
+        .{ my_time, my_time, my_time },
+        .{ without_ms, without_ms, without_ms },
+        .{ only_day, only_day, only_day },
     };
 
     inline for (params) |param| {
@@ -480,7 +497,9 @@ test "binary data types - temporal" {
         defer table.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
-            &.{"2023-11-30 06:50:58.123456"},
+            &.{ "2023-11-30 06:50:58.123456", "2023-11-30 06:50:58.12", "2023-11-30 06:50:58" },
+            &.{ "2023-11-30 06:50:58.000000", "2023-11-30 06:50:58.00", "2023-11-30 06:50:58" },
+            &.{ "2023-11-30 00:00:00.000000", "2023-11-30 00:00:00.00", "2023-11-30 00:00:00" },
         };
 
         try std.testing.expectEqualDeep(expected, table.rows);
