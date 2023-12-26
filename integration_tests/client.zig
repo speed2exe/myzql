@@ -128,20 +128,20 @@ test "query text table" {
         const query_res = try c.query(allocator, "SELECT 1,2,3 UNION ALL SELECT 4,null,6");
         defer query_res.deinit(allocator);
         const iter = (try query_res.expect(.rows)).iter();
-        const table = try iter.collect(allocator);
-        defer table.deinit(allocator);
-        try std.testing.expectEqual(table.rows.len, 2);
+        const table_texts = try iter.collect_texts(allocator);
+        defer table_texts.deinit(allocator);
+        try std.testing.expectEqual(table_texts.rows.len, 2);
         {
             var expected = [_]?[]const u8{ "1", "2", "3", "4", null, "6" };
-            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table.elems);
+            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table_texts.elems);
         }
         {
             var expected = [_]?[]const u8{ "1", "2", "3" };
-            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table.rows[0]);
+            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table_texts.rows[0]);
         }
         {
             var expected = [_]?[]const u8{ "4", null, "6" };
-            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table.rows[1]);
+            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table_texts.rows[1]);
         }
     }
 }
@@ -243,7 +243,7 @@ test "prepare execute with result" {
         var dest: MyType = undefined;
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
-            try row.scanStruct(&dest);
+            try row.scan(&dest);
             try std.testing.expectEqualDeep(expected, dest);
         }
     }
@@ -273,36 +273,38 @@ test "binary data types - int" {
     );
     defer queryExpectOk(&c, "DROP TABLE test.int_types_example") catch {};
 
-    const prep_res = try c.prepare(
-        allocator,
-        "INSERT INTO test.int_types_example VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    );
-    defer prep_res.deinit(allocator);
-    const prep_stmt = try prep_res.expect(.ok);
+    { // Insert (Binary Protocol)
+        const prep_res = try c.prepare(
+            allocator,
+            "INSERT INTO test.int_types_example VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        );
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.ok);
 
-    const params = .{
-        .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        .{ -(1 << 7), -(1 << 15), -(1 << 23), -(1 << 31), -(1 << 63), 0, 0, 0, 0, 0 },
-        .{ (1 << 7) - 1, (1 << 15) - 1, (1 << 23) - 1, (1 << 31) - 1, (1 << 63) - 1, (1 << 8) - 1, (1 << 16) - 1, (1 << 24) - 1, (1 << 32) - 1, (1 << 64) - 1 },
-        .{ null, null, null, null, null, null, null, null, null, null },
-        .{ @as(?i8, 0), @as(?i16, 0), @as(?i32, 0), @as(?i64, 0), @as(?u8, 0), @as(?u16, 0), @as(?u32, 0), @as(?u64, 0), @as(?u8, 0), @as(?u64, 0) },
-        .{ minInt(i8), minInt(i16), minInt(i24), minInt(i32), minInt(i64), minInt(u8), minInt(u16), minInt(u24), minInt(u32), minInt(u64) },
-        .{ maxInt(i8), maxInt(i16), maxInt(i24), maxInt(i32), maxInt(i64), maxInt(u8), maxInt(u16), maxInt(u24), maxInt(u32), maxInt(u64) },
-        .{ @as(?i8, null), @as(?i16, null), @as(?i32, null), @as(?i64, null), @as(?u8, null), @as(?u16, null), @as(?u32, null), @as(?u64, null), @as(?u8, null), @as(?u64, null) },
-    };
-    inline for (params) |param| {
-        const exe_res = try c.execute(allocator, &prep_stmt, param);
-        defer exe_res.deinit(allocator);
-        _ = try exe_res.expect(.ok);
+        const params = .{
+            .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            .{ -(1 << 7), -(1 << 15), -(1 << 23), -(1 << 31), -(1 << 63), 0, 0, 0, 0, 0 },
+            .{ (1 << 7) - 1, (1 << 15) - 1, (1 << 23) - 1, (1 << 31) - 1, (1 << 63) - 1, (1 << 8) - 1, (1 << 16) - 1, (1 << 24) - 1, (1 << 32) - 1, (1 << 64) - 1 },
+            .{ null, null, null, null, null, null, null, null, null, null },
+            .{ @as(?i8, 0), @as(?i16, 0), @as(?i32, 0), @as(?i64, 0), @as(?u8, 0), @as(?u16, 0), @as(?u32, 0), @as(?u64, 0), @as(?u8, 0), @as(?u64, 0) },
+            .{ minInt(i8), minInt(i16), minInt(i24), minInt(i32), minInt(i64), minInt(u8), minInt(u16), minInt(u24), minInt(u32), minInt(u64) },
+            .{ maxInt(i8), maxInt(i16), maxInt(i24), maxInt(i32), maxInt(i64), maxInt(u8), maxInt(u16), maxInt(u24), maxInt(u32), maxInt(u64) },
+            .{ @as(?i8, null), @as(?i16, null), @as(?i32, null), @as(?i64, null), @as(?u8, null), @as(?u16, null), @as(?u32, null), @as(?u64, null), @as(?u8, null), @as(?u64, null) },
+        };
+        inline for (params) |param| {
+            const exe_res = try c.execute(allocator, &prep_stmt, param);
+            defer exe_res.deinit(allocator);
+            _ = try exe_res.expect(.ok);
+        }
     }
 
-    {
+    { // Select (Text Protocol)
         const res = try c.query(allocator, "SELECT * FROM test.int_types_example");
         defer res.deinit(allocator);
         const rows_iter = (try res.expect(.rows)).iter();
 
-        const table = try rows_iter.collect(allocator);
-        defer table.deinit(allocator);
+        const table_texts = try rows_iter.collect_texts(allocator);
+        defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
             &.{ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" },
@@ -314,8 +316,33 @@ test "binary data types - int" {
             &.{ "127", "32767", "8388607", "2147483647", "9223372036854775807", "255", "65535", "16777215", "4294967295", "18446744073709551615" },
             &.{ null, null, null, null, null, null, null, null, null, null },
         };
-        try std.testing.expectEqualDeep(expected, table.rows);
+        try std.testing.expectEqualDeep(expected, table_texts.rows);
     }
+
+    // { // Select (Binary Protocol)
+    //     const IntTypesExample = struct {
+    //         tinyint_col: i8,
+    //         smallint_col: i16,
+    //         mediumint_col: i24,
+    //         int_col: i32,
+    //         bigint_col: i64,
+    //         tinyint_unsigned_col: u8,
+    //         smallint_unsigned_col: u16,
+    //         mediumint_unsigned_col: u24,
+    //         int_unsigned_col: u32,
+    //         bigint_unsigned_col: u64,
+    //     };
+
+    //     const prep_res = try c.prepare(
+    //         allocator,
+    //         "select * from int_types_example",
+    //     );
+    //     defer prep_res.deinit(allocator);
+    //     const prep_stmt = try prep_res.expect(.ok);
+
+    //     const res = try c.execute(allocator, prep_stmt, .{});
+    //     _ = res;
+    // }
 }
 
 test "binary data types - float" {
@@ -359,8 +386,8 @@ test "binary data types - float" {
         defer res.deinit(allocator);
         const rows_iter = (try res.expect(.rows)).iter();
 
-        const table = try rows_iter.collect(allocator);
-        defer table.deinit(allocator);
+        const table_texts = try rows_iter.collect_texts(allocator);
+        defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
             &.{ "0", "0" },
@@ -372,7 +399,7 @@ test "binary data types - float" {
             &.{ "1.23", "1.23" },
             &.{ null, null },
         };
-        try std.testing.expectEqualDeep(expected, table.rows);
+        try std.testing.expectEqualDeep(expected, table_texts.rows);
     }
 }
 
@@ -420,8 +447,8 @@ test "binary data types - string" {
         defer res.deinit(allocator);
         const rows_iter = (try res.expect(.rows)).iter();
 
-        const table = try rows_iter.collect(allocator);
-        defer table.deinit(allocator);
+        const table_texts = try rows_iter.collect_texts(allocator);
+        defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
             &.{ "hello", "world", "a", "b" },
@@ -429,7 +456,7 @@ test "binary data types - string" {
             &.{ null, "", null, "a" },
             &.{ "baz", "bar", null, "c" },
         };
-        try std.testing.expectEqualDeep(expected, table.rows);
+        try std.testing.expectEqualDeep(expected, table_texts.rows);
     }
 }
 
@@ -511,8 +538,8 @@ test "binary data types - temporal" {
         defer res.deinit(allocator);
         const rows_iter = (try res.expect(.rows)).iter();
 
-        const table = try rows_iter.collect(allocator);
-        defer table.deinit(allocator);
+        const table_texts = try rows_iter.collect_texts(allocator);
+        defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
             &.{ "2023-11-30 06:50:58.123456", "2023-11-30 06:50:58.12", "2023-11-30 06:50:58", "47:59:59.123456", "47:59:59.1235", "47:59:59" },
@@ -520,7 +547,7 @@ test "binary data types - temporal" {
             &.{ "2023-11-30 00:00:00.000000", "2023-11-30 00:00:00.00", "2023-11-30 00:00:00", "00:00:00.000000", "00:00:00.0000", "00:00:00" },
         };
 
-        try std.testing.expectEqualDeep(expected, table.rows);
+        try std.testing.expectEqualDeep(expected, table_texts.rows);
     }
 }
 

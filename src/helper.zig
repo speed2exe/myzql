@@ -5,6 +5,7 @@ const EnumFieldType = constants.EnumFieldType;
 const result = @import("./result.zig");
 const ResultSet = result.ResultSet;
 const TextResultRow = result.TextResultRow;
+const BinaryResultRow = result.BinaryResultRow;
 const Options = result.BinaryResultRow.Options;
 const protocol = @import("./protocol.zig");
 const PacketReader = protocol.packet_reader.PacketReader;
@@ -304,7 +305,7 @@ pub fn scanTextResultRow(raw: []const u8, dest: []?[]const u8) !void {
 }
 
 // dest is a pointer to a struct
-pub fn scanBinResRowtoStruct(dest: anytype, raw: []const u8, col_defs: []ColumnDefinition41) void {
+pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []ColumnDefinition41) void {
     var reader = PacketReader.initFromPayload(raw);
     const first = reader.readByte();
     std.debug.assert(first == constants.BINARY_PROTOCOL_RESULTSET_ROW_HEADER);
@@ -457,7 +458,7 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
             };
         }
 
-        pub fn collect(iter: *const ResultSetIter(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
+        pub fn collect_texts(iter: *const ResultSetIter(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
             var row_acc = std.ArrayList(TextResultRow).init(allocator);
             while (try iter.next(allocator)) |row| {
                 const new_row_ptr = try row_acc.addOne();
@@ -467,6 +468,29 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
             const num_cols = iter.text_result_set.col_defs.len;
             var rows = try allocator.alloc([]?[]const u8, row_acc.items.len);
             var elems = try allocator.alloc(?[]const u8, row_acc.items.len * num_cols);
+            for (row_acc.items, 0..) |row, i| {
+                const dest_row = elems[i * num_cols .. (i + 1) * num_cols];
+                try row.scan(dest_row);
+                rows[i] = dest_row;
+            }
+
+            return .{
+                .result_rows = try row_acc.toOwnedSlice(),
+                .elems = elems,
+                .rows = rows,
+            };
+        }
+
+        pub fn collect_structs(comptime Struct: type, iter: *const ResultSetIter(BinaryResultRow), allocator: std.mem.Allocator) !TableStructs(Struct) {
+            var row_acc = std.ArrayList(BinaryResultRow).init(allocator);
+            while (try iter.next(allocator)) |row| {
+                const new_row_ptr = try row_acc.addOne();
+                new_row_ptr.* = row;
+            }
+
+            const num_cols = iter.text_result_set.col_defs.len;
+            var rows = try allocator.alloc([]Struct, row_acc.items.len);
+            var elems = try allocator.alloc(Struct, row_acc.items.len * num_cols);
             for (row_acc.items, 0..) |row, i| {
                 const dest_row = elems[i * num_cols .. (i + 1) * num_cols];
                 try row.scan(dest_row);
@@ -509,3 +533,33 @@ pub const TableTexts = struct {
         }
     }
 };
+
+pub fn TableStructs(comptime Struct: type) type {
+    return struct {
+        result_rows: []BinaryResultRow,
+        elems: []?Struct,
+        rows: [][]?Struct,
+
+        pub fn deinit(t: *const TableStructs(Struct), allocator: std.mem.Allocator) void {
+            for (t.result_rows) |row| {
+                row.deinit(allocator);
+            }
+            allocator.free(t.result_rows);
+            allocator.free(t.rows);
+            allocator.free(t.elems);
+        }
+
+        pub fn debugPrint(t: *const TableStructs(Struct)) void {
+            const print = std.debug.print;
+            for (t.rows, 0..) |row, i| {
+                print("row: {d} -> ", .{i});
+                print("|", .{});
+                for (row) |elem| {
+                    print("{any}", .{elem});
+                    print("|", .{});
+                }
+                print("\n", .{});
+            }
+        }
+    };
+}

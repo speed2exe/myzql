@@ -143,11 +143,11 @@ pub const BinaryResultRow = struct {
 
     const Options = struct {};
 
-    pub fn scanStruct(b: *const BinaryResultRow, dest: anytype) !void {
+    pub fn scan(b: *const BinaryResultRow, dest: anytype) !void {
         switch (b.value) {
             .err => |err| return err.asError(),
             .eof => |eof| return eof.asError(),
-            .raw => |raw| helper.scanBinResRowtoStruct(dest, raw, b.result_set.col_defs),
+            .raw => |raw| helper.scanBinResultRow(dest, raw, b.result_set.col_defs),
         }
     }
 
