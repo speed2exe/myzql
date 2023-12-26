@@ -93,8 +93,8 @@ test "query text protocol" {
         defer query_res.deinit(allocator);
         const rows = try query_res.expect(.rows);
 
-        var dest = [_]?[]const u8{ undefined, undefined };
         {
+            var dest = [_]?[]const u8{ undefined, undefined };
             const row = try rows.readRow(allocator);
             defer row.deinit(std.testing.allocator);
             try row.scan(&dest);
@@ -104,7 +104,8 @@ test "query text protocol" {
         {
             const row = try rows.readRow(allocator);
             defer row.deinit(std.testing.allocator);
-            try row.scan(&dest);
+            const dest = try row.scanAlloc(allocator);
+            defer allocator.free(dest);
             try std.testing.expectEqualSlices(u8, "10", dest[0].?);
             try std.testing.expectEqualSlices(u8, "11", dest[1].?);
         }

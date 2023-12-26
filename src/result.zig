@@ -127,6 +127,12 @@ pub const TextResultRow = struct {
         }
     }
 
+    pub fn scanAlloc(t: *const TextResultRow, allocator: std.mem.Allocator) ![]?[]const u8 {
+        const record = try allocator.alloc(?[]const u8, t.result_set.col_defs.len);
+        _ = try t.scan(record);
+        return record;
+    }
+
     pub fn deinit(text_result_set: *const TextResultRow, allocator: std.mem.Allocator) void {
         text_result_set.packet.deinit(allocator);
     }
@@ -143,12 +149,26 @@ pub const BinaryResultRow = struct {
 
     const Options = struct {};
 
+    // dest: pointer to a struct
     pub fn scan(b: *const BinaryResultRow, dest: anytype) !void {
         switch (b.value) {
             .err => |err| return err.asError(),
             .eof => |eof| return eof.asError(),
             .raw => |raw| helper.scanBinResultRow(dest, raw, b.result_set.col_defs),
         }
+    }
+
+    // returns a pointer to allocated struct object, caller must remember to call destroy on the object after use
+    pub fn scanAlloc(b: *const BinaryResultRow, allocator: std.mem.Allocator) !*b.structType() {
+        const S = b.structType();
+        const s = try allocator.create(S);
+        _ = try b.scan(s);
+        return s;
+    }
+
+    fn structType(b: *const BinaryResultRow) type {
+        _ = b;
+        @panic("not implemente");
     }
 
     pub fn deinit(text_result_set: *const BinaryResultRow, allocator: std.mem.Allocator) void {
