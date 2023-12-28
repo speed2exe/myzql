@@ -16,8 +16,8 @@ const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
 pub fn QueryResult(comptime ResultRowType: type) type {
     return struct {
         const Value = union(enum) {
-            ok: OkPacket,
-            err: ErrorPacket,
+            ok: *const OkPacket,
+            err: *const ErrorPacket,
             rows: ResultSet(ResultRowType),
         };
         packet: Packet,
@@ -28,8 +28,8 @@ pub fn QueryResult(comptime ResultRowType: type) type {
             return .{
                 .packet = response_packet,
                 .value = switch (response_packet.payload[0]) {
-                    constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
-                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
+                    constants.OK => .{ .ok = &OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
+                    constants.ERR => .{ .err = &ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
                     constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
                     else => .{ .rows = blk: {
                         var packet_reader = PacketReader.initFromPacket(&response_packet);
