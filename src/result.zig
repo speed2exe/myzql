@@ -13,17 +13,17 @@ const helper = @import("./helper.zig");
 const ResultSetIter = helper.ResultSetIter;
 const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
 
-pub fn QueryResult(comptime ResultRowType: type) type {
+pub fn QueryResult(comptime T: type) type {
     return struct {
         const Value = union(enum) {
             ok: *const OkPacket,
             err: *const ErrorPacket,
-            rows: ResultSet(ResultRowType),
+            rows: ResultSet(T),
         };
         packet: Packet,
         value: Value,
 
-        pub fn init(conn: *Conn, allocator: std.mem.Allocator) !QueryResult(ResultRowType) {
+        pub fn init(conn: *Conn, allocator: std.mem.Allocator) !QueryResult(T) {
             const response_packet = try conn.readPacket(allocator);
             return .{
                 .packet = response_packet,
@@ -35,13 +35,13 @@ pub fn QueryResult(comptime ResultRowType: type) type {
                         var packet_reader = PacketReader.initFromPacket(&response_packet);
                         const column_count = packet_reader.readLengthEncodedInteger();
                         std.debug.assert(packet_reader.finished());
-                        break :blk try ResultSet(ResultRowType).init(allocator, conn, column_count);
+                        break :blk try ResultSet(T).init(allocator, conn, column_count);
                     } },
                 },
             };
         }
 
-        pub fn deinit(q: *const QueryResult(ResultRowType), allocator: std.mem.Allocator) void {
+        pub fn deinit(q: *const QueryResult(T), allocator: std.mem.Allocator) void {
             q.packet.deinit(allocator);
             switch (q.value) {
                 .rows => |rows| rows.deinit(allocator),
@@ -50,7 +50,7 @@ pub fn QueryResult(comptime ResultRowType: type) type {
         }
 
         pub fn expect(
-            q: *const QueryResult(ResultRowType),
+            q: *const QueryResult(T),
             comptime value_variant: std.meta.FieldEnum(Value),
         ) !std.meta.FieldType(Value, value_variant) {
             return switch (q.value) {
@@ -73,13 +73,13 @@ pub fn QueryResult(comptime ResultRowType: type) type {
     };
 }
 
-pub fn ResultSet(comptime ResultRowType: type) type {
+pub fn ResultSet(comptime T: type) type {
     return struct {
         conn: *Conn,
         col_packets: []const Packet,
         col_defs: []const ColumnDefinition41,
 
-        pub fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !ResultSet(ResultRowType) {
+        pub fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !ResultSet(T) {
             const col_packets = try allocator.alloc(Packet, column_count);
             @memset(col_packets, Packet.safe_deinit());
             const col_defs = try allocator.alloc(ColumnDefinition41, column_count);
@@ -94,7 +94,7 @@ pub fn ResultSet(comptime ResultRowType: type) type {
             return .{ .conn = conn, .col_packets = col_packets, .col_defs = col_defs };
         }
 
-        fn deinit(t: *const ResultSet(ResultRowType), allocator: std.mem.Allocator) void {
+        fn deinit(t: *const ResultSet(T), allocator: std.mem.Allocator) void {
             for (t.col_packets) |packet| {
                 packet.deinit(allocator);
             }
@@ -102,87 +102,97 @@ pub fn ResultSet(comptime ResultRowType: type) type {
             allocator.free(t.col_defs);
         }
 
-        pub fn readRow(t: *const ResultSet(ResultRowType), allocator: std.mem.Allocator) !ResultRowType {
-            const packet = try t.conn.readPacket(allocator);
-            return .{
-                .result_set = t,
-                .packet = packet,
-                .value = switch (packet.payload[0]) {
-                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &packet, t.conn.client_capabilities) },
-                    constants.EOF => .{ .eof = EofPacket.initFromPacket(&packet, t.conn.client_capabilities) },
-                    else => .{ .raw = packet.payload },
-                },
-            };
+        pub fn readRow(t: *const ResultSet(T), allocator: std.mem.Allocator) !ResultRow(T) {
+            return ResultRow(T).init(t.conn, allocator, t.col_defs);
         }
 
-        pub fn iter(t: *const ResultSet(ResultRowType)) ResultSetIter(ResultRowType) {
+        pub fn iter(t: *const ResultSet(T)) ResultSetIter(T) {
             return .{ .result_set = t };
         }
     };
 }
 
-pub const TextResultRow = struct {
-    result_set: *const ResultSet(TextResultRow),
-    packet: Packet,
-    value: union(enum) {
-        err: ErrorPacket,
-        eof: EofPacket,
+pub const TextResultData = struct {
+    raw: []const u8,
+    col_defs: []const ColumnDefinition41,
 
-        //https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query_response_text_resultset_row.html
-        raw: []const u8,
-    },
-
-    pub fn scan(t: *const TextResultRow, dest: []?[]const u8) !void {
-        std.debug.assert(dest.len == t.result_set.col_defs.len);
-        switch (t.value) {
-            .err => |err| return err.asError(),
-            .eof => |eof| return eof.asError(),
-            .raw => try helper.scanTextResultRow(t.value.raw, dest),
-        }
+    pub fn scan(t: *const TextResultData, dest: []?[]const u8) !void {
+        std.debug.assert(dest.len == t.col_defs.len);
+        try helper.scanTextResultRow(dest, t.raw);
     }
 
-    pub fn scanAlloc(t: *const TextResultRow, allocator: std.mem.Allocator) ![]?[]const u8 {
-        const record = try allocator.alloc(?[]const u8, t.result_set.col_defs.len);
+    pub fn scanAlloc(t: *const TextResultData, allocator: std.mem.Allocator) ![]?[]const u8 {
+        const record = try allocator.alloc(?[]const u8, t.col_defs.len);
         try t.scan(record);
         return record;
     }
-
-    pub fn deinit(text_result_set: *const TextResultRow, allocator: std.mem.Allocator) void {
-        text_result_set.packet.deinit(allocator);
-    }
 };
 
-pub const BinaryResultRow = struct {
-    result_set: *const ResultSet(BinaryResultRow),
-    packet: Packet,
-    value: union(enum) {
-        err: ErrorPacket,
-        eof: EofPacket,
-        raw: []const u8,
-    },
-
-    const Options = struct {};
+pub const BinaryResultData = struct {
+    raw: []const u8,
+    col_defs: []const ColumnDefinition41,
 
     // dest: pointer to a struct
-    pub fn scan(b: *const BinaryResultRow, dest: anytype) !void {
-        switch (b.value) {
-            .err => |err| return err.asError(),
-            .eof => |eof| return eof.asError(),
-            .raw => |raw| helper.scanBinResultRow(dest, raw, b.result_set.col_defs),
-        }
+    pub fn scan(b: *const BinaryResultData, dest: anytype) !void {
+        try helper.scanBinResultRow(dest, b.raw, b.col_defs);
     }
 
     // returns a pointer to allocated struct object, caller must remember to call destroy on the object after use
-    pub fn scanAlloc(b: *const BinaryResultRow, comptime S: type, allocator: std.mem.Allocator) !*S {
+    pub fn scanAlloc(b: *const BinaryResultData, comptime S: type, allocator: std.mem.Allocator) !*S {
         const s = try allocator.create(S);
         try b.scan(s);
         return s;
     }
-
-    pub fn deinit(text_result_set: *const BinaryResultRow, allocator: std.mem.Allocator) void {
-        text_result_set.packet.deinit(allocator);
-    }
 };
+
+pub fn ResultRow(comptime T: type) type {
+    return struct {
+        const Value = union(enum) {
+            err: ErrorPacket,
+            eof: EofPacket,
+
+            //https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query_response_text_resultset_row.html
+            data: T,
+        };
+        packet: Packet,
+        value: Value,
+
+        fn init(conn: *Conn, allocator: std.mem.Allocator, col_defs: []const ColumnDefinition41) !ResultRow(T) {
+            const packet = try conn.readPacket(allocator);
+            return .{
+                .packet = packet,
+                .value = switch (packet.payload[0]) {
+                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &packet, conn.client_capabilities) },
+                    constants.EOF => .{ .eof = EofPacket.initFromPacket(&packet, conn.client_capabilities) },
+                    else => .{ .data = .{ .raw = packet.payload, .col_defs = col_defs } },
+                },
+            };
+        }
+
+        pub fn expect(
+            r: *const ResultRow(T),
+            comptime variant: std.meta.FieldEnum(Value),
+        ) !std.meta.FieldType(Value, variant) {
+            return switch (r.value) {
+                variant => @field(r.value, @tagName(variant)),
+                else => {
+                    return switch (r.value) {
+                        .err => |err| return err.asError(),
+                        .eof => |eof| return eof.asError(),
+                        .data => |data| {
+                            std.log.err("Unexpected ResultData: {any}\n", .{data});
+                            return error.UnexpectedResultData;
+                        },
+                    };
+                },
+            };
+        }
+
+        pub fn deinit(r: *const ResultRow(T), allocator: std.mem.Allocator) void {
+            r.packet.deinit(allocator);
+        }
+    };
+}
 
 pub const PrepareResult = struct {
     const Value = union(enum) {

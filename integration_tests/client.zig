@@ -58,7 +58,8 @@ test "query text protocol" {
         var dest = [_]?[]const u8{undefined};
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
-            try row.scan(&dest);
+            const data = try row.expect(.data);
+            try data.scan(&dest);
             try std.testing.expectEqualSlices(u8, "1", dest[0].?);
         }
     }
@@ -70,7 +71,8 @@ test "query text protocol" {
         var dest = [_]?[]const u8{ undefined, undefined };
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
-            try row.scan(&dest);
+            const data = try row.expect(.data);
+            try data.scan(&dest);
             try std.testing.expectEqualSlices(u8, "3", dest[0].?);
             try std.testing.expectEqualSlices(u8, "4", dest[1].?);
         }
@@ -82,7 +84,8 @@ test "query text protocol" {
         var dest = [_]?[]const u8{ undefined, undefined, undefined };
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
-            try row.scan(&dest);
+            const data = try row.expect(.data);
+            try data.scan(&dest);
             try std.testing.expectEqualSlices(u8, "5", dest[0].?);
             try std.testing.expectEqual(@as(?[]const u8, null), dest[1]);
             try std.testing.expectEqualSlices(u8, "7", dest[2].?);
@@ -97,14 +100,16 @@ test "query text protocol" {
             var dest = [_]?[]const u8{ undefined, undefined };
             const row = try rows.readRow(allocator);
             defer row.deinit(std.testing.allocator);
-            try row.scan(&dest);
+            const data = try row.expect(.data);
+            try data.scan(&dest);
             try std.testing.expectEqualSlices(u8, "8", dest[0].?);
             try std.testing.expectEqualSlices(u8, "9", dest[1].?);
         }
         {
             const row = try rows.readRow(allocator);
             defer row.deinit(std.testing.allocator);
-            const dest = try row.scanAlloc(allocator);
+            const data = try row.expect(.data);
+            const dest = try data.scanAlloc(allocator);
             defer allocator.free(dest);
             try std.testing.expectEqualSlices(u8, "10", dest[0].?);
             try std.testing.expectEqualSlices(u8, "11", dest[1].?);
@@ -115,7 +120,7 @@ test "query text protocol" {
             switch (row.value) {
                 .eof => {},
                 .err => |err| return err.asError(),
-                .raw => @panic("unexpected raw"),
+                .data => @panic("unexpected data"),
             }
         }
     }
@@ -245,11 +250,13 @@ test "prepare execute with result" {
             defer row.deinit(allocator);
             {
                 var dest: MyType = undefined;
-                try row.scan(&dest);
+                const data = try row.expect(.data);
+                try data.scan(&dest);
                 try std.testing.expectEqualDeep(expected, dest);
             }
             {
-                const dest = try row.scanAlloc(MyType, allocator);
+                const data = try row.expect(.data);
+                const dest = try data.scanAlloc(MyType, allocator);
                 defer allocator.destroy(dest);
                 try std.testing.expectEqualDeep(&expected, dest);
             }

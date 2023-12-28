@@ -4,15 +4,15 @@ const constants = @import("./constants.zig");
 const EnumFieldType = constants.EnumFieldType;
 const result = @import("./result.zig");
 const ResultSet = result.ResultSet;
-const TextResultRow = result.TextResultRow;
-const BinaryResultRow = result.BinaryResultRow;
-const Options = result.BinaryResultRow.Options;
 const protocol = @import("./protocol.zig");
 const PacketReader = protocol.packet_reader.PacketReader;
 const packet_writer = protocol.packet_writer;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 const DateTime = @import("./temporal.zig").DateTime;
 const Duration = @import("./temporal.zig").Duration;
+const ResultRow = result.ResultRow;
+const TextResultData = result.TextResultData;
+const BinaryResultData = result.BinaryResultData;
 
 fn comptimeIntToUInt(
     comptime Unsigned: type,
@@ -226,7 +226,7 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
     // comptime FieldType: type, field_name: []const u8, col_name: []const u8, col_type: EnumFieldType)
     // TODO: insert field name if struct is passed in
     logConversionError(@TypeOf(param), "", col_def.name, col_type);
-    return error.InvalidConversion;
+    return error.EncodeBinaryParam;
 }
 
 // To save space the packet can be compressed:
@@ -287,7 +287,7 @@ fn encodeDuration(d: Duration, writer: anytype) !void {
     }
 }
 
-pub fn scanTextResultRow(raw: []const u8, dest: []?[]const u8) !void {
+pub fn scanTextResultRow(dest: []?[]const u8, raw: []const u8) !void {
     var packet_reader = PacketReader.initFromPayload(raw);
     for (dest) |*d| {
         d.* = blk: {
@@ -305,7 +305,7 @@ pub fn scanTextResultRow(raw: []const u8, dest: []?[]const u8) !void {
 }
 
 // dest is a pointer to a struct
-pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const ColumnDefinition41) void {
+pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const ColumnDefinition41) !void {
     var reader = PacketReader.initFromPayload(raw);
     const first = reader.readByte();
     std.debug.assert(first == constants.BINARY_PROTOCOL_RESULTSET_ROW_HEADER);
@@ -328,7 +328,7 @@ pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const Column
                 if (isNull) {
                     @field(dest, field.name) = null;
                 } else {
-                    @field(dest, field.name) = binElemToValue(field_info.Optional.child, field.name, &col_def, &reader);
+                    @field(dest, field.name) = try binElemToValue(field_info.Optional.child, field.name, &col_def, &reader);
                 }
             },
             else => {
@@ -336,7 +336,7 @@ pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const Column
                     std.log.err("column: {s} value is null, but field: {s} is not nullable\n", .{ col_def.name, field.name });
                     unreachable;
                 }
-                @field(dest, field.name) = binElemToValue(field.type, field.name, &col_def, &reader);
+                @field(dest, field.name) = try binElemToValue(field.type, field.name, &col_def, &reader);
             },
         }
     }
@@ -345,12 +345,12 @@ pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const Column
 
 inline fn logConversionError(comptime FieldType: type, field_name: []const u8, col_name: []const u8, col_type: EnumFieldType) void {
     std.log.err(
-        "MySQL Column: (name: {s}, type: {any}), Zig Value: (name: {s}, type: {any})\n",
+        "Conversion Error: MySQL Column: (name: {s}, type: {any}), Zig Value: (name: {s}, type: {any})\n",
         .{ col_name, col_type, field_name, FieldType },
     );
 }
 
-inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, reader: *PacketReader) FieldType {
+inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, reader: *PacketReader) !FieldType {
     const field_info = @typeInfo(FieldType);
     const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
 
@@ -400,7 +400,7 @@ inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_d
     }
 
     logConversionError(FieldType, field_name, col_def.name, col_type);
-    unreachable;
+    return error.BinElemToValue;
 }
 
 inline fn binResIsNull(null_bitmap: []const u8, col_idx: usize) bool {
@@ -441,12 +441,12 @@ test "binResIsNull" {
     }
 }
 
-pub fn ResultSetIter(comptime ResultRowType: type) type {
+pub fn ResultSetIter(comptime T: type) type {
     return struct {
-        result_set: *const ResultSet(ResultRowType),
+        result_set: *const ResultSet(T),
 
-        pub fn next(i: *const ResultSetIter(ResultRowType), allocator: std.mem.Allocator) !?ResultRowType {
-            const row = try i.result_set.readRow(allocator);
+        pub fn next(iter: *const ResultSetIter(T), allocator: std.mem.Allocator) !?ResultRow(T) {
+            const row = try iter.result_set.readRow(allocator);
             return switch (row.value) {
                 .eof => {
                     // need to deinit as caller would not know to do so
@@ -458,8 +458,8 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
             };
         }
 
-        pub fn collectTexts(iter: *const ResultSetIter(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
-            var row_acc = std.ArrayList(TextResultRow).init(allocator);
+        pub fn collectTexts(iter: *const ResultSetIter(TextResultData), allocator: std.mem.Allocator) !TableTexts {
+            var row_acc = std.ArrayList(ResultRow(TextResultData)).init(allocator);
             while (try iter.next(allocator)) |row| {
                 const new_row_ptr = try row_acc.addOne();
                 new_row_ptr.* = row;
@@ -470,7 +470,8 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
             var elems = try allocator.alloc(?[]const u8, row_acc.items.len * num_cols);
             for (row_acc.items, 0..) |row, i| {
                 const dest_row = elems[i * num_cols .. (i + 1) * num_cols];
-                try row.scan(dest_row);
+                const data = try row.expect(.data);
+                try data.scan(dest_row);
                 rows[i] = dest_row;
             }
 
@@ -481,8 +482,8 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
             };
         }
 
-        pub fn collectStructs(iter: *const ResultSetIter(BinaryResultRow), comptime Struct: type, allocator: std.mem.Allocator) !TableStructs(Struct) {
-            var row_acc = std.ArrayList(BinaryResultRow).init(allocator);
+        pub fn collectStructs(iter: *const ResultSetIter(BinaryResultData), comptime Struct: type, allocator: std.mem.Allocator) !TableStructs(Struct) {
+            var row_acc = std.ArrayList(ResultRow(BinaryResultData)).init(allocator);
             while (try iter.next(allocator)) |row| {
                 const new_row_ptr = try row_acc.addOne();
                 new_row_ptr.* = row;
@@ -490,7 +491,8 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
 
             const structs = try allocator.alloc(Struct, row_acc.items.len);
             for (row_acc.items, structs) |row, *s| {
-                try row.scan(s);
+                const data = try row.expect(.data);
+                try data.scan(s);
             }
 
             return .{
@@ -502,7 +504,7 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
 }
 
 pub const TableTexts = struct {
-    result_rows: []const TextResultRow,
+    result_rows: []const ResultRow(TextResultData),
     elems: []const ?[]const u8,
     rows: []const []const ?[]const u8,
 
@@ -531,7 +533,7 @@ pub const TableTexts = struct {
 
 pub fn TableStructs(comptime Struct: type) type {
     return struct {
-        result_rows: []const BinaryResultRow,
+        result_rows: []const ResultRow(BinaryResultData),
         rows: []const Struct,
 
         pub fn deinit(t: *const TableStructs(Struct), allocator: std.mem.Allocator) void {

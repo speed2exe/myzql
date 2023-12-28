@@ -24,8 +24,8 @@ const result = @import("./result.zig");
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
 const PreparedStatement = result.PreparedStatement;
-const TextResultRow = result.TextResultRow;
-const BinaryResultRow = result.BinaryResultRow;
+const TextResultData = result.TextResultData;
+const BinaryResultData = result.BinaryResultData;
 const ResultSet = result.ResultSet;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 
@@ -49,12 +49,12 @@ pub const Conn = struct {
 
     // TODO: add options
     /// caller must consume the result by switching on the result's value
-    pub fn query(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult(TextResultRow) {
+    pub fn query(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult(TextResultData) {
         std.debug.assert(conn.state == .connected);
         conn.sequence_id = 0;
         const query_request: QueryRequest = .{ .query = query_string };
         try conn.sendPacketUsingSmallPacketWriter(query_request);
-        return QueryResult(TextResultRow).init(conn, allocator);
+        return QueryResult(TextResultData).init(conn, allocator);
     }
 
     // TODO: add options
@@ -74,7 +74,7 @@ pub const Conn = struct {
         };
     }
 
-    pub fn execute(conn: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
+    pub fn execute(conn: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultData) {
         std.debug.assert(conn.state == .connected);
         conn.sequence_id = 0;
         const execute_request: ExecuteRequest = .{
@@ -82,7 +82,7 @@ pub const Conn = struct {
             .prep_stmt = prep_stmt,
         };
         try conn.sendPacketUsingSmallPacketWriterWithParams(execute_request, params);
-        return QueryResult(BinaryResultRow).init(conn, allocator);
+        return QueryResult(BinaryResultData).init(conn, allocator);
     }
 
     pub fn close(conn: *Conn) void {
