@@ -11,6 +11,7 @@ const Conn = @import("./conn.zig").Conn;
 const EofPacket = protocol.generic_response.EofPacket;
 const helper = @import("./helper.zig");
 const ResultSetIter = helper.ResultSetIter;
+const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
 
 pub fn QueryResult(comptime ResultRowType: type) type {
     return struct {
@@ -19,9 +20,26 @@ pub fn QueryResult(comptime ResultRowType: type) type {
             err: ErrorPacket,
             rows: ResultSet(ResultRowType),
         };
-
         packet: Packet,
         value: Value,
+
+        pub fn init(conn: *Conn, allocator: std.mem.Allocator) !QueryResult(ResultRowType) {
+            const response_packet = try conn.readPacket(allocator);
+            return .{
+                .packet = response_packet,
+                .value = switch (response_packet.payload[0]) {
+                    constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
+                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
+                    constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
+                    else => .{ .rows = blk: {
+                        var packet_reader = PacketReader.initFromPacket(&response_packet);
+                        const column_count = packet_reader.readLengthEncodedInteger();
+                        std.debug.assert(packet_reader.finished());
+                        break :blk try ResultSet(ResultRowType).init(allocator, conn, column_count);
+                    } },
+                },
+            };
+        }
 
         pub fn deinit(q: *const QueryResult(ResultRowType), allocator: std.mem.Allocator) void {
             q.packet.deinit(allocator);

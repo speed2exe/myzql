@@ -54,21 +54,7 @@ pub const Conn = struct {
         conn.sequence_id = 0;
         const query_request: QueryRequest = .{ .query = query_string };
         try conn.sendPacketUsingSmallPacketWriter(query_request);
-        const response_packet = try conn.readPacket(allocator);
-        return .{
-            .packet = response_packet,
-            .value = switch (response_packet.payload[0]) {
-                constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
-                constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
-                constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-                else => .{ .rows = blk: {
-                    var packet_reader = PacketReader.initFromPacket(&response_packet);
-                    const column_count = packet_reader.readLengthEncodedInteger();
-                    std.debug.assert(packet_reader.finished());
-                    break :blk try ResultSet(TextResultRow).init(allocator, conn, column_count);
-                } },
-            },
-        };
+        return QueryResult(TextResultRow).init(conn, allocator);
     }
 
     // TODO: add options
@@ -96,21 +82,7 @@ pub const Conn = struct {
             .prep_stmt = prep_stmt,
         };
         try conn.sendPacketUsingSmallPacketWriterWithParams(execute_request, params);
-
-        const response_packet = try conn.readPacket(allocator);
-        return .{
-            .packet = response_packet,
-            .value = switch (response_packet.payload[0]) {
-                constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
-                constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
-                else => .{ .rows = blk: {
-                    var packet_reader = PacketReader.initFromPacket(&response_packet);
-                    const column_count = packet_reader.readLengthEncodedInteger();
-                    std.debug.assert(packet_reader.finished());
-                    break :blk try ResultSet(BinaryResultRow).init(allocator, conn, column_count);
-                } },
-            },
-        };
+        return QueryResult(BinaryResultRow).init(conn, allocator);
     }
 
     pub fn close(conn: *Conn) void {
