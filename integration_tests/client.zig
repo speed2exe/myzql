@@ -255,6 +255,33 @@ test "prepare execute with result" {
             }
         }
     }
+    {
+        const query =
+            \\SELECT 1, 2, 3
+            \\UNION ALL
+            \\SELECT 4, 5, 6
+        ;
+        const prep_res = try c.prepare(allocator, query);
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.ok);
+        const query_res = try c.execute(allocator, &prep_stmt, .{});
+        defer query_res.deinit(allocator);
+        const rows = (try query_res.expect(.rows)).iter();
+
+        const MyType = struct {
+            a: u8,
+            b: u8,
+            c: u8,
+        };
+        const expected: []const MyType = &.{
+            .{ .a = 1, .b = 2, .c = 3 },
+            .{ .a = 4, .b = 5, .c = 6 },
+        };
+
+        const structs = try rows.collectStructs(MyType, allocator);
+        defer structs.deinit(allocator);
+        try std.testing.expectEqualDeep(expected, structs.rows);
+    }
 }
 
 test "binary data types - int" {
@@ -311,7 +338,7 @@ test "binary data types - int" {
         defer res.deinit(allocator);
         const rows_iter = (try res.expect(.rows)).iter();
 
-        const table_texts = try rows_iter.collect_texts(allocator);
+        const table_texts = try rows_iter.collectTexts(allocator);
         defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{

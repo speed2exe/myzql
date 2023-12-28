@@ -443,10 +443,10 @@ test "binResIsNull" {
 
 pub fn ResultSetIter(comptime ResultRowType: type) type {
     return struct {
-        text_result_set: *const ResultSet(ResultRowType),
+        result_set: *const ResultSet(ResultRowType),
 
         pub fn next(i: *const ResultSetIter(ResultRowType), allocator: std.mem.Allocator) !?ResultRowType {
-            const row = try i.text_result_set.readRow(allocator);
+            const row = try i.result_set.readRow(allocator);
             return switch (row.value) {
                 .eof => {
                     // need to deinit as caller would not know to do so
@@ -458,15 +458,15 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
             };
         }
 
-        pub fn collect_texts(iter: *const ResultSetIter(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
+        pub fn collectTexts(iter: *const ResultSetIter(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
             var row_acc = std.ArrayList(TextResultRow).init(allocator);
             while (try iter.next(allocator)) |row| {
                 const new_row_ptr = try row_acc.addOne();
                 new_row_ptr.* = row;
             }
 
-            const num_cols = iter.text_result_set.col_defs.len;
-            var rows = try allocator.alloc([]?[]const u8, row_acc.items.len);
+            const num_cols = iter.result_set.col_defs.len;
+            var rows = try allocator.alloc([]?[]const u8, row_acc.items.len); //TODO: alloc once inst instead
             var elems = try allocator.alloc(?[]const u8, row_acc.items.len * num_cols);
             for (row_acc.items, 0..) |row, i| {
                 const dest_row = elems[i * num_cols .. (i + 1) * num_cols];
@@ -481,26 +481,21 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
             };
         }
 
-        pub fn collect_structs(comptime Struct: type, iter: *const ResultSetIter(BinaryResultRow), allocator: std.mem.Allocator) !TableStructs(Struct) {
+        pub fn collectStructs(iter: *const ResultSetIter(BinaryResultRow), comptime Struct: type, allocator: std.mem.Allocator) !TableStructs(Struct) {
             var row_acc = std.ArrayList(BinaryResultRow).init(allocator);
             while (try iter.next(allocator)) |row| {
                 const new_row_ptr = try row_acc.addOne();
                 new_row_ptr.* = row;
             }
 
-            const num_cols = iter.text_result_set.col_defs.len;
-            var rows = try allocator.alloc([]Struct, row_acc.items.len);
-            var elems = try allocator.alloc(Struct, row_acc.items.len * num_cols);
-            for (row_acc.items, 0..) |row, i| {
-                const dest_row = elems[i * num_cols .. (i + 1) * num_cols];
-                try row.scan(dest_row);
-                rows[i] = dest_row;
+            const structs = try allocator.alloc(Struct, row_acc.items.len);
+            for (row_acc.items, structs) |row, *s| {
+                try row.scan(s);
             }
 
             return .{
                 .result_rows = try row_acc.toOwnedSlice(),
-                .elems = elems,
-                .rows = rows,
+                .rows = structs,
             };
         }
     };
@@ -537,8 +532,7 @@ pub const TableTexts = struct {
 pub fn TableStructs(comptime Struct: type) type {
     return struct {
         result_rows: []BinaryResultRow,
-        elems: []?Struct,
-        rows: [][]?Struct,
+        rows: []Struct,
 
         pub fn deinit(t: *const TableStructs(Struct), allocator: std.mem.Allocator) void {
             for (t.result_rows) |row| {
@@ -546,7 +540,6 @@ pub fn TableStructs(comptime Struct: type) type {
             }
             allocator.free(t.result_rows);
             allocator.free(t.rows);
-            allocator.free(t.elems);
         }
 
         pub fn debugPrint(t: *const TableStructs(Struct)) void {

@@ -102,7 +102,7 @@ pub fn ResultSet(comptime ResultRowType: type) type {
         }
 
         pub fn iter(t: *const ResultSet(ResultRowType)) ResultSetIter(ResultRowType) {
-            return .{ .text_result_set = t };
+            return .{ .result_set = t };
         }
     };
 }
