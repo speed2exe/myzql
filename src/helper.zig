@@ -305,7 +305,7 @@ pub fn scanTextResultRow(raw: []const u8, dest: []?[]const u8) !void {
 }
 
 // dest is a pointer to a struct
-pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []ColumnDefinition41) void {
+pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const ColumnDefinition41) void {
     var reader = PacketReader.initFromPayload(raw);
     const first = reader.readByte();
     std.debug.assert(first == constants.BINARY_PROTOCOL_RESULTSET_ROW_HEADER);

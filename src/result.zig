@@ -58,26 +58,22 @@ pub fn QueryResult(comptime ResultRowType: type) type {
 pub fn ResultSet(comptime ResultRowType: type) type {
     return struct {
         conn: *Conn,
-        col_packets: []Packet,
-        col_defs: []ColumnDefinition41,
+        col_packets: []const Packet,
+        col_defs: []const ColumnDefinition41,
 
         pub fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !ResultSet(ResultRowType) {
-            var t: ResultSet(ResultRowType) = .{ .conn = conn, .col_packets = &.{}, .col_defs = &.{} };
-            errdefer t.deinit(allocator);
+            const col_packets = try allocator.alloc(Packet, column_count);
+            @memset(col_packets, Packet.safe_deinit());
+            const col_defs = try allocator.alloc(ColumnDefinition41, column_count);
 
-            t.col_packets = try allocator.alloc(Packet, column_count);
-            @memset(t.col_packets, Packet.safe_deinit());
-            t.col_defs = try allocator.alloc(ColumnDefinition41, column_count);
-
-            for (t.col_packets, t.col_defs) |*pac, *def| {
+            for (col_packets, col_defs) |*pac, *def| {
                 pac.* = try conn.readPacket(allocator);
                 def.* = ColumnDefinition41.initFromPacket(pac);
             }
 
             try discardEofPacket(conn, allocator);
 
-            t.conn = conn;
-            return t;
+            return .{ .conn = conn, .col_packets = col_packets, .col_defs = col_defs };
         }
 
         fn deinit(t: *const ResultSet(ResultRowType), allocator: std.mem.Allocator) void {
