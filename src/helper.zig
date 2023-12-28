@@ -502,9 +502,9 @@ pub fn ResultSetIter(comptime ResultRowType: type) type {
 }
 
 pub const TableTexts = struct {
-    result_rows: []TextResultRow,
-    elems: []?[]const u8,
-    rows: [][]?[]const u8,
+    result_rows: []const TextResultRow,
+    elems: []const ?[]const u8,
+    rows: []const []const ?[]const u8,
 
     pub fn deinit(t: *const TableTexts, allocator: std.mem.Allocator) void {
         for (t.result_rows) |row| {
@@ -531,8 +531,8 @@ pub const TableTexts = struct {
 
 pub fn TableStructs(comptime Struct: type) type {
     return struct {
-        result_rows: []BinaryResultRow,
-        rows: []Struct,
+        result_rows: []const BinaryResultRow,
+        rows: []const Struct,
 
         pub fn deinit(t: *const TableStructs(Struct), allocator: std.mem.Allocator) void {
             for (t.result_rows) |row| {

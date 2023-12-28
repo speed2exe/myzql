@@ -133,16 +133,16 @@ test "query text table" {
         defer table_texts.deinit(allocator);
         try std.testing.expectEqual(table_texts.rows.len, 2);
         {
-            var expected = [_]?[]const u8{ "1", "2", "3", "4", null, "6" };
-            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table_texts.elems);
+            const expected: []const ?[]const u8 = &.{ "1", "2", "3", "4", null, "6" };
+            try std.testing.expectEqualDeep(expected, table_texts.elems);
         }
         {
-            var expected = [_]?[]const u8{ "1", "2", "3" };
-            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table_texts.rows[0]);
+            const expected: []const ?[]const u8 = &.{ "1", "2", "3" };
+            try std.testing.expectEqualDeep(expected, table_texts.rows[0]);
         }
         {
-            var expected = [_]?[]const u8{ "4", null, "6" };
-            try std.testing.expectEqualDeep(@as([]?[]const u8, &expected), table_texts.rows[1]);
+            const expected: []const ?[]const u8 = &.{ "4", null, "6" };
+            try std.testing.expectEqualDeep(expected, table_texts.rows[1]);
         }
     }
 }
