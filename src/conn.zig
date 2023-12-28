@@ -63,15 +63,7 @@ pub const Conn = struct {
         conn.sequence_id = 0;
         const prepare_request: PrepareRequest = .{ .query = query_string };
         try conn.sendPacketUsingSmallPacketWriter(prepare_request);
-        const response_packet = try conn.readPacket(allocator);
-        return .{
-            .packet = response_packet,
-            .value = switch (response_packet.payload[0]) {
-                constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
-                constants.OK => .{ .ok = try PreparedStatement.initFromPacket(&response_packet, conn, allocator) },
-                else => return response_packet.asError(conn.client_capabilities),
-            },
-        };
+        return PrepareResult.init(conn, allocator);
     }
 
     pub fn execute(conn: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultData) {

@@ -81,8 +81,10 @@ pub fn ResultSet(comptime T: type) type {
 
         pub fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !ResultSet(T) {
             const col_packets = try allocator.alloc(Packet, column_count);
-            @memset(col_packets, Packet.safe_deinit());
+            errdefer allocator.free(col_packets);
+
             const col_defs = try allocator.alloc(ColumnDefinition41, column_count);
+            errdefer allocator.free(col_defs);
 
             for (col_packets, col_defs) |*pac, *def| {
                 pac.* = try conn.readPacket(allocator);
@@ -91,7 +93,11 @@ pub fn ResultSet(comptime T: type) type {
 
             try discardEofPacket(conn, allocator);
 
-            return .{ .conn = conn, .col_packets = col_packets, .col_defs = col_defs };
+            return .{
+                .conn = conn,
+                .col_packets = col_packets,
+                .col_defs = col_defs,
+            };
         }
 
         fn deinit(t: *const ResultSet(T), allocator: std.mem.Allocator) void {
@@ -148,10 +154,8 @@ pub const BinaryResultData = struct {
 pub fn ResultRow(comptime T: type) type {
     return struct {
         const Value = union(enum) {
-            err: ErrorPacket,
-            eof: EofPacket,
-
-            //https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query_response_text_resultset_row.html
+            err: *const ErrorPacket,
+            eof: *const EofPacket,
             data: T,
         };
         packet: Packet,
@@ -162,8 +166,8 @@ pub fn ResultRow(comptime T: type) type {
             return .{
                 .packet = packet,
                 .value = switch (packet.payload[0]) {
-                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &packet, conn.client_capabilities) },
-                    constants.EOF => .{ .eof = EofPacket.initFromPacket(&packet, conn.client_capabilities) },
+                    constants.ERR => .{ .err = &ErrorPacket.initFromPacket(false, &packet, conn.client_capabilities) },
+                    constants.EOF => .{ .eof = &EofPacket.initFromPacket(&packet, conn.client_capabilities) },
                     else => .{ .data = .{ .raw = packet.payload, .col_defs = col_defs } },
                 },
             };
@@ -196,12 +200,24 @@ pub fn ResultRow(comptime T: type) type {
 
 pub const PrepareResult = struct {
     const Value = union(enum) {
+        err: *const ErrorPacket,
         ok: PreparedStatement,
-        err: ErrorPacket,
     };
 
     packet: Packet,
     value: Value,
+
+    pub fn init(conn: *Conn, allocator: std.mem.Allocator) !PrepareResult {
+        const response_packet = try conn.readPacket(allocator);
+        return .{
+            .packet = response_packet,
+            .value = switch (response_packet.payload[0]) {
+                constants.ERR => .{ .err = &ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
+                constants.OK => .{ .ok = try PreparedStatement.initFromPacket(&response_packet, conn, allocator) },
+                else => return response_packet.asError(conn.client_capabilities),
+            },
+        };
+    }
 
     pub fn deinit(p: *const PrepareResult, allocator: std.mem.Allocator) void {
         p.packet.deinit(allocator);
@@ -231,25 +247,25 @@ pub const PrepareResult = struct {
 };
 
 pub const PreparedStatement = struct {
-    // TODO: use const instead
     prep_ok: PrepareOk,
-    packets: []Packet,
-    params: []ColumnDefinition41, // parameters that would be passed when executing the query
-    res_cols: []ColumnDefinition41, // columns that would be returned when executing the query
+    packets: []const Packet,
+    params: []const ColumnDefinition41, // parameters that would be passed when executing the query
+    res_cols: []const ColumnDefinition41, // columns that would be returned when executing the query
 
     pub fn initFromPacket(resp_packet: *const Packet, conn: *Conn, allocator: std.mem.Allocator) !PreparedStatement {
         const prep_ok = PrepareOk.initFromPacket(resp_packet, conn.client_capabilities);
-        var prep_stmt: PreparedStatement = .{ .prep_ok = prep_ok, .packets = &.{}, .params = &.{}, .res_cols = &.{} };
-        errdefer prep_stmt.deinit(allocator);
 
-        prep_stmt.packets = try allocator.alloc(Packet, prep_ok.num_params + prep_ok.num_columns);
-        @memset(prep_stmt.packets, Packet.safe_deinit());
+        const packets = try allocator.alloc(Packet, prep_ok.num_params + prep_ok.num_columns);
+        errdefer allocator.free(packets);
 
-        prep_stmt.params = try allocator.alloc(ColumnDefinition41, prep_ok.num_params);
-        prep_stmt.res_cols = try allocator.alloc(ColumnDefinition41, prep_ok.num_columns);
+        const params = try allocator.alloc(ColumnDefinition41, prep_ok.num_params);
+        errdefer allocator.free(params);
+
+        const res_cols = try allocator.alloc(ColumnDefinition41, prep_ok.num_columns);
+        errdefer allocator.free(res_cols);
 
         if (prep_ok.num_params > 0) {
-            for (prep_stmt.packets[0..prep_ok.num_params], prep_stmt.params) |*packet, *param| {
+            for (packets[0..prep_ok.num_params], params) |*packet, *param| {
                 packet.* = try conn.readPacket(allocator);
                 param.* = ColumnDefinition41.initFromPacket(packet);
             }
@@ -257,14 +273,19 @@ pub const PreparedStatement = struct {
         }
 
         if (prep_ok.num_columns > 0) {
-            for (prep_stmt.packets[prep_ok.num_params..], prep_stmt.res_cols) |*packet, *res_col| {
+            for (packets[prep_ok.num_params..], res_cols) |*packet, *res_col| {
                 packet.* = try conn.readPacket(allocator);
                 res_col.* = ColumnDefinition41.initFromPacket(packet);
             }
             try discardEofPacket(conn, allocator);
         }
 
-        return prep_stmt;
+        return .{
+            .prep_ok = prep_ok,
+            .packets = packets,
+            .params = params,
+            .res_cols = res_cols,
+        };
     }
 
     pub fn deinit(prep_stmt: *const PreparedStatement, allocator: std.mem.Allocator) void {

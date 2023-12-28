@@ -10,11 +10,6 @@ pub const Packet = struct {
     sequence_id: u8,
     payload: []const u8,
 
-    // generate a packet safe to deinit with allocator
-    pub fn safe_deinit() Packet {
-        return .{ .payload_length = undefined, .sequence_id = undefined, .payload = &.{} };
-    }
-
     pub fn initFromReader(allocator: std.mem.Allocator, sbr: *buffered_stream.Reader) !Packet {
         var packet: Packet = undefined;
 
