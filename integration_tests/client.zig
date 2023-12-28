@@ -129,7 +129,7 @@ test "query text table" {
         const query_res = try c.query(allocator, "SELECT 1,2,3 UNION ALL SELECT 4,null,6");
         defer query_res.deinit(allocator);
         const iter = (try query_res.expect(.rows)).iter();
-        const table_texts = try iter.collect_texts(allocator);
+        const table_texts = try iter.collectTexts(allocator);
         defer table_texts.deinit(allocator);
         try std.testing.expectEqual(table_texts.rows.len, 2);
         {
@@ -421,7 +421,7 @@ test "binary data types - float" {
         defer res.deinit(allocator);
         const rows_iter = (try res.expect(.rows)).iter();
 
-        const table_texts = try rows_iter.collect_texts(allocator);
+        const table_texts = try rows_iter.collectTexts(allocator);
         defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
@@ -482,7 +482,7 @@ test "binary data types - string" {
         defer res.deinit(allocator);
         const rows_iter = (try res.expect(.rows)).iter();
 
-        const table_texts = try rows_iter.collect_texts(allocator);
+        const table_texts = try rows_iter.collectTexts(allocator);
         defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
@@ -573,7 +573,7 @@ test "binary data types - temporal" {
         defer res.deinit(allocator);
         const rows_iter = (try res.expect(.rows)).iter();
 
-        const table_texts = try rows_iter.collect_texts(allocator);
+        const table_texts = try rows_iter.collectTexts(allocator);
         defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{

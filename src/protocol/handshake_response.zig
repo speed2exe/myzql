@@ -19,7 +19,7 @@ pub const HandshakeResponse41 = struct {
         try packer_writer.writeUInt32(writer, h.client_flag);
         try packer_writer.writeUInt32(writer, h.max_packet_size);
         try packer_writer.writeUInt8(writer, h.character_set);
-        _ = try writer.write(&([_]u8{0} ** 23)); // filler
+        try writer.write(&([_]u8{0} ** 23)); // filler
         try packer_writer.writeNullTerminatedString(writer, h.username);
 
         if ((h.client_flag & constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) > 0) {
@@ -27,7 +27,7 @@ pub const HandshakeResponse41 = struct {
         } else {
             const length: u8 = @truncate(h.auth_response.len);
             try packer_writer.writeUInt8(writer, length);
-            _ = try writer.write(h.auth_response);
+            try writer.write(h.auth_response);
         }
         if ((h.client_flag & constants.CLIENT_CONNECT_WITH_DB) > 0) {
             try packer_writer.writeNullTerminatedString(writer, h.database);

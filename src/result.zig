@@ -129,7 +129,7 @@ pub const TextResultRow = struct {
 
     pub fn scanAlloc(t: *const TextResultRow, allocator: std.mem.Allocator) ![]?[]const u8 {
         const record = try allocator.alloc(?[]const u8, t.result_set.col_defs.len);
-        _ = try t.scan(record);
+        try t.scan(record);
         return record;
     }
 
@@ -161,7 +161,7 @@ pub const BinaryResultRow = struct {
     // returns a pointer to allocated struct object, caller must remember to call destroy on the object after use
     pub fn scanAlloc(b: *const BinaryResultRow, comptime S: type, allocator: std.mem.Allocator) !*S {
         const s = try allocator.create(S);
-        _ = try b.scan(s);
+        try b.scan(s);
         return s;
     }
 

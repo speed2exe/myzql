@@ -87,7 +87,7 @@ test "writeNullBitmap - 1" {
 
     var buffer: [4]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
-    _ = try writeNullBitmap(params, &fbs);
+    try writeNullBitmap(params, &fbs);
 
     const written = fbs.buffer[0..fbs.pos];
 
@@ -106,7 +106,7 @@ test "writeNullBitmap - 2" {
 
     var buffer: [4]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
-    _ = try writeNullBitmap(params, &fbs);
+    try writeNullBitmap(params, &fbs);
 
     const written = fbs.buffer[0..fbs.pos];
 
