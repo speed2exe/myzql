@@ -241,11 +241,18 @@ test "prepare execute with result" {
             .c = 3,
         };
 
-        var dest: MyType = undefined;
         while (try rows.next(allocator)) |row| {
             defer row.deinit(allocator);
-            try row.scan(&dest);
-            try std.testing.expectEqualDeep(expected, dest);
+            {
+                var dest: MyType = undefined;
+                try row.scan(&dest);
+                try std.testing.expectEqualDeep(expected, dest);
+            }
+            {
+                const dest = try row.scanAlloc(MyType, allocator);
+                defer allocator.destroy(dest);
+                try std.testing.expectEqualDeep(&expected, dest);
+            }
         }
     }
 }

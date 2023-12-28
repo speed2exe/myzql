@@ -159,16 +159,10 @@ pub const BinaryResultRow = struct {
     }
 
     // returns a pointer to allocated struct object, caller must remember to call destroy on the object after use
-    pub fn scanAlloc(b: *const BinaryResultRow, allocator: std.mem.Allocator) !*b.structType() {
-        const S = b.structType();
+    pub fn scanAlloc(b: *const BinaryResultRow, comptime S: type, allocator: std.mem.Allocator) !*S {
         const s = try allocator.create(S);
         _ = try b.scan(s);
         return s;
-    }
-
-    fn structType(b: *const BinaryResultRow) type {
-        _ = b;
-        @panic("not implemente");
     }
 
     pub fn deinit(text_result_set: *const BinaryResultRow, allocator: std.mem.Allocator) void {
