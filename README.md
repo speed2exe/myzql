@@ -2,7 +2,7 @@
 - mysql client in zig
 
 ## Status
-- MVP
+- Alpha
 
 ## Features
 - [x] Ping
@@ -11,23 +11,20 @@
 - [x] Password Authentication
 
 ### Binary Column Types support
-- Output Encoding
+- MySQL Colums Types to Zig Values
 ```
 - Null -> ?T
 - Int -> u64, u32, u16, u8
 - Float -> f32, f64
-- String -> []u8
+- String -> []u8, enum
 ```
-- Input
-WIP
 
 ## Examples
-- Coming soon!
+- [Examples](https://github.com/speed2exe/myzql-example)
 
 ## Tasks
 - [ ] TLS support
 - [ ] Slice as param input
-- [ ] Struct as param input
 - [ ] Connection Pooling
 
 ## Unit Tests

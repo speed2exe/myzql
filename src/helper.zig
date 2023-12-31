@@ -182,6 +182,7 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
                 else => {},
             }
         },
+        .Enum => return try packet_writer.writeLengthEncodedString(writer, @tagName(param)),
         .Pointer => |pointer| {
             switch (pointer.size) {
                 .One => return encodeBinaryParam(param.*, col_def, writer),

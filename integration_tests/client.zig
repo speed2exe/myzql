@@ -540,6 +540,8 @@ test "binary data types - string" {
     );
     defer queryExpectOk(&c, "DROP TABLE test.string_types_example") catch {};
 
+    const MyEnum = enum { a, b, c };
+
     { // Exec Insert
         const prep_res = try c.prepare(allocator, "INSERT INTO test.string_types_example VALUES (?, ?, ?, ?)");
         defer prep_res.deinit(allocator);
@@ -553,7 +555,7 @@ test "binary data types - string" {
                 @as(?*const [3]u8, "baz"),
                 @as([*:0]const u8, "bar"),
                 @as(?[]const u8, null),
-                @as([:0]const u8, "c"),
+                @as(MyEnum, .c),
             },
         };
         inline for (params) |param| {
@@ -581,7 +583,6 @@ test "binary data types - string" {
     }
 
     { // Select (Binary Protocol)
-        const MyEnum = enum { a, b, c };
         const StringTypesExample = struct {
             varchar_col: ?[]const u8,
             not_null_varchar_col: []const u8,
