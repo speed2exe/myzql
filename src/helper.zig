@@ -419,6 +419,21 @@ inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_d
                 },
             }
         },
+        .Float => |float| {
+            if (float.bits >= 64) {
+                switch (col_type) {
+                    .MYSQL_TYPE_DOUBLE => return @as(f64, @bitCast(reader.readUInt64())),
+                    .MYSQL_TYPE_FLOAT => return @as(f32, @bitCast(reader.readUInt32())),
+                    else => {},
+                }
+            }
+            if (float.bits >= 32) {
+                switch (col_type) {
+                    .MYSQL_TYPE_FLOAT => return @as(f32, @bitCast(reader.readUInt32())),
+                    else => {},
+                }
+            }
+        },
         else => {},
     }
 

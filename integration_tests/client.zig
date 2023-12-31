@@ -455,27 +455,29 @@ test "binary data types - float" {
     );
     defer queryExpectOk(&c, "DROP TABLE test.float_types_example") catch {};
 
-    const prep_res = try c.prepare(allocator, "INSERT INTO test.float_types_example VALUES (?, ?)");
-    defer prep_res.deinit(allocator);
-    const prep_stmt = try prep_res.expect(.ok);
+    { // Exec Insert
+        const prep_res = try c.prepare(allocator, "INSERT INTO test.float_types_example VALUES (?, ?)");
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.ok);
 
-    const params = .{
-        .{ 0.0, 0.0 },
-        .{ -1.23, -1.23 },
-        .{ 1.23, 1.23 },
-        .{ null, null },
-        .{ @as(?f32, 0), @as(?f64, 0) },
-        .{ @as(f32, -1.23), @as(f64, -1.23) },
-        .{ @as(f32, 1.23), @as(f64, 1.23) },
-        .{ @as(?f32, null), @as(?f64, null) },
-    };
-    inline for (params) |param| {
-        const exe_res = try c.execute(allocator, &prep_stmt, param);
-        defer exe_res.deinit(allocator);
-        _ = try exe_res.expect(.ok);
+        const params = .{
+            .{ 0.0, 0.0 },
+            .{ -1.23, -1.23 },
+            .{ 1.23, 1.23 },
+            .{ null, null },
+            .{ @as(?f32, 0), @as(?f64, 0) },
+            .{ @as(f32, -1.23), @as(f64, -1.23) },
+            .{ @as(f32, 1.23), @as(f64, 1.23) },
+            .{ @as(?f32, null), @as(?f64, null) },
+        };
+        inline for (params) |param| {
+            const exe_res = try c.execute(allocator, &prep_stmt, param);
+            defer exe_res.deinit(allocator);
+            _ = try exe_res.expect(.ok);
+        }
     }
 
-    {
+    { // Text Protocol
         const res = try c.query(allocator, "SELECT * FROM test.float_types_example");
         defer res.deinit(allocator);
         const rows_iter = (try res.expect(.rows)).iter();
@@ -494,6 +496,30 @@ test "binary data types - float" {
             &.{ null, null },
         };
         try std.testing.expectEqualDeep(expected, table_texts.rows);
+    }
+
+    { // Select (Binary Protocol)
+        const FloatTypesExample = struct {
+            float_col: f32,
+            double_col: f64,
+        };
+
+        const prep_res = try c.prepare(allocator, "SELECT * FROM test.float_types_example LIMIT 3");
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.ok);
+        const res = try c.execute(allocator, &prep_stmt, .{});
+        defer res.deinit(allocator);
+        const rows_iter = (try res.expect(.rows)).iter();
+
+        const expected: []const FloatTypesExample = &.{
+            .{ .float_col = 0, .double_col = 0 },
+            .{ .float_col = -1.23, .double_col = -1.23 },
+            .{ .float_col = 1.23, .double_col = 1.23 },
+        };
+
+        const structs = try rows_iter.collectStructs(FloatTypesExample, allocator);
+        defer structs.deinit(allocator);
+        try std.testing.expectEqualDeep(expected, structs.rows);
     }
 }
 
