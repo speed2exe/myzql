@@ -531,7 +531,6 @@ test "binary data types - string" {
     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
 
     try queryExpectOk(&c,
-        \\
         \\CREATE TABLE test.string_types_example (
         \\    varchar_col VARCHAR(255),
         \\    not_null_varchar_col VARCHAR(255) NOT NULL,
@@ -541,28 +540,30 @@ test "binary data types - string" {
     );
     defer queryExpectOk(&c, "DROP TABLE test.string_types_example") catch {};
 
-    const prep_res = try c.prepare(allocator, "INSERT INTO test.string_types_example VALUES (?, ?, ?, ?)");
-    defer prep_res.deinit(allocator);
-    const prep_stmt = try prep_res.expect(.ok);
+    { // Exec Insert
+        const prep_res = try c.prepare(allocator, "INSERT INTO test.string_types_example VALUES (?, ?, ?, ?)");
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.ok);
 
-    const params = .{
-        .{ "hello", "world", "a", "b" },
-        .{ null, "foo", null, "c" },
-        .{ null, "", null, "a" },
-        .{
-            @as(?*const [3]u8, "baz"),
-            @as([*:0]const u8, "bar"),
-            @as(?[]const u8, null),
-            @as([:0]const u8, "c"),
-        },
-    };
-    inline for (params) |param| {
-        const exe_res = try c.execute(allocator, &prep_stmt, param);
-        defer exe_res.deinit(allocator);
-        _ = try exe_res.expect(.ok);
+        const params = .{
+            .{ "hello", "world", "a", "b" },
+            .{ null, "foo", null, "c" },
+            .{ null, "", null, "a" },
+            .{
+                @as(?*const [3]u8, "baz"),
+                @as([*:0]const u8, "bar"),
+                @as(?[]const u8, null),
+                @as([:0]const u8, "c"),
+            },
+        };
+        inline for (params) |param| {
+            const exe_res = try c.execute(allocator, &prep_stmt, param);
+            defer exe_res.deinit(allocator);
+            _ = try exe_res.expect(.ok);
+        }
     }
 
-    {
+    { // Text Protocol
         const res = try c.query(allocator, "SELECT * FROM test.string_types_example");
         defer res.deinit(allocator);
         const rows_iter = (try res.expect(.rows)).iter();
@@ -577,6 +578,43 @@ test "binary data types - string" {
             &.{ "baz", "bar", null, "c" },
         };
         try std.testing.expectEqualDeep(expected, table_texts.rows);
+    }
+
+    { // Select (Binary Protocol)
+        const MyEnum = enum { a, b, c };
+        const StringTypesExample = struct {
+            varchar_col: ?[]const u8,
+            not_null_varchar_col: []const u8,
+            not_null_enum_col: []const u8,
+            not_null_enum_col_2: MyEnum,
+        };
+
+        const prep_res = try c.prepare(allocator,
+            \\SELECT
+            \\    varchar_col,
+            \\    not_null_varchar_col,
+            \\    not_null_enum_col,
+            \\    not_null_enum_col
+            \\FROM test.string_types_example LIMIT 1
+        );
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.ok);
+        const res = try c.execute(allocator, &prep_stmt, .{});
+        defer res.deinit(allocator);
+        const rows_iter = (try res.expect(.rows)).iter();
+
+        const expected: []const StringTypesExample = &.{
+            .{
+                .varchar_col = "hello",
+                .not_null_varchar_col = "world",
+                .not_null_enum_col = "b",
+                .not_null_enum_col_2 = .b,
+            },
+        };
+
+        const structs = try rows_iter.collectStructs(StringTypesExample, allocator);
+        defer structs.deinit(allocator);
+        try std.testing.expectEqualDeep(expected, structs.rows);
     }
 }
 

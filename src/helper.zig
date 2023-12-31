@@ -317,7 +317,10 @@ pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const Column
     const child_type = @typeInfo(@TypeOf(dest)).Pointer.child;
     const struct_fields = @typeInfo(child_type).Struct.fields;
 
-    std.debug.assert(struct_fields.len == col_defs.len);
+    if (struct_fields.len != col_defs.len) {
+        std.log.err("received {d} columns from mysql, but given {d} fields for struct", .{ struct_fields.len, col_defs.len });
+        return error.ColumnAndFieldCountMismatch;
+    }
 
     inline for (struct_fields, col_defs, 0..) |field, col_def, i| {
         const field_info = @typeInfo(field.type);
@@ -377,6 +380,36 @@ inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_d
                             else => {},
                         }
                     }
+                },
+                else => {},
+            }
+        },
+        .Enum => |e| {
+            switch (col_type) {
+                .MYSQL_TYPE_STRING,
+                .MYSQL_TYPE_VARCHAR,
+                .MYSQL_TYPE_VAR_STRING,
+                .MYSQL_TYPE_ENUM,
+                .MYSQL_TYPE_SET,
+                .MYSQL_TYPE_LONG_BLOB,
+                .MYSQL_TYPE_MEDIUM_BLOB,
+                .MYSQL_TYPE_BLOB,
+                .MYSQL_TYPE_TINY_BLOB,
+                .MYSQL_TYPE_GEOMETRY,
+                .MYSQL_TYPE_BIT,
+                .MYSQL_TYPE_DECIMAL,
+                .MYSQL_TYPE_NEWDECIMAL,
+                => {
+                    const str = reader.readLengthEncodedString();
+                    inline for (e.fields) |f| {
+                        if (std.mem.eql(u8, str, f.name)) {
+                            return @field(FieldType, f.name);
+                        }
+                    }
+                    std.log.err(
+                        "received string: {s} from mysql, but could not find tag from enum: {s}, field name: {s}\n",
+                        .{ str, @typeName(FieldType), field_name },
+                    );
                 },
                 else => {},
             }
@@ -586,11 +619,7 @@ pub fn TableStructs(comptime Struct: type) type {
             const print = std.debug.print;
             for (t.rows, 0..) |row, i| {
                 print("row: {d} -> ", .{i});
-                print("|", .{});
-                for (row) |elem| {
-                    print("{any}", .{elem});
-                    print("|", .{});
-                }
+                print("{any}", .{row});
                 print("\n", .{});
             }
         }
