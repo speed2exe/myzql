@@ -368,16 +368,14 @@ test "binary data types - int" {
             mediumint_col: ?i24,
             int_col: ?i32,
             bigint_col: ?i64,
-            tinyint_unsigned_col: u8,
-            smallint_unsigned_col: u16,
-            mediumint_unsigned_col: u24,
-            int_unsigned_col: u32,
-            bigint_unsigned_col: u64,
+            tinyint_unsigned_col: ?u8,
+            smallint_unsigned_col: ?u16,
+            mediumint_unsigned_col: ?u24,
+            int_unsigned_col: ?u32,
+            bigint_unsigned_col: ?u64,
         };
 
-        const prep_res = try c.prepare(allocator,
-            \\SELECT * FROM test.int_types_example LIMIT 2
-        );
+        const prep_res = try c.prepare(allocator, "SELECT * FROM test.int_types_example LIMIT 4");
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.ok);
         const res = try c.execute(allocator, &prep_stmt, .{});
@@ -408,6 +406,30 @@ test "binary data types - int" {
                 .mediumint_unsigned_col = 0,
                 .int_unsigned_col = 0,
                 .bigint_unsigned_col = 0,
+            },
+            .{
+                .tinyint_col = 127,
+                .smallint_col = 32767,
+                .mediumint_col = 8388607,
+                .int_col = 2147483647,
+                .bigint_col = 9223372036854775807,
+                .tinyint_unsigned_col = 255,
+                .smallint_unsigned_col = 65535,
+                .mediumint_unsigned_col = 16777215,
+                .int_unsigned_col = 4294967295,
+                .bigint_unsigned_col = 18446744073709551615,
+            },
+            .{
+                .tinyint_col = null,
+                .smallint_col = null,
+                .mediumint_col = null,
+                .int_col = null,
+                .bigint_col = null,
+                .tinyint_unsigned_col = null,
+                .smallint_unsigned_col = null,
+                .mediumint_unsigned_col = null,
+                .int_unsigned_col = null,
+                .bigint_unsigned_col = null,
             },
         };
 
