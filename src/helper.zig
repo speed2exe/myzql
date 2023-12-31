@@ -334,7 +334,7 @@ pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const Column
             else => {
                 if (isNull) {
                     std.log.err("column: {s} value is null, but field: {s} is not nullable\n", .{ col_def.name, field.name });
-                    unreachable;
+                    return error.UnexpectedNullMySQLValue;
                 }
                 @field(dest, field.name) = try binElemToValue(field.type, field.name, &col_def, &reader);
             },
@@ -392,7 +392,7 @@ inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_d
             .MYSQL_TYPE_YEAR,
             => return @intCast(reader.readUInt16()),
 
-            .MYSQL_TYPE_TINY => return @intCast(reader.readUInt16()),
+            .MYSQL_TYPE_TINY => return @intCast(reader.readByte()),
 
             else => {},
         },
@@ -400,7 +400,7 @@ inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_d
     }
 
     logConversionError(FieldType, field_name, col_def.name, col_type);
-    return error.BinElemToValue;
+    return error.IncompatibleBinaryConversion;
 }
 
 inline fn binResIsNull(null_bitmap: []const u8, col_idx: usize) bool {

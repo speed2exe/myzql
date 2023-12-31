@@ -361,30 +361,49 @@ test "binary data types - int" {
         try std.testing.expectEqualDeep(expected, table_texts.rows);
     }
 
-    // { // Select (Binary Protocol)
-    //     const IntTypesExample = struct {
-    //         tinyint_col: i8,
-    //         smallint_col: i16,
-    //         mediumint_col: i24,
-    //         int_col: i32,
-    //         bigint_col: i64,
-    //         tinyint_unsigned_col: u8,
-    //         smallint_unsigned_col: u16,
-    //         mediumint_unsigned_col: u24,
-    //         int_unsigned_col: u32,
-    //         bigint_unsigned_col: u64,
-    //     };
+    { // Select (Binary Protocol)
+        const IntTypesExample = struct {
+            tinyint_col: ?i8,
+            // smallint_col: i16,
+            // mediumint_col: i24,
+            // int_col: i32,
+            // bigint_col: i64,
+            // tinyint_unsigned_col: u8,
+            // smallint_unsigned_col: u16,
+            // mediumint_unsigned_col: u24,
+            // int_unsigned_col: u32,
+            // bigint_unsigned_col: u64,
+        };
 
-    //     const prep_res = try c.prepare(
-    //         allocator,
-    //         "select * from int_types_example",
-    //     );
-    //     defer prep_res.deinit(allocator);
-    //     const prep_stmt = try prep_res.expect(.ok);
+        const prep_res = try c.prepare(
+            allocator,
+            "select tinyint_col from test.int_types_example limit 1",
+        );
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.ok);
+        const res = try c.execute(allocator, &prep_stmt, .{});
+        defer res.deinit(allocator);
+        const rows_iter = (try res.expect(.rows)).iter();
 
-    //     const res = try c.execute(allocator, prep_stmt, .{});
-    //     _ = res;
-    // }
+        const expected: []const IntTypesExample = &.{
+            .{
+                .tinyint_col = 0,
+                // .smallint_col = 0,
+                // .mediumint_col = 0,
+                // .int_col = 0,
+                // .bigint_col = 0,
+                // .tinyint_unsigned_col = 0,
+                // .smallint_unsigned_col = 0,
+                // .mediumint_unsigned_col = 0,
+                // .int_unsigned_col = 0,
+                // .bigint_unsigned_col = 0,
+            },
+        };
+
+        const structs = try rows_iter.collectStructs(IntTypesExample, allocator);
+        defer structs.deinit(allocator);
+        try std.testing.expectEqualDeep(expected, structs.rows);
+    }
 }
 
 test "binary data types - float" {
