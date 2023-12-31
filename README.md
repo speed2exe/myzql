@@ -1,14 +1,14 @@
 # MyZql
-- mysql client in zig
+- MySQL driver written in pure zig
 
 ## Status
 - Alpha
 
 ## Features
-- [x] Ping
-- [x] Query Text Protocol
-- [x] Prepared Statement
-- [x] Password Authentication
+- Native Zig code
+- TCP protocol
+- MySQL DateTime and Time support
+- comptime safety and type conversion as much as possible
 
 ### Binary Column Types support
 - MySQL Colums Types to Zig Values
@@ -16,16 +16,19 @@
 - Null -> ?T
 - Int -> u64, u32, u16, u8
 - Float -> f32, f64
-- String -> []u8, enum
+- String -> []u8, []const u8, enum
 ```
 
-## Examples
+## Getting started
+Follow examples below:
 - [Examples](https://github.com/speed2exe/myzql-example)
 
-## Tasks
-- [ ] TLS support
-- [ ] Slice as param input
-- [ ] Connection Pooling
+## Upcoming Implementation
+- Connection Pooling
+- Bulk Insert
+- Infile Insertion
+- TLS support
+- struct array as param input
 
 ## Unit Tests
 - `zig test src/myzql.zig`
