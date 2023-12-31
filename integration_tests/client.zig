@@ -364,20 +364,19 @@ test "binary data types - int" {
     { // Select (Binary Protocol)
         const IntTypesExample = struct {
             tinyint_col: ?i8,
-            // smallint_col: i16,
-            // mediumint_col: i24,
-            // int_col: i32,
-            // bigint_col: i64,
-            // tinyint_unsigned_col: u8,
-            // smallint_unsigned_col: u16,
-            // mediumint_unsigned_col: u24,
-            // int_unsigned_col: u32,
-            // bigint_unsigned_col: u64,
+            smallint_col: ?i16,
+            mediumint_col: ?i24,
+            int_col: ?i32,
+            bigint_col: ?i64,
+            tinyint_unsigned_col: u8,
+            smallint_unsigned_col: u16,
+            mediumint_unsigned_col: u24,
+            int_unsigned_col: u32,
+            bigint_unsigned_col: u64,
         };
 
-        const prep_res = try c.prepare(
-            allocator,
-            "select tinyint_col from test.int_types_example limit 1",
+        const prep_res = try c.prepare(allocator,
+            \\SELECT * FROM test.int_types_example LIMIT 2
         );
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.ok);
@@ -388,15 +387,27 @@ test "binary data types - int" {
         const expected: []const IntTypesExample = &.{
             .{
                 .tinyint_col = 0,
-                // .smallint_col = 0,
-                // .mediumint_col = 0,
-                // .int_col = 0,
-                // .bigint_col = 0,
-                // .tinyint_unsigned_col = 0,
-                // .smallint_unsigned_col = 0,
-                // .mediumint_unsigned_col = 0,
-                // .int_unsigned_col = 0,
-                // .bigint_unsigned_col = 0,
+                .smallint_col = 0,
+                .mediumint_col = 0,
+                .int_col = 0,
+                .bigint_col = 0,
+                .tinyint_unsigned_col = 0,
+                .smallint_unsigned_col = 0,
+                .mediumint_unsigned_col = 0,
+                .int_unsigned_col = 0,
+                .bigint_unsigned_col = 0,
+            },
+            .{
+                .tinyint_col = -128,
+                .smallint_col = -32768,
+                .mediumint_col = -8388608,
+                .int_col = -2147483648,
+                .bigint_col = -9223372036854775808,
+                .tinyint_unsigned_col = 0,
+                .smallint_unsigned_col = 0,
+                .mediumint_unsigned_col = 0,
+                .int_unsigned_col = 0,
+                .bigint_unsigned_col = 0,
             },
         };
 

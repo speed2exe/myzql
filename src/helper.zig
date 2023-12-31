@@ -381,20 +381,43 @@ inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_d
                 else => {},
             }
         },
-        .Int => switch (col_type) {
-            .MYSQL_TYPE_LONGLONG => return @intCast(reader.readUInt64()),
+        .Int => |int| {
+            switch (int.signedness) {
+                .unsigned => {
+                    switch (col_type) {
+                        .MYSQL_TYPE_LONGLONG => return @intCast(reader.readUInt64()),
 
-            .MYSQL_TYPE_LONG,
-            .MYSQL_TYPE_INT24,
-            => return @intCast(reader.readUInt32()),
+                        .MYSQL_TYPE_LONG,
+                        .MYSQL_TYPE_INT24,
+                        => return @intCast(reader.readUInt32()),
 
-            .MYSQL_TYPE_SHORT,
-            .MYSQL_TYPE_YEAR,
-            => return @intCast(reader.readUInt16()),
+                        .MYSQL_TYPE_SHORT,
+                        .MYSQL_TYPE_YEAR,
+                        => return @intCast(reader.readUInt16()),
 
-            .MYSQL_TYPE_TINY => return @intCast(reader.readByte()),
+                        .MYSQL_TYPE_TINY => return @intCast(reader.readByte()),
 
-            else => {},
+                        else => {},
+                    }
+                },
+                .signed => {
+                    switch (col_type) {
+                        .MYSQL_TYPE_LONGLONG => return @intCast(@as(i64, @bitCast(reader.readUInt64()))),
+
+                        .MYSQL_TYPE_LONG,
+                        .MYSQL_TYPE_INT24,
+                        => return @intCast(@as(i32, @bitCast(reader.readUInt32()))),
+
+                        .MYSQL_TYPE_SHORT,
+                        .MYSQL_TYPE_YEAR,
+                        => return @intCast(@as(i16, @bitCast(reader.readUInt16()))),
+
+                        .MYSQL_TYPE_TINY => return @intCast(@as(i8, @bitCast(reader.readByte()))),
+
+                        else => {},
+                    }
+                },
+            }
         },
         else => {},
     }
