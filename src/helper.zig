@@ -40,17 +40,13 @@ pub fn encodeBinaryParam(param: anytype, col_def: *const ColumnDefinition41, wri
                 .MYSQL_TYPE_DATE,
                 .MYSQL_TYPE_DATETIME,
                 .MYSQL_TYPE_TIMESTAMP,
-                => {
-                    return try encodeDateTime(param, writer);
-                },
+                => return try encodeDateTime(param, writer),
                 else => {},
             }
         },
         Duration => {
             switch (col_type) {
-                .MYSQL_TYPE_TIME => {
-                    return try encodeDuration(param, writer);
-                },
+                .MYSQL_TYPE_TIME => return try encodeDuration(param, writer),
                 else => {},
             }
         },
@@ -262,6 +258,36 @@ fn encodeDateTime(dt: DateTime, writer: anytype) !void {
     }
 }
 
+fn decodeDateTime(reader: *PacketReader) DateTime {
+    const length = reader.readByte();
+    switch (length) {
+        11 => return .{
+            .year = reader.readUInt16(),
+            .month = reader.readByte(),
+            .day = reader.readByte(),
+            .hour = reader.readByte(),
+            .minute = reader.readByte(),
+            .second = reader.readByte(),
+            .microsecond = reader.readUInt32(),
+        },
+        7 => return .{
+            .year = reader.readUInt16(),
+            .month = reader.readByte(),
+            .day = reader.readByte(),
+            .hour = reader.readByte(),
+            .minute = reader.readByte(),
+            .second = reader.readByte(),
+        },
+        4 => return .{
+            .year = reader.readUInt16(),
+            .month = reader.readByte(),
+            .day = reader.readByte(),
+        },
+        0 => return .{},
+        else => unreachable,
+    }
+}
+
 // To save space the packet can be compressed:
 // if day, hour, minutes, seconds and microseconds are all 0, length is 0 and no other field is sent.
 // if microseconds is 0, length is 8 and micro_seconds is not sent.
@@ -284,6 +310,32 @@ fn encodeDuration(d: Duration, writer: anytype) !void {
         try packet_writer.writeUInt8(writer, d.seconds);
     } else {
         try packet_writer.writeUInt8(writer, 0);
+    }
+}
+
+fn decodeDuration(reader: *PacketReader) Duration {
+    const length = reader.readByte();
+    switch (length) {
+        12 => return .{
+            .is_negative = reader.readByte(),
+            .days = reader.readUInt32(),
+            .hours = reader.readByte(),
+            .minutes = reader.readByte(),
+            .seconds = reader.readByte(),
+            .microseconds = reader.readUInt32(),
+        },
+        8 => return .{
+            .is_negative = reader.readByte(),
+            .days = reader.readUInt32(),
+            .hours = reader.readByte(),
+            .minutes = reader.readByte(),
+            .seconds = reader.readByte(),
+        },
+        0 => return .{},
+        else => {
+            std.debug.print("length: {d}\n", .{length});
+            unreachable;
+        },
     }
 }
 
@@ -356,6 +408,25 @@ inline fn logConversionError(comptime FieldType: type, field_name: []const u8, c
 inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, reader: *PacketReader) !FieldType {
     const field_info = @typeInfo(FieldType);
     const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
+
+    switch (FieldType) {
+        DateTime => {
+            switch (col_type) {
+                .MYSQL_TYPE_DATE,
+                .MYSQL_TYPE_DATETIME,
+                .MYSQL_TYPE_TIMESTAMP,
+                => return decodeDateTime(reader),
+                else => {},
+            }
+        },
+        Duration => {
+            switch (col_type) {
+                .MYSQL_TYPE_TIME => return decodeDuration(reader),
+                else => {},
+            }
+        },
+        else => {},
+    }
 
     switch (field_info) {
         .Pointer => |pointer| {
