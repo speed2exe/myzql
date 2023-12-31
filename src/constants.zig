@@ -142,7 +142,7 @@ pub const NUM_FLAG:                       u16 = 32768;
 
 pub const PART_KEY_FLAG:                  u16 = 16384;
 pub const GROUP_FLAG:                     u16 = 32768;
-pub const UNIQUE_FLAG:                    u16 = 65536;
+pub const UNIQUE_FLAG:                    u32 = 65536;
 pub const BINCMP_FLAG:                    u32 = 131072;
 pub const GET_FIXED_FIELDS_FLAG:          u32 = (1 << 18);
 pub const FIELD_IN_PART_FUNC_FLAG:        u32 = (1 << 19);
