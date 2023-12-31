@@ -728,6 +728,22 @@ test "binary data types - temporal" {
     }
 }
 
-//
-// SELECT CONCAT(?, ?) AS col1
-// event_time DATETIME(6) NOT NULL
+test "select concat with params" {
+    var c = Client.init(test_config);
+    defer c.deinit();
+
+    { // Select (Binary Protocol)
+        const prep_res = try c.prepare(allocator, "SELECT CONCAT(?, ?) AS col1");
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.ok);
+        const res = try c.execute(allocator, &prep_stmt, .{ "hello", "world" });
+        defer res.deinit(allocator);
+        const rows_iter = (try res.expect(.rows)).iter();
+
+        const Result = struct { col1: []const u8 };
+        const expected: []const Result = &.{.{ .col1 = "helloworld" }};
+        const structs = try rows_iter.collectStructs(Result, allocator);
+        defer structs.deinit(allocator);
+        try std.testing.expectEqualDeep(expected, structs.rows);
+    }
+}
