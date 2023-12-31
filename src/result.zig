@@ -16,8 +16,8 @@ const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
 pub fn QueryResult(comptime T: type) type {
     return struct {
         const Value = union(enum) {
-            ok: *const OkPacket,
-            err: *const ErrorPacket,
+            ok: OkPacket,
+            err: ErrorPacket,
             rows: ResultSet(T),
         };
         packet: Packet,
@@ -28,8 +28,8 @@ pub fn QueryResult(comptime T: type) type {
             return .{
                 .packet = response_packet,
                 .value = switch (response_packet.payload[0]) {
-                    constants.OK => .{ .ok = &OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
-                    constants.ERR => .{ .err = &ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
+                    constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
+                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
                     constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
                     else => .{ .rows = blk: {
                         var packet_reader = PacketReader.initFromPacket(&response_packet);
@@ -154,8 +154,8 @@ pub const BinaryResultData = struct {
 pub fn ResultRow(comptime T: type) type {
     return struct {
         const Value = union(enum) {
-            err: *const ErrorPacket,
-            eof: *const EofPacket,
+            err: ErrorPacket,
+            eof: EofPacket,
             data: T,
         };
         packet: Packet,
@@ -166,8 +166,8 @@ pub fn ResultRow(comptime T: type) type {
             return .{
                 .packet = packet,
                 .value = switch (packet.payload[0]) {
-                    constants.ERR => .{ .err = &ErrorPacket.initFromPacket(false, &packet, conn.client_capabilities) },
-                    constants.EOF => .{ .eof = &EofPacket.initFromPacket(&packet, conn.client_capabilities) },
+                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &packet, conn.client_capabilities) },
+                    constants.EOF => .{ .eof = EofPacket.initFromPacket(&packet, conn.client_capabilities) },
                     else => .{ .data = .{ .raw = packet.payload, .col_defs = col_defs } },
                 },
             };
@@ -200,7 +200,7 @@ pub fn ResultRow(comptime T: type) type {
 
 pub const PrepareResult = struct {
     const Value = union(enum) {
-        err: *const ErrorPacket,
+        err: ErrorPacket,
         ok: PreparedStatement,
     };
 
@@ -212,7 +212,7 @@ pub const PrepareResult = struct {
         return .{
             .packet = response_packet,
             .value = switch (response_packet.payload[0]) {
-                constants.ERR => .{ .err = &ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
+                constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
                 constants.OK => .{ .ok = try PreparedStatement.initFromPacket(&response_packet, conn, allocator) },
                 else => return response_packet.asError(conn.client_capabilities),
             },
