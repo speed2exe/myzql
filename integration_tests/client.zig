@@ -299,7 +299,6 @@ test "binary data types - int" {
     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
 
     try queryExpectOk(&c,
-        \\
         \\CREATE TABLE test.int_types_example (
         \\    tinyint_col TINYINT,
         \\    smallint_col SMALLINT,
@@ -447,7 +446,6 @@ test "binary data types - float" {
     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
 
     try queryExpectOk(&c,
-        \\
         \\CREATE TABLE test.float_types_example (
         \\    float_col FLOAT,
         \\    double_col DOUBLE
