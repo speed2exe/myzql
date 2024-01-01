@@ -27,6 +27,7 @@ jobs:
 
       - name: run the tests
         run: |
+          docker run --health-cmd='mysqladmin ping --silent' -d mysql
           $HOME/zig-build/zig test integration_tests/main.zig --main-mod-path .
 
       - name: switch to mysql_native_password
@@ -37,5 +38,5 @@ jobs:
 
       - name: run the tests
         run: |
-          while ! wget -qO- localhost:3306; do sleep 1; done
+          docker run --health-cmd='mysqladmin ping --silent' -d mysql
           $HOME/zig-build/zig test integration_tests/main.zig --main-mod-path .
