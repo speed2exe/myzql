@@ -2,6 +2,7 @@ const std = @import("std");
 const FixedBytes = @import("./utils.zig").FixedBytes;
 const PublicKey = std.crypto.Certificate.rsa.PublicKey;
 const Sha1 = std.crypto.hash.Sha1;
+const Sha256 = std.crypto.hash.sha2.Sha256;
 
 const base64 = std.base64.standard.decoderWithIgnore(" \t\r\n");
 
@@ -24,6 +25,17 @@ pub const AuthPlugin = enum {
             return .mysql_clear_password;
         } else {
             return .unknown;
+        }
+    }
+
+    pub fn toName(auth_plugin: AuthPlugin) [:0]const u8 {
+        switch (auth_plugin) {
+            .unspecified => return "unspecified",
+            .mysql_native_password => return "mysql_native_password",
+            .sha256_password => return "sha256_password",
+            .caching_sha2_password => return "caching_sha2_password",
+            .mysql_clear_password => return "mysql_clear_password",
+            .unknown => return "unknown",
         }
     }
 };
@@ -112,6 +124,9 @@ pub fn generate_auth_response(auth_plugin: AuthPlugin, auth_data: []const u8, pa
         .caching_sha2_password => if (password.len > 0) {
             result.set(&scrambleSHA256Password(auth_data, password));
         },
+        .mysql_native_password => if (password.len > 0) {
+            result.set(&scramblePassword(auth_data, password));
+        },
         .sha256_password => {
             // need RSA-OAEP encryption
             return error.PleaseSupportASAP;
@@ -124,25 +139,84 @@ pub fn generate_auth_response(auth_plugin: AuthPlugin, auth_data: []const u8, pa
     return result;
 }
 
+// https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_authentication_methods_native_password_authentication.html
+// SHA1(password) XOR SHA1(scramble ++ SHA1(SHA1(password)))
+pub fn scramblePassword(scramble: []const u8, password: []const u8) [20]u8 {
+    std.debug.assert(password.len > 0);
+
+    var message1 = blk: { // SHA1(password)
+        var sha1 = Sha1.init(.{});
+        sha1.update(password);
+        break :blk sha1.finalResult();
+    };
+    const message2 = blk: { // SHA1(SHA1(password))
+        var sha1 = Sha1.init(.{});
+        sha1.update(&message1);
+        var hash = sha1.finalResult();
+
+        sha1 = Sha1.init(.{});
+        sha1.update(scramble);
+        sha1.update(&hash);
+        sha1.final(&hash);
+        break :blk hash;
+    };
+    for (&message1, message2) |*m1, m2| {
+        m1.* ^= m2;
+    }
+    return message1;
+}
+
+test "scramblePassword" {
+    const scramble: []const u8 = &.{
+        10,  47, 74, 111, 75, 73, 34, 48, 88, 76,
+        114, 74, 37, 13,  3,  80, 82, 2,  23, 21,
+    };
+    const tests = [_]struct {
+        password: []const u8,
+        expected: [20]u8,
+    }{
+        .{
+            .password = "secret",
+            .expected = .{
+                106, 20,  155, 221, 128, 189, 161, 235, 240, 250,
+                43,  210, 207, 46,  151, 23,  254, 204, 52,  187,
+            },
+        },
+        .{
+            .password = "secret2",
+            .expected = .{
+                101, 15, 7,  223, 53, 60,  206, 83,  112, 238,
+                163, 77, 88, 15,  46, 145, 24,  129, 139, 86,
+            },
+        },
+    };
+
+    for (tests) |t| {
+        const actual = scramblePassword(scramble, t.password);
+        try std.testing.expectEqual(t.expected, actual);
+    }
+}
+
+// https://dev.mysql.com/doc/dev/mysql-server/latest/page_caching_sha2_authentication_exchanges.html
 // XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))
 fn scrambleSHA256Password(scramble: []const u8, password: []const u8) [32]u8 {
-    const Sha256 = std.crypto.hash.sha2.Sha256;
+    std.debug.assert(password.len > 0);
 
-    var message1 = blk: {
+    var message1 = blk: { // SHA256(password)
         var hasher = Sha256.init(.{});
         hasher.update(password);
         break :blk hasher.finalResult();
     };
-    const message2 = blk: {
-        var hasher = Sha256.init(.{});
-        hasher.update(&message1);
-        var temp = hasher.finalResult();
+    const message2 = blk: { // SHA256(SHA256(SHA256(password)), scramble)
+        var sha256 = Sha256.init(.{});
+        sha256.update(&message1);
+        var hash = sha256.finalResult();
 
-        hasher = Sha256.init(.{});
-        hasher.update(&temp);
-        hasher.update(scramble);
-        hasher.final(&temp);
-        break :blk temp;
+        sha256 = Sha256.init(.{});
+        sha256.update(&hash);
+        sha256.update(scramble);
+        sha256.final(&hash);
+        break :blk hash;
     };
     for (&message1, message2) |*m1, m2| {
         m1.* ^= m2;

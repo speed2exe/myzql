@@ -136,6 +136,8 @@ pub const Conn = struct {
                     .character_set = config.collation,
                     .username = config.username,
                     .auth_response = auth_resp.get(),
+                    .client_plugin_name = handshake_v10.auth_plugin_name orelse
+                        AuthPlugin.caching_sha2_password.toName(),
                 };
                 try conn.sendPacketUsingSmallPacketWriter(response);
             } else {
@@ -188,7 +190,10 @@ pub const Conn = struct {
                                 else => return error.UnsupportedCachingSha2PasswordMoreData,
                             }
                         },
-                        else => {},
+                        else => {
+                            std.log.err("unsupported auth plugin: {any}", .{auth_plugin});
+                            return error.UnsupportedAuthPlugin;
+                        },
                     }
                 },
                 else => return packet.asError(conn.client_capabilities),
