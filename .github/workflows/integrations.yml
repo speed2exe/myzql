@@ -37,5 +37,5 @@ jobs:
 
       - name: run the tests
         run: |
-          while ! wget -qO- mysql:3306; do sleep 1; done
+          while ! wget -qO- localhost:3306; do sleep 1; done
           $HOME/zig-build/zig test integration_tests/main.zig --main-mod-path .
