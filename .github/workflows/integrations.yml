@@ -14,7 +14,7 @@ jobs:
     steps:
       - name: run mysql server
         run: |
-          docker run --name some-mysql --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql
+          docker run --name mysql_server_1 --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql
 
       - uses: actions/checkout@v3
 
@@ -24,6 +24,16 @@ jobs:
           wget https://ziglang.org/builds/zig-linux-x86_64-$ZIG_VERSION.tar.xz
           tar xf zig-linux-x86_64-$ZIG_VERSION.tar.xz
           mv zig-linux-x86_64-$ZIG_VERSION $HOME/zig-build
+
+      - name: run the tests
+        run: |
+          $HOME/zig-build/zig test integration_tests/main.zig --main-mod-path .
+
+      - name: switch to mysql_native_password
+        run: |
+          docker stop mysql_server_1
+          docker run --name mysql_server_2 --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql \
+            --default-authentication-plugin=mysql_native_password
 
       - name: run the tests
         run: |
