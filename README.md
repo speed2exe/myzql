@@ -19,9 +19,29 @@
 - String -> []u8, []const u8, enum
 ```
 
-## Getting started
-Follow examples below:
-- [Examples](https://github.com/speed2exe/myzql-example)
+## Add as dependency to your Zig project
+- `build.zig`
+```zig
+    //...
+    const myzql_dep = b.dependency("myzql", .{});
+    const myzql = myzql_dep.module("myzql");
+    exe.addModule("myzql", myzql);
+    //...
+```
+
+- `build.zig.zon`
+```zon
+    // ...
+    .dependencies = .{
+        .myzql = .{
+	    .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.0.2.tar.gz", // replace tag version as needed
+            .hash = "122021c467d780838f6225f90d5a5f42019afdc54d83ef0bceb5c8fd4e5e4df4a965",
+	}
+    // ...
+```
+
+## Examples
+- [Usage](https://github.com/speed2exe/myzql-example)
 
 ## Upcoming Implementation
 - Connection Pooling
