@@ -43,7 +43,8 @@
 ## Examples
 - [Usage](https://github.com/speed2exe/myzql-example)
 
-## Upcoming Implementation
+## Upcoming Implementations
+- config from URL
 - Connection Pooling
 - Bulk Insert
 - Infile Insertion
