@@ -33,7 +33,8 @@ jobs:
         run: |
           docker stop mysql_server_1
           docker run --name mysql_server_2 --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql \
-            --default-authentication-plugin=mysql_native_password
+            --default-authentication-plugin=mysql_native_password \
+            --health-cmd='mysqladmin ping --silent'
 
       - name: run the tests
         run: |
