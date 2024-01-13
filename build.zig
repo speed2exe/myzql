@@ -1,11 +1,8 @@
 const std = @import("std");
 
-// Although this function looks imperative, note that its job is to
-// declaratively construct a build graph that will be executed by an external
-// runner.
 pub fn build(b: *std.Build) void {
-    _ = b.addModule("myzql", .{
-        .source_file = .{ .path = "./src/myzql.zig" },
+    const myzql = b.addModule("myzql", .{
+        .root_source_file = .{ .path = "./src/myzql.zig" },
     });
 
     // zig build unit_test
@@ -17,11 +14,17 @@ pub fn build(b: *std.Build) void {
     unit_test_step.dependOn(&run_unit_tests.step);
 
     // zig build integration_test
-    // run test: error: unable to spawn .../myzql/zig-cache/o/10ad607cabdbbbddf584ad4ba72fa8d7/test: BrokenPipe
+    // integration_test
+    // └─ run test failure
+    // error: unable to spawn /<some-path>/myzql/zig-cache/o/82ac61612eaa882f2401e0d249b59437/test: BrokenPipe
+    //
+    // Use this command for now:
+    // zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test
     const integration_tests = b.addTest(.{
         .root_source_file = .{ .path = "./integration_tests/main.zig" },
-        .main_mod_path = .{ .path = "./" },
     });
+    integration_tests.root_module.addImport("myzql", myzql);
+
     const run_integration_tests = b.addRunArtifact(integration_tests);
     const integration_test_step = b.step("integration_test", "Run integration tests");
     integration_test_step.dependOn(&run_integration_tests.step);

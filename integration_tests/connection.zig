@@ -1,4 +1,5 @@
-const Conn = @import("../src/conn.zig").Conn;
+const myzql = @import("myzql");
+const Conn = myzql.conn.Conn;
 const std = @import("std");
 const test_config = @import("./config.zig").test_config;
 

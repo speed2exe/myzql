@@ -20,23 +20,20 @@ jobs:
 
       - name: install zig
         run: |
-          ZIG_VERSION=0.12.0-dev.1861+412999621
+          ZIG_VERSION=0.12.0-dev.2150+63de8a598
           wget https://ziglang.org/builds/zig-linux-x86_64-$ZIG_VERSION.tar.xz
           tar xf zig-linux-x86_64-$ZIG_VERSION.tar.xz
           mv zig-linux-x86_64-$ZIG_VERSION $HOME/zig-build
 
-      - name: run the tests
+      - name: Run Integration Tests
         run: |
           while ! wget -qO- localhost:3306; do sleep 1; done
-          $HOME/zig-build/zig test integration_tests/main.zig --main-mod-path .
+          $HOME/zig-build/zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test
 
-      - name: switch to mysql_native_password
+      - name: Auth Test
         run: |
           docker stop mysql_server_1
           docker run --name mysql_server_2 --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql \
             --default-authentication-plugin=mysql_native_password
-
-      - name: run the tests
-        run: |
           while ! wget -qO- localhost:3306; do sleep 1; done
-          $HOME/zig-build/zig test integration_tests/main.zig --main-mod-path .
+          $HOME/zig-build/zig test integration_tests/main.zig --main-mod-path . --test-filter 'ping'

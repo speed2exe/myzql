@@ -1,12 +1,13 @@
 const std = @import("std");
-const Client = @import("../src/client.zig").Client;
+const myzql = @import("myzql");
+const Client = myzql.client.Client;
 const test_config = @import("./config.zig").test_config;
 const allocator = std.testing.allocator;
-const ErrorPacket = @import("../src/protocol.zig").generic_response.ErrorPacket;
+const ErrorPacket = myzql.protocol.generic_response.ErrorPacket;
 const minInt = std.math.minInt;
 const maxInt = std.math.maxInt;
-const DateTime = @import("../src/temporal.zig").DateTime;
-const Duration = @import("../src/temporal.zig").Duration;
+const DateTime = myzql.temporal.DateTime;
+const Duration = myzql.temporal.Duration;
 
 // convenient function for testing
 fn queryExpectOk(c: *Client, query: []const u8) !void {
