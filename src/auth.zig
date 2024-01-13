@@ -1,5 +1,4 @@
 const std = @import("std");
-const FixedBytes = @import("./utils.zig").FixedBytes;
 const PublicKey = std.crypto.Certificate.rsa.PublicKey;
 const Sha1 = std.crypto.hash.Sha1;
 const Sha256 = std.crypto.hash.sha2.Sha256;
@@ -39,6 +38,9 @@ pub const AuthPlugin = enum {
         }
     }
 };
+
+// https://mariadb.com/kb/en/sha256_password-plugin/
+pub const sha256_password_public_key_request = 0x01;
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_caching_sha2_authentication_exchanges.html
 // https://mariadb.com/kb/en/caching_sha2_password-authentication-plugin/
@@ -118,27 +120,6 @@ test "decode public key" {
     defer d.deinit(std.testing.allocator);
 }
 
-pub fn generate_auth_response(auth_plugin: AuthPlugin, auth_data: []const u8, password: []const u8) !FixedBytes(32) {
-    var result: FixedBytes(32) = .{};
-    switch (auth_plugin) {
-        .caching_sha2_password => if (password.len > 0) {
-            result.set(&scrambleSHA256Password(auth_data, password));
-        },
-        .mysql_native_password => if (password.len > 0) {
-            result.set(&scramblePassword(auth_data, password));
-        },
-        .sha256_password => {
-            // need RSA-OAEP encryption
-            return error.PleaseSupportASAP;
-        },
-        else => {
-            std.log.warn("Unsupported auth plugin: {any}\n", .{auth_plugin});
-            return error.UnsupportedAuthPlugin;
-        },
-    }
-    return result;
-}
-
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_authentication_methods_native_password_authentication.html
 // SHA1(password) XOR SHA1(scramble ++ SHA1(SHA1(password)))
 pub fn scramblePassword(scramble: []const u8, password: []const u8) [20]u8 {
@@ -199,7 +180,7 @@ test "scramblePassword" {
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_caching_sha2_authentication_exchanges.html
 // XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))
-fn scrambleSHA256Password(scramble: []const u8, password: []const u8) [32]u8 {
+pub fn scrambleSHA256Password(scramble: []const u8, password: []const u8) [32]u8 {
     std.debug.assert(password.len > 0);
 
     var message1 = blk: { // SHA256(password)
@@ -249,7 +230,7 @@ test "scrambleSHA256Password" {
 
 // https://mariadb.com/kb/en/sha256_password-plugin/#rsa-encrypted-password
 // RSA encrypted value of XOR(password, seed) using server public key (RSA_PKCS1_OAEP_PADDING).
-pub fn encryptPassword(allocator: std.mem.Allocator, password: []const u8, auth_data: *const [20]u8, pk: *const PublicKey) ![]const u8 {
+pub fn encryptPassword(allocator: std.mem.Allocator, password: []const u8, seed: *const [20]u8, pk: *const PublicKey) ![]const u8 {
     const plain = blk: {
         var plain = try allocator.alloc(u8, password.len + 1);
         @memcpy(plain.ptr, password);
@@ -259,7 +240,7 @@ pub fn encryptPassword(allocator: std.mem.Allocator, password: []const u8, auth_
     defer allocator.free(plain);
 
     for (plain, 0..) |*c, i| {
-        c.* ^= auth_data[i % 20];
+        c.* ^= seed[i % 20];
     }
 
     return rsaEncryptOAEP(allocator, plain, pk);

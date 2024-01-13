@@ -3,6 +3,8 @@ const packer_writer = @import("./packet_writer.zig");
 const std = @import("std");
 const constants = @import("../constants.zig");
 const stream_buffered = @import("../stream_buffered.zig");
+const Config = @import("../config.zig").Config;
+const AuthPlugin = @import("../auth.zig").AuthPlugin;
 
 pub const HandshakeResponse41 = struct {
     client_flag: u32, // capabilities
@@ -14,6 +16,17 @@ pub const HandshakeResponse41 = struct {
     client_plugin_name: [:0]const u8,
     key_values: []const [2][]const u8 = &.{},
     zstd_compression_level: u8 = 0,
+
+    pub fn init(comptime auth_plugin: AuthPlugin, config: *const Config, auth_resp: []const u8) HandshakeResponse41 {
+        return .{
+            .database = config.database,
+            .client_flag = config.capability_flags(),
+            .character_set = config.collation,
+            .username = config.username,
+            .auth_response = auth_resp,
+            .client_plugin_name = auth_plugin.toName(),
+        };
+    }
 
     pub fn write(h: *const HandshakeResponse41, writer: *stream_buffered.SmallPacketWriter) !void {
         try packer_writer.writeUInt32(writer, h.client_flag);

@@ -2,7 +2,6 @@ const std = @import("std");
 const Config = @import("./config.zig").Config;
 const constants = @import("./constants.zig");
 const auth = @import("./auth.zig");
-const generate_auth_response = auth.generate_auth_response;
 const AuthPlugin = auth.AuthPlugin;
 const protocol = @import("./protocol.zig");
 const HandshakeV10 = protocol.handshake_v10.HandshakeV10;
@@ -18,7 +17,6 @@ const ExecuteRequest = prepared_statements.ExecuteRequest;
 const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const stream_buffered = @import("./stream_buffered.zig");
-const FixedBytes = @import("./utils.zig").FixedBytes;
 const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
 const result = @import("./result.zig");
 const QueryResult = result.QueryResult;
@@ -106,94 +104,111 @@ pub const Conn = struct {
         conn.sequence_id = 0;
         conn.client_capabilities = config.capability_flags();
 
-        var auth_plugin: AuthPlugin = undefined;
-        var auth_data: [20]u8 = undefined;
-        {
-            const packet = try conn.readPacket(allocator);
-            defer packet.deinit(allocator);
+        const packet = try conn.readPacket(allocator);
+        defer packet.deinit(allocator);
 
-            const handshake_v10 = switch (packet.payload[0]) {
-                constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(&packet, conn.client_capabilities),
-                else => return packet.asError(conn.client_capabilities),
-            };
-            conn.server_capabilities = handshake_v10.capability_flags();
-
-            auth_plugin = handshake_v10.get_auth_plugin();
-            auth_data = handshake_v10.get_auth_data();
-
-            // TODO: TLS handshake if enabled
-
-            // send handshake response to server
-            if (conn.hasCapability(constants.CLIENT_PROTOCOL_41)) {
-                const auth_resp = try generate_auth_response(
-                    handshake_v10.get_auth_plugin(),
-                    &handshake_v10.get_auth_data(),
-                    config.password,
-                );
-                const response: HandshakeResponse41 = .{
-                    .database = config.database,
-                    .client_flag = conn.client_capabilities,
-                    .character_set = config.collation,
-                    .username = config.username,
-                    .auth_response = auth_resp.get(),
-                    .client_plugin_name = handshake_v10.auth_plugin_name orelse
-                        AuthPlugin.caching_sha2_password.toName(),
-                };
-                try conn.sendPacketUsingSmallPacketWriter(response);
-            } else {
-                // TODO: handle older protocol
-                @panic("not implemented");
-            }
+        const handshake_v10 = switch (packet.payload[0]) {
+            constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(&packet, conn.client_capabilities),
+            else => return packet.asError(conn.client_capabilities),
+        };
+        conn.server_capabilities = handshake_v10.capability_flags();
+        if (!conn.hasCapability(constants.CLIENT_PROTOCOL_41)) {
+            std.log.err("protocol older than 4.1 is not supported\n", .{});
+            return error.UnsupportedProtocol;
         }
+
+        const auth_plugin = handshake_v10.get_auth_plugin();
+        const auth_data = handshake_v10.get_auth_data();
+
+        // TODO: TLS handshake if enabled
+
+        // more auth exchange based on auth_method
+        // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_authentication_methods.html
+        switch (auth_plugin) {
+            .caching_sha2_password => try conn.auth_caching_sha2_password(allocator, &auth_data, config),
+            .mysql_native_password => try conn.auth_mysql_native_password(allocator, &auth_data, config),
+            .sha256_password => try conn.auth_sha256_password(allocator, &auth_data, config),
+            else => {
+                std.log.warn("Unsupported auth plugin: {any}\n", .{auth_plugin});
+                return error.UnsupportedAuthPlugin;
+            },
+        }
+    }
+
+    fn auth_mysql_native_password(conn: *Conn, allocator: std.mem.Allocator, auth_data: *const [20]u8, config: *const Config) !void {
+        const auth_resp = auth.scramblePassword(auth_data, config.password);
+        const response = HandshakeResponse41.init(.mysql_native_password, config, &auth_resp);
+        try conn.sendPacketUsingSmallPacketWriter(response);
+
+        const packet = try conn.readPacket(allocator);
+        defer packet.deinit(allocator);
+        return switch (packet.payload[0]) {
+            constants.OK => {},
+            else => packet.asError(conn.client_capabilities),
+        };
+    }
+
+    fn auth_sha256_password(conn: *Conn, allocator: std.mem.Allocator, auth_data: *const [20]u8, config: *const Config) !void {
+        // TODO: if there is already a pub key, skip requesting it
+        const response = HandshakeResponse41.init(.sha256_password, config, &[_]u8{auth.sha256_password_public_key_request});
+        try conn.sendPacketUsingSmallPacketWriter(response);
+
+        const pk_packet = try conn.readPacket(allocator);
+        defer pk_packet.deinit(allocator);
+
+        // Decode public key
+        const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
+        defer decoded_pk.deinit(allocator);
+
+        const enc_pw = try auth.encryptPassword(allocator, config.password, auth_data, &decoded_pk.value);
+        defer allocator.free(enc_pw);
+
+        try conn.sendBytesAsPacket(enc_pw);
+
+        const resp_packet = try conn.readPacket(allocator);
+        defer resp_packet.deinit(allocator);
+        return switch (resp_packet.payload[0]) {
+            constants.OK => {},
+            else => resp_packet.asError(conn.client_capabilities),
+        };
+    }
+
+    fn auth_caching_sha2_password(conn: *Conn, allocator: std.mem.Allocator, auth_data: *const [20]u8, config: *const Config) !void {
+        const auth_resp = auth.scrambleSHA256Password(auth_data, config.password);
+        const response = HandshakeResponse41.init(.caching_sha2_password, config, &auth_resp);
+        try conn.sendPacketUsingSmallPacketWriter(response);
 
         while (true) {
             const packet = try conn.readPacket(allocator);
             defer packet.deinit(allocator);
-
             switch (packet.payload[0]) {
                 constants.OK => return,
-                constants.AUTH_SWITCH => {
-                    const auth_switch = AuthSwitchRequest.initFromPacket(&packet);
-                    auth_plugin = AuthPlugin.fromName(auth_switch.plugin_name);
-                    const auth_resp = try generate_auth_response(auth_plugin, auth_switch.plugin_data, config.password);
-                    try conn.sendBytesAsPacket(auth_resp.get());
-                },
                 constants.AUTH_MORE_DATA => {
-                    // more auth exchange based on auth_method
-                    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_authentication_methods.html
                     const more_data = packet.payload[1..];
-                    switch (auth_plugin) {
-                        .caching_sha2_password => {
-                            switch (more_data[0]) {
-                                auth.caching_sha2_password_fast_auth_success => {}, // success (do nothing, wait for next packet)
-                                auth.caching_sha2_password_full_authentication_start => {
-                                    // Full Authentication start
+                    switch (more_data[0]) {
+                        auth.caching_sha2_password_fast_auth_success => {}, // success (do nothing, wait for next packet)
+                        auth.caching_sha2_password_full_authentication_start => {
+                            // Full Authentication start
 
-                                    // TODO: support TLS
-                                    // // if TLS, send password as plain text
-                                    // try conn.sendBytesAsPacket(config.password);
+                            // TODO: support TLS
+                            // // if TLS, send password as plain text
+                            // try conn.sendBytesAsPacket(config.password);
 
-                                    // Request public key from server
-                                    try conn.sendBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
-                                    const pk_packet = try conn.readPacket(allocator);
-                                    defer pk_packet.deinit(allocator);
+                            try conn.sendBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
+                            const pk_packet = try conn.readPacket(allocator);
+                            defer pk_packet.deinit(allocator);
 
-                                    // Decode public key
-                                    const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
-                                    defer decoded_pk.deinit(allocator);
+                            // Decode public key
+                            const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
+                            defer decoded_pk.deinit(allocator);
 
-                                    // Encrypt password with public key and send it to server
-                                    const encrypted_pw = try auth.encryptPassword(allocator, config.password, &auth_data, &decoded_pk.value);
-                                    defer allocator.free(encrypted_pw);
-                                    try conn.sendBytesAsPacket(encrypted_pw);
-                                },
-                                else => return error.UnsupportedCachingSha2PasswordMoreData,
-                            }
+                            // Encrypt password
+                            const enc_pw = try auth.encryptPassword(allocator, config.password, auth_data, &decoded_pk.value);
+                            defer allocator.free(enc_pw);
+
+                            try conn.sendBytesAsPacket(enc_pw);
                         },
-                        else => {
-                            std.log.err("unsupported auth plugin: {any}", .{auth_plugin});
-                            return error.UnsupportedAuthPlugin;
-                        },
+                        else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
                 },
                 else => return packet.asError(conn.client_capabilities),
