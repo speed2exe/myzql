@@ -37,11 +37,11 @@ jobs:
           docker run --name mysql_server_2 --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql \
             --default-authentication-plugin=mysql_native_password
           while ! wget -qO- localhost:3306; do sleep 1; done
-          $HOME/zig-build/zig test integration_tests/main.zig --main-mod-path . --test-filter 'ping'
+          $HOME/zig-build/zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test --test-filter 'ping'
 
           # sha2_password
           docker stop mysql_server_1
           docker run --name mysql_server_2 --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql \
             --default-authentication-plugin=sha2_password
           while ! wget -qO- localhost:3306; do sleep 1; done
-          $HOME/zig-build/zig test integration_tests/main.zig --main-mod-path . --test-filter 'ping'
+          $HOME/zig-build/zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test --test-filter 'ping'
