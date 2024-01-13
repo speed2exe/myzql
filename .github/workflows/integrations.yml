@@ -27,7 +27,8 @@ jobs:
 
       - name: Run Integration Tests
         run: |
-          while ! wget -qO- localhost:3306; do sleep 1; done
+          $HOME/zig-build/zig build
+          while ! wget -qO- localhost:3306; do sleep 1; docker ps -a; done
           $HOME/zig-build/zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test
 
       - name: Auth Test
@@ -42,6 +43,6 @@ jobs:
           # sha2_password
           docker rm -f mysql_server
           docker run --name mysql_server --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql \
-            --default-authentication-plugin=sha2_password
+            --default-authentication-plugin=sha256_password
           while ! wget -qO- localhost:3306; do sleep 1; docker ps -a; done
           $HOME/zig-build/zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test --test-filter 'ping'
