@@ -29,7 +29,7 @@ pub fn QueryResult(comptime T: type) type {
                 .packet = response_packet,
                 .value = switch (response_packet.payload[0]) {
                     constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
-                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
+                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet) },
                     constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
                     else => .{ .rows = blk: {
                         var packet_reader = PacketReader.initFromPacket(&response_packet);
@@ -91,7 +91,12 @@ pub fn ResultSet(comptime T: type) type {
                 def.* = ColumnDefinition41.initFromPacket(pac);
             }
 
-            try discardEofPacket(conn, allocator);
+            // const packet = try conn.readPacket(allocator);
+            // defer packet.deinit(allocator);
+            // switch (packet.payload[0]) {
+            //     constants.EOF, constants.OK => _ = OkPacket.initFromPacket(&packet, conn.client_capabilities),
+            //     else => return packet.asError(conn.client_capabilities),
+            // }
 
             return .{
                 .conn = conn,
@@ -155,7 +160,7 @@ pub fn ResultRow(comptime T: type) type {
     return struct {
         const Value = union(enum) {
             err: ErrorPacket,
-            eof: EofPacket,
+            ok: OkPacket,
             data: T,
         };
         packet: Packet,
@@ -166,8 +171,8 @@ pub fn ResultRow(comptime T: type) type {
             return .{
                 .packet = packet,
                 .value = switch (packet.payload[0]) {
-                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &packet, conn.client_capabilities) },
-                    constants.EOF => .{ .eof = EofPacket.initFromPacket(&packet, conn.client_capabilities) },
+                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &packet) },
+                    constants.EOF => .{ .ok = OkPacket.initFromPacket(&packet, conn.client_capabilities) },
                     else => .{ .data = .{ .raw = packet.payload, .col_defs = col_defs } },
                 },
             };
@@ -182,7 +187,7 @@ pub fn ResultRow(comptime T: type) type {
                 else => {
                     return switch (r.value) {
                         .err => |err| return err.asError(),
-                        .eof => |eof| return eof.asError(),
+                        .ok => |_| return r.packet.asError(),
                         .data => |data| {
                             std.log.err("Unexpected ResultData: {any}\n", .{data});
                             return error.UnexpectedResultData;
@@ -212,9 +217,9 @@ pub const PrepareResult = struct {
         return .{
             .packet = response_packet,
             .value = switch (response_packet.payload[0]) {
-                constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet, conn.client_capabilities) },
+                constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet) },
                 constants.OK => .{ .ok = try PreparedStatement.initFromPacket(&response_packet, conn, allocator) },
-                else => return response_packet.asError(conn.client_capabilities),
+                else => return response_packet.asError(),
             },
         };
     }
@@ -256,37 +261,25 @@ pub const PreparedStatement = struct {
     pub fn initFromPacket(resp_packet: *const Packet, conn: *Conn, allocator: std.mem.Allocator) !PreparedStatement {
         const prep_ok = PrepareOk.initFromPacket(resp_packet, conn.client_capabilities);
 
-        const packets = try allocator.alloc(Packet, prep_ok.num_params + prep_ok.num_columns);
+        const col_count = prep_ok.num_params + prep_ok.num_columns;
+
+        const packets = try allocator.alloc(Packet, col_count);
         errdefer allocator.free(packets);
 
-        const col_defs = try allocator.alloc(ColumnDefinition41, prep_ok.num_params + prep_ok.num_columns);
+        const col_defs = try allocator.alloc(ColumnDefinition41, col_count);
         errdefer allocator.free(col_defs);
 
-        const params = col_defs[0..prep_ok.num_params];
-        const res_cols = col_defs[prep_ok.num_params..];
-
-        if (prep_ok.num_params > 0) {
-            for (packets[0..prep_ok.num_params], params) |*packet, *param| {
-                packet.* = try conn.readPacket(allocator);
-                param.* = ColumnDefinition41.initFromPacket(packet);
-            }
-            try discardEofPacket(conn, allocator);
-        }
-
-        if (prep_ok.num_columns > 0) {
-            for (packets[prep_ok.num_params..], res_cols) |*packet, *res_col| {
-                packet.* = try conn.readPacket(allocator);
-                res_col.* = ColumnDefinition41.initFromPacket(packet);
-            }
-            try discardEofPacket(conn, allocator);
+        for (packets, col_defs) |*packet, *col_def| {
+            packet.* = try conn.readPacket(allocator);
+            col_def.* = ColumnDefinition41.initFromPacket(packet);
         }
 
         return .{
             .prep_ok = prep_ok,
             .packets = packets,
             .col_defs = col_defs,
-            .params = params,
-            .res_cols = res_cols,
+            .params = col_defs[0..prep_ok.num_params],
+            .res_cols = col_defs[prep_ok.num_params..],
         };
     }
 
@@ -298,9 +291,3 @@ pub const PreparedStatement = struct {
         allocator.free(prep_stmt.packets);
     }
 };
-
-fn discardEofPacket(conn: *Conn, allocator: std.mem.Allocator) !void {
-    const eof_packet = try conn.readPacket(allocator);
-    defer eof_packet.deinit(allocator);
-    std.debug.assert(eof_packet.payload[0] == constants.EOF);
-}

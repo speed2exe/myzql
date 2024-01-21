@@ -94,7 +94,7 @@ pub const Conn = struct {
         defer packet.deinit(allocator);
         switch (packet.payload[0]) {
             constants.OK => _ = OkPacket.initFromPacket(&packet, config.capability_flags()),
-            else => return packet.asError(config.capability_flags()),
+            else => return packet.asError(),
         }
     }
 
@@ -110,7 +110,7 @@ pub const Conn = struct {
 
         const handshake_v10 = switch (packet.payload[0]) {
             constants.HANDSHAKE_V10 => HandshakeV10.initFromPacket(&packet, conn.client_capabilities),
-            else => return packet.asError(conn.client_capabilities),
+            else => return packet.asError(),
         };
         conn.server_capabilities = handshake_v10.capability_flags();
         if (!conn.hasCapability(constants.CLIENT_PROTOCOL_41)) {
@@ -145,7 +145,7 @@ pub const Conn = struct {
         defer packet.deinit(allocator);
         return switch (packet.payload[0]) {
             constants.OK => {},
-            else => packet.asError(conn.client_capabilities),
+            else => packet.asError(),
         };
     }
 
@@ -170,7 +170,7 @@ pub const Conn = struct {
         defer resp_packet.deinit(allocator);
         return switch (resp_packet.payload[0]) {
             constants.OK => {},
-            else => resp_packet.asError(conn.client_capabilities),
+            else => resp_packet.asError(),
         };
     }
 
@@ -212,7 +212,7 @@ pub const Conn = struct {
                         else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
                 },
-                else => return packet.asError(conn.client_capabilities),
+                else => return packet.asError(),
             }
         }
     }

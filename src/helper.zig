@@ -591,7 +591,7 @@ pub fn ResultSetIter(comptime T: type) type {
         pub fn next(iter: *const ResultSetIter(T), allocator: std.mem.Allocator) !?ResultRow(T) {
             const row = try iter.result_set.readRow(allocator);
             return switch (row.value) {
-                .eof => {
+                .ok => {
                     // need to deinit as caller would not know to do so
                     row.deinit(allocator);
                     return null;

@@ -23,9 +23,9 @@ pub const Packet = struct {
         return packet;
     }
 
-    pub fn asError(packet: *const Packet, capabilities: u32) error{ UnexpectedPacket, ErrorPacket } {
+    pub fn asError(packet: *const Packet) error{ UnexpectedPacket, ErrorPacket } {
         if (packet.payload[0] == constants.ERR) {
-            return ErrorPacket.initFromPacket(false, packet, capabilities).asError();
+            return ErrorPacket.initFromPacket(false, packet).asError();
         }
         std.log.warn("unexpected packet: {any}", .{packet});
         return error.UnexpectedPacket;

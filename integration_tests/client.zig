@@ -119,7 +119,7 @@ test "query text protocol" {
             const row = try rows.readRow(std.testing.allocator);
             defer row.deinit(std.testing.allocator);
             switch (row.value) {
-                .eof => {},
+                .ok => {},
                 .err => |err| return err.asError(),
                 .data => @panic("unexpected data"),
             }
