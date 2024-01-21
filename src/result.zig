@@ -249,6 +249,7 @@ pub const PrepareResult = struct {
 pub const PreparedStatement = struct {
     prep_ok: PrepareOk,
     packets: []const Packet,
+    col_defs: []const ColumnDefinition41,
     params: []const ColumnDefinition41, // parameters that would be passed when executing the query
     res_cols: []const ColumnDefinition41, // columns that would be returned when executing the query
 
@@ -283,14 +284,14 @@ pub const PreparedStatement = struct {
         return .{
             .prep_ok = prep_ok,
             .packets = packets,
+            .col_defs = col_defs,
             .params = params,
             .res_cols = res_cols,
         };
     }
 
     pub fn deinit(prep_stmt: *const PreparedStatement, allocator: std.mem.Allocator) void {
-        allocator.free(prep_stmt.params);
-        allocator.free(prep_stmt.res_cols);
+        allocator.free(prep_stmt.col_defs);
         for (prep_stmt.packets) |packet| {
             packet.deinit(allocator);
         }
