@@ -142,15 +142,9 @@ pub const Conn = struct {
         try conn.sendPacketUsingSmallPacketWriter(response);
 
         const packet = try conn.readPacket(allocator);
-        std.debug.print("packet: {s} \n", .{packet.payload});
         defer packet.deinit(allocator);
         return switch (packet.payload[0]) {
             constants.OK => {},
-            constants.AUTH_SWITCH => {
-                const auth_switch = AuthSwitchRequest.initFromPacket(&packet);
-                std.debug.print("auth_switch: {s} \n", .{auth_switch.plugin_name});
-                return error.AuthSwitch;
-            },
             else => packet.asError(conn.client_capabilities),
         };
     }

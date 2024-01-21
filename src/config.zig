@@ -17,6 +17,7 @@ pub const Config = struct {
         // zig fmt: off
         var flags: u32 = constants.CLIENT_PROTOCOL_41
                        | constants.CLIENT_PLUGIN_AUTH
+                       | constants.CLIENT_SECURE_CONNECTION
                        // TODO: Support more
                        ;
         // zig fmt: on
