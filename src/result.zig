@@ -258,11 +258,11 @@ pub const PreparedStatement = struct {
         const packets = try allocator.alloc(Packet, prep_ok.num_params + prep_ok.num_columns);
         errdefer allocator.free(packets);
 
-        const params = try allocator.alloc(ColumnDefinition41, prep_ok.num_params);
-        errdefer allocator.free(params);
+        const col_defs = try allocator.alloc(ColumnDefinition41, prep_ok.num_params + prep_ok.num_columns);
+        errdefer allocator.free(col_defs);
 
-        const res_cols = try allocator.alloc(ColumnDefinition41, prep_ok.num_columns);
-        errdefer allocator.free(res_cols);
+        const params = col_defs[0..prep_ok.num_params];
+        const res_cols = col_defs[prep_ok.num_params..];
 
         if (prep_ok.num_params > 0) {
             for (packets[0..prep_ok.num_params], params) |*packet, *param| {
