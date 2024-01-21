@@ -1,5 +1,5 @@
 # MyZql
-- MySQL driver written in pure zig
+- MySQL/MariaDB driver written in pure zig
 
 ## Status
 - Alpha

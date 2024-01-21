@@ -4,6 +4,8 @@ const PacketReader = @import("./packet_reader.zig").PacketReader;
 const constants = @import("../constants.zig");
 const AuthPlugin = @import("../auth.zig").AuthPlugin;
 
+// https://mariadb.com/kb/en/connection/#initial-handshake-packet
+// https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_handshake_v10.html
 pub const HandshakeV10 = struct {
     server_version: [:0]const u8,
     connection_id: u32,
@@ -34,8 +36,8 @@ pub const HandshakeV10 = struct {
 
         handshake_v10.auth_plugin_data_len = reader.readByte();
 
-        const reserved = reader.readFixed(10);
-        std.debug.assert(std.mem.eql(u8, reserved, &[10]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
+        // mariadb or mysql specific, ignore for now
+        _ = reader.readFixed(10);
 
         // This part ambiguous in mariadb and mysql,
         // It seems like null terminated string works for both, at least for now
