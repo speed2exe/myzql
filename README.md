@@ -10,6 +10,18 @@
 - MySQL DateTime and Time support
 - comptime safety and type conversion as much as possible
 
+## Philosophy
+### Correctness and readability.
+This is probably subjective, but as much as possible, code should be easy to reason about.
+### Low-level and High-level APIs
+Low-level apis should contain all information you need.
+High-level apis are built on top of low-level ones for convenience and ergonomics.
+### Explicit memory allocation
+Requires user to provide allocator whenever there is allocation involved(querying, data fetching, etc).
+This is done so that allocation strategy can be optimized.
+E.g. Supposed you can guarantee that the data returned from query result have reasonable upper bound(eg. `SELECT COUNT(*) FROM my_table`),
+you can use a fixed buffer allocation strategy.
+
 ### Binary Column Types support
 - MySQL Colums Types to Zig Values
 ```
