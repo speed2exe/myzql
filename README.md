@@ -11,11 +11,11 @@
 - comptime safety and type conversion as much as possible
 
 ## Philosophy
-### Correctness and readability.
-This is probably subjective, but as much as possible, code should be easy to reason about.
+### Correctness
+Focused on correct representation of server client protocol.
 ### Low-level and High-level APIs
 Low-level apis should contain all information you need.
-High-level apis are built on top of low-level ones for convenience and ergonomics.
+High-level apis are built on top of low-level ones for convenience and developer ergonomics.
 ### Explicit memory allocation
 Requires user to provide allocator whenever there is allocation involved(querying, data fetching, etc).
 This is done so that allocation strategy can be optimized.
