@@ -70,7 +70,7 @@ you can use a fixed buffer allocation strategy.
 - Start up mysql/mariadb in docker:
   - `docker run --name some-mysql --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql`
   - `docker run --name some-mariadb --env MARIADB_ROOT_PASSWORD=password -p 3306:3306 -d mariadb`
-- Run all the test: In root directory of project: `zig test integration_tests/main.zig --main-mod-path .`
+- Run all the test: In root directory of project: `zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test`
 
 ### Tips
 - test filter flag: `--test-filter <test name ish>`

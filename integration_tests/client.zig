@@ -547,7 +547,7 @@ test "binary data types - string" {
         const prep_stmt = try prep_res.expect(.ok);
 
         const params = .{
-            .{ "hello", "world", "a", "b" },
+            .{ "hello", "world", "a", @as([*c]const u8, "b") },
             .{ null, "foo", null, "c" },
             .{ null, "", null, "a" },
             .{
