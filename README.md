@@ -30,7 +30,7 @@
     // ...
     .dependencies = .{
         .myzql = .{
-	    .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.0.4.tar.gz", // replace tag version as needed
+	    .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.0.5.tar.gz", // do check tags for newer versions
         .hash = "122021c467d780838f6225f90d5a5f42019afdc54d83ef0bceb5c8fd4e5e4df4a965",
 	}
     // ...
