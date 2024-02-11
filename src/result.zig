@@ -385,7 +385,6 @@ fn decodeDuration(reader: *PacketReader) Duration {
         },
         0 => return .{},
         else => {
-            std.debug.print("length: {d}\n", .{length});
             unreachable;
         },
     }

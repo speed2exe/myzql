@@ -245,7 +245,7 @@ pub const Conn = struct {
     pub fn readPacket(conn: *Conn, allocator: std.mem.Allocator) !Packet {
         std.debug.assert(conn.state == .connected);
         const packet = try Packet.initFromReader(allocator, &conn.reader);
-        conn.sequence_id = packet.sequence_id + 1;
+        conn.sequence_id = packet.sequence_id;
         return packet;
     }
 
