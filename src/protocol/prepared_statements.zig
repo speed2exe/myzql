@@ -8,6 +8,7 @@ const PreparedStatement = @import("./../result.zig").PreparedStatement;
 const ColumnDefinition41 = @import("./column_definition.zig").ColumnDefinition41;
 const DateTime = @import("../temporal.zig").DateTime;
 const Duration = @import("../temporal.zig").Duration;
+const maxInt = std.math.maxInt;
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query.html
 pub const PrepareRequest = struct {
@@ -114,13 +115,19 @@ pub const ExecuteRequest = struct {
                 enum_field_type.* = comptime enumFieldTypeFromParam(param);
             }
 
-            inline for (col_defs, enum_field_types) |col_def, enum_field_type| {
+            inline for (enum_field_types, params) |enum_field_type, param| {
                 try packet_writer.writeUInt8(writer, @intFromEnum(enum_field_type));
-                if (col_def.flags & constants.UNSIGNED_FLAG > 0) {
-                    try packet_writer.writeUInt8(writer, 0x80);
-                } else {
-                    try packet_writer.writeUInt8(writer, 0);
-                }
+                const sign_flag = comptime switch (@TypeOf(param)) {
+                    comptime_int => switch (enum_field_type) {
+                        .MYSQL_TYPE_TINY => if (param > maxInt(i8)) 0x80 else 0,
+                        .MYSQL_TYPE_SHORT => if (param > maxInt(i16)) 0x80 else 0,
+                        .MYSQL_TYPE_LONG => if (param > maxInt(i32)) 0x80 else 0,
+                        .MYSQL_TYPE_LONGLONG => if (param > maxInt(i64)) 0x80 else 0,
+                        else => 0,
+                    },
+                    else => 0,
+                };
+                try packet_writer.writeUInt8(writer, sign_flag);
 
                 // Not supported yet
                 // if (e.capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) {
