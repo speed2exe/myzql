@@ -77,7 +77,7 @@ const OkPacket = protocol.generic_response.OkPacket;
 pub fn main() !void {
     // ...
     // You can do a text query (text protocol) by using `query` method on `Client`
-    // Observer that an allocator is required. This is because the driver cannot determine
+    // Observe that an allocator is required. This is because the driver cannot determine
     // the amount of allocation that is required for this call. If you might be able to
     // reasonably predict the upper bound of this operation, you can provide a more optimized allocator.
     // You may also do insertion query here, but it will not be optimal and will be more
@@ -114,7 +114,8 @@ pub fn main() !void {
 }
 ```
 
-## Querying returning rows
+## Querying returning rows (Text Results)
+- If you want to have query results to be represented as struct, this is not the section, scroll down to "Executing prepared statements returning results" instead
 ```zig
 const myzql = @import("myzql");
 const QueryResult = myzql.result.QueryResult;
@@ -227,7 +228,7 @@ pub fn main() void {
 }
 ```
 
-### Binary data into structs
+### Executing prepared statements returning results
 ```zig
 const ResultSetIter = myzql.result.ResultSetIter;
 const QueryResult = myzql.result.QueryResult;
