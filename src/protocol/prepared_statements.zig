@@ -6,7 +6,6 @@ const Packet = @import("./packet.zig").Packet;
 const PacketReader = @import("./packet_reader.zig").PacketReader;
 const PreparedStatement = @import("./../result.zig").PreparedStatement;
 const ColumnDefinition41 = @import("./column_definition.zig").ColumnDefinition41;
-const helper = @import("./../helper.zig");
 const DateTime = @import("../temporal.zig").DateTime;
 const Duration = @import("../temporal.zig").Duration;
 
