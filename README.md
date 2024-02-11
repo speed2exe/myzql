@@ -1,5 +1,5 @@
 # MyZql
-- MySQL/MariaDB driver written in pure zig
+- MySQL and MariaDB driver in native zig
 
 ## Status
 - Beta
