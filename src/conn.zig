@@ -261,8 +261,7 @@ pub const Conn = struct {
     }
 
     fn generateSequenceId(conn: *Conn) u8 {
-        const id = conn.sequence_id;
         conn.sequence_id += 1;
-        return id;
+        return conn.sequence_id;
     }
 };
