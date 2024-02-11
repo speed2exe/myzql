@@ -272,6 +272,7 @@ fn main() !void {
     // to interate through all the rows until EOF
     // and collecting them into a data structure.
     const people_structs: TableStructs(Person) = try iter.collectStructs(DateTimeDuration, allocator);
+    defer people_structs.deinit(allocator);
     const people []const Person = people_structs.rows;
     //... do something with people
 }
