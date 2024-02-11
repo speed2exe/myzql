@@ -329,8 +329,8 @@ test "binary data types - int" {
             .{ (1 << 7) - 1, (1 << 15) - 1, (1 << 23) - 1, (1 << 31) - 1, (1 << 63) - 1, (1 << 8) - 1, (1 << 16) - 1, (1 << 24) - 1, (1 << 32) - 1, (1 << 64) - 1 },
             .{ null, null, null, null, null, null, null, null, null, null },
             .{ @as(?i8, 0), @as(?i16, 0), @as(?i32, 0), @as(?i64, 0), @as(?u8, 0), @as(?u16, 0), @as(?u32, 0), @as(?u64, 0), @as(?u8, 0), @as(?u64, 0) },
-            .{ minInt(i8), minInt(i16), minInt(i24), minInt(i32), minInt(i64), minInt(u8), minInt(u16), minInt(u24), minInt(u32), minInt(u64) },
-            .{ maxInt(i8), maxInt(i16), maxInt(i24), maxInt(i32), maxInt(i64), maxInt(u8), maxInt(u16), maxInt(u24), maxInt(u32), maxInt(u64) },
+            .{ @as(i8, minInt(i8)), @as(i16, minInt(i16)), @as(i32, minInt(i24)), @as(i32, minInt(i32)), @as(i64, minInt(i64)), @as(u8, minInt(u8)), @as(u16, minInt(u16)), @as(u32, minInt(u24)), @as(u32, minInt(u32)), @as(u64, minInt(u64)) },
+            .{ @as(i8, maxInt(i8)), @as(i16, maxInt(i16)), @as(i32, maxInt(i24)), @as(i32, maxInt(i32)), @as(i64, maxInt(i64)), @as(u8, maxInt(u8)), @as(u16, maxInt(u16)), @as(u32, maxInt(u24)), @as(u32, maxInt(u32)), @as(u64, maxInt(u64)) },
             .{ @as(?i8, null), @as(?i16, null), @as(?i32, null), @as(?i64, null), @as(?u8, null), @as(?u16, null), @as(?u32, null), @as(?u64, null), @as(?u8, null), @as(?u64, null) },
         };
         inline for (params) |param| {

@@ -117,14 +117,15 @@ pub const ExecuteRequest = struct {
 
             inline for (enum_field_types, params) |enum_field_type, param| {
                 try packet_writer.writeUInt8(writer, @intFromEnum(enum_field_type));
-                const sign_flag = comptime switch (@TypeOf(param)) {
-                    comptime_int => switch (enum_field_type) {
+                const sign_flag = comptime switch (@typeInfo(@TypeOf(param))) {
+                    .ComptimeInt => switch (enum_field_type) {
                         .MYSQL_TYPE_TINY => if (param > maxInt(i8)) 0x80 else 0,
                         .MYSQL_TYPE_SHORT => if (param > maxInt(i16)) 0x80 else 0,
                         .MYSQL_TYPE_LONG => if (param > maxInt(i32)) 0x80 else 0,
                         .MYSQL_TYPE_LONGLONG => if (param > maxInt(i64)) 0x80 else 0,
                         else => 0,
                     },
+                    .Int => |int| if (int.signedness == .unsigned) 0x80 else 0,
                     else => 0,
                 };
                 try packet_writer.writeUInt8(writer, sign_flag);
