@@ -2,7 +2,7 @@
 - MySQL/MariaDB driver written in pure zig
 
 ## Status
-- Alpha
+- Beta
 
 ## Features
 - Native Zig code
@@ -46,8 +46,8 @@ you can use a fixed buffer allocation strategy.
     // ...
     .dependencies = .{
         .myzql = .{
-	    .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.0.2.tar.gz", // replace tag version as needed
-            .hash = "122021c467d780838f6225f90d5a5f42019afdc54d83ef0bceb5c8fd4e5e4df4a965",
+	    .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.0.4.tar.gz", // replace tag version as needed
+        .hash = "122021c467d780838f6225f90d5a5f42019afdc54d83ef0bceb5c8fd4e5e4df4a965",
 	}
     // ...
 ```
@@ -55,13 +55,10 @@ you can use a fixed buffer allocation strategy.
 ## Examples
 - [Usage](https://github.com/speed2exe/myzql-example)
 
-## Upcoming Implementations
-- config from URL
+## TODOs
+- Config from URL
 - Connection Pooling
-- Bulk Insert
-- Infile Insertion
 - TLS support
-- struct array as param input
 
 ## Unit Tests
 - `zig test src/myzql.zig`
