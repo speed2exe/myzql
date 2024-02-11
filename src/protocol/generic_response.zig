@@ -10,7 +10,7 @@ pub const ErrorPacket = struct {
     sql_state: ?*const [5]u8,
     error_message: []const u8,
 
-    pub fn initFromPacket(comptime is_first_packet: bool, packet: *const Packet, capabilities: u32) ErrorPacket {
+    pub fn initFromPacket(comptime is_first_packet: bool, packet: *const Packet) ErrorPacket {
         var error_packet: ErrorPacket = undefined;
 
         var reader = PacketReader.initFromPacket(packet);
@@ -18,7 +18,7 @@ pub const ErrorPacket = struct {
         std.debug.assert(header == constants.ERR);
 
         error_packet.error_code = reader.readUInt16();
-        if (!is_first_packet and (capabilities & constants.CLIENT_PROTOCOL_41 > 0)) {
+        if (!is_first_packet) {
             error_packet.sql_state_marker = reader.readByte();
             error_packet.sql_state = reader.readFixed(5);
         } else {
@@ -53,7 +53,7 @@ pub const OkPacket = struct {
 
         var reader = PacketReader.initFromPacket(packet);
         const header = reader.readByte();
-        std.debug.assert(header == constants.OK);
+        std.debug.assert(header == constants.OK or header == constants.EOF);
 
         ok_packet.affected_rows = reader.readLengthEncodedInteger();
         ok_packet.last_insert_id = reader.readLengthEncodedInteger();

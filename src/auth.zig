@@ -14,28 +14,11 @@ pub const AuthPlugin = enum {
     unknown,
 
     pub fn fromName(name: []const u8) AuthPlugin {
-        if (std.mem.eql(u8, name, "mysql_native_password")) {
-            return .mysql_native_password;
-        } else if (std.mem.eql(u8, name, "sha256_password")) {
-            return .sha256_password;
-        } else if (std.mem.eql(u8, name, "caching_sha2_password")) {
-            return .caching_sha2_password;
-        } else if (std.mem.eql(u8, name, "mysql_clear_password")) {
-            return .mysql_clear_password;
-        } else {
-            return .unknown;
-        }
+        return std.meta.stringToEnum(AuthPlugin, name) orelse .unknown;
     }
 
     pub fn toName(auth_plugin: AuthPlugin) [:0]const u8 {
-        switch (auth_plugin) {
-            .unspecified => return "unspecified",
-            .mysql_native_password => return "mysql_native_password",
-            .sha256_password => return "sha256_password",
-            .caching_sha2_password => return "caching_sha2_password",
-            .mysql_clear_password => return "mysql_clear_password",
-            .unknown => return "unknown",
-        }
+        return @tagName(auth_plugin);
     }
 };
 

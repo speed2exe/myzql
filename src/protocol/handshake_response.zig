@@ -1,4 +1,5 @@
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_handshake_response.html
+// https://mariadb.com/kb/en/connection/#client-handshake-response
 const packer_writer = @import("./packet_writer.zig");
 const std = @import("std");
 const constants = @import("../constants.zig");
@@ -37,10 +38,13 @@ pub const HandshakeResponse41 = struct {
 
         if ((h.client_flag & constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) > 0) {
             try packer_writer.writeLengthEncodedString(writer, h.auth_response);
-        } else {
+        } else if ((h.client_flag & constants.CLIENT_SECURE_CONNECTION) > 0) {
             const length: u8 = @truncate(h.auth_response.len);
             try packer_writer.writeUInt8(writer, length);
             try writer.write(h.auth_response);
+        } else {
+            try writer.write(h.auth_response);
+            try packer_writer.writeUInt8(writer, 0);
         }
         if ((h.client_flag & constants.CLIENT_CONNECT_WITH_DB) > 0) {
             try packer_writer.writeNullTerminatedString(writer, h.database);

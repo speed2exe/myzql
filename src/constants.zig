@@ -13,7 +13,7 @@ pub const LOCAL_INFILE_REQUEST: u8 = 0xFB;
 // Query Result
 pub const TEXT_RESULT_ROW_NULL: u8 = 0xFB;
 
-// https://dev.mysql.com/doc/dev/mysql-server/latest/mysql__com_8h.html#a1d854e841086925be1883e4d7b4e8cad
+// https://dev.mysql.com/doc/dev/mysql-server/latest/mysql__com_8h.html
 pub const SERVER_STATUS_IN_TRANS:             u16 = 1 << 0;
 pub const SERVER_STATUS_AUTOCOMMIT:           u16 = 1 << 1;
 pub const SERVER_MORE_RESULTS_EXISTS:         u16 = 1 << 2;
@@ -43,7 +43,7 @@ pub const CLIENT_IGNORE_SIGPIPE:  u32 = 4096;
 pub const CLIENT_TRANSACTIONS:    u32 = 8192;
 pub const CLIENT_RESERVED:        u32 = 16384;
 
-pub const CLIENT_RESERVED2:                      u32 = 32768;
+pub const CLIENT_SECURE_CONNECTION:              u32 = 32768; // Appears deprecated in MySQL but still used in MariaDB
 pub const CLIENT_MULTI_STATEMENTS:               u32 = 1 << 16;
 pub const CLIENT_MULTI_RESULTS:                  u32 = 1 << 17;
 pub const CLIENT_PS_MULTI_RESULTS:               u32 = 1 << 18;
