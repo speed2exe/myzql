@@ -7,8 +7,10 @@
 ## Features
 - Native Zig code, no external dependencies
 - TCP protocol
+- Prepared Statement
+- Structs from query result
+- Data insertion
 - MySQL DateTime and Time support
-- Query Results to struct
 
 ## TODOs
 - Config from URL
@@ -62,12 +64,10 @@ pub fn main() !void {
 }
 ```
 Note:
-- Allocation and connection are lazy by default, and will be required when required (e.g. query or ping).
-- Allocator is stored in `Client`, and will NOT do implicit allocation for user. Every function or method
-that requires allocation explicitly require an allocator.
+- Allocation and network are lazy by default and will only be invoked when needed (e.g. query or ping).
+- Allocator is not stored in `Client`, and will NOT do implicit allocation for user. Every function or method
+that requires allocation will require an allocator to be passed in as parameter.
 This is done so that allocation strategy can be optimized.
-E.g. Supposed you can guarantee that the data returned from query result have reasonable upper bound(eg. `SELECT COUNT(*) FROM my_table`),
-you can use a fixed buffer allocation strategy to avoid heap allocation.
 
 ## Querying
 ```zig
@@ -77,9 +77,8 @@ const OkPacket = protocol.generic_response.OkPacket;
 pub fn main() !void {
     // ...
     // You can do a text query (text protocol) by using `query` method on `Client`
-    // Observe that an allocator is required. This is because the driver cannot determine
-    // the amount of allocation that is required for this call. If you might be able to
-    // reasonably predict the upper bound of this operation, you can provide a more optimized allocator.
+    // Observe that an allocator is required. Allocation and network will be invoked.
+    // If you are able to have an upper bound of this operation, you can provide a more optimized allocator.
     // You may also do insertion query here, but it will not be optimal and will be more
     // vulnerable to SQL injection attacks.
     const result = try c.query(allocator, "CREATE DATABASE testdb");
@@ -91,11 +90,12 @@ pub fn main() !void {
     // - rows: ResultSet(TextResultData) => rows returned from server
     // In this example, the query is not returning any result, so it will either be `ok` or `err`.
     // We are using the convenient method `expect` for simplified error handling.
-    // You can also do `expect(.err)` or `expect(.rows)`, if the result variant does not match
-    // what you have specified, a message will be printed and you will get an error instead.
+    // You can also do `expect(.err)` or `expect(.rows)`.
+    // If the result variant does not match the kind of result you have specified,
+    // a message will be printed and you will get an error instead.
     const ok: OkPacket = try result.expect(.ok);
 
-    // Alternatively, you can also handle results manually if you want more control.
+    // Alternatively, you can also handle results manually for more control.
     // Here, we do a switch statement to handle all possible variant or results.
     switch (result.value) {
         .ok => |ok| {
@@ -105,7 +105,7 @@ pub fn main() !void {
         // You may also choose to inspect individual elements for more control.
         .err => |err| return err.asError(),
 
-        // Result rows will be covered below
+        // query results that returns data
         .rows => |rows| {
             _ = rows;
             @panic("should not expect rows");
@@ -115,7 +115,8 @@ pub fn main() !void {
 ```
 
 ## Querying returning rows (Text Results)
-- If you want to have query results to be represented as struct, this is not the section, scroll down to "Executing prepared statements returning results" instead
+- If you want to have query results to be represented by custom created structs,
+this is not the section, scroll down to "Executing prepared statements returning results" instead.
 ```zig
 const myzql = @import("myzql");
 const QueryResult = myzql.result.QueryResult;
@@ -129,12 +130,13 @@ pub fn main() !void {
     const result = try c.query(allocator, "SELECT * FROM customers.purchases");
     defer result.deinit(allocator);
 
-    // If you have a query that returns rows, you have to collect the result.
-    // you can use `expect(.rows)` to get rows.
+    // This is a query that returns rows, you have to collect the result.
+    // you can use `expect(.rows)` to interpret the values as ResultSet(TextResultData)
     const rows: ResultSet(TextResultData) = try query_res.expect(.rows);
-    // Each time you call a `readRow` on row, you will get a `ResultRow(TextResultData)` type.
-    // This is likely a spot where allocation can be optimized, since a single row allocation
-    // can be easily estimated.
+
+    // Each time you call a `readRow` on row, you will get a `ResultRow(TextResultData)`.
+    // Tip: This is likely a spot where allocation can be optimized,
+    // since a single row allocation can be easily estimated.
     // This may or may not invoke a network call depending on buffer of the network reader.
     //
     // There are few variant of ResultRow(TextResultData):
@@ -161,16 +163,17 @@ pub fn main() !void {
         defer row.deinit(allocator);
         // do something with row
     }
-    // Collecting all data from iterator (another convenient method)
+
+    // You can also use `collectTexts` method to collect all rows.
+    // Under the hood, it does network call and allocations, until EOF or error
     const table: TableTexts = try it.collectTexts(allocator);
     defer table.deinit(allocator);
     const all_rows: []const []const ?[]const u8 = table.rows;
     all_rows.debugPrint(); // prints out the content to terminal
 
     // IMPORTANT:
-    // Underlying data remains in the ResultRow(TextResultData),
-    // which is in the network reader buffer.
-    // your data will be valid until it goes out of scope, do a copy if needed.
+    // Underlying data remains in the ResultRow(TextResultData), which is in the network reader buffer.
+    // Results return will be valid until it goes out of scope, do a copy if needed.
     // If you find a common tedious use case, feel free to file a Feature Request.
 }
 
@@ -203,7 +206,7 @@ pub fn main() void {
     // err: ErrorPacket       => something gone wrong
     // In this example, we use `expect(.ok)` to get PreparedStatement
     const prep_stmt: PreparedStatement = try prep_res.expect(.ok);
-    // Preparing the params to be inserted
+    // Data to be inserted
     const params = .{
         .{ "John", 42 },
         .{ "Sam", 24 },
@@ -211,12 +214,12 @@ pub fn main() void {
     inline for (params) |param| {
         const exe_res: QueryResult(BinaryResultData) = try c.execute(allocator, &prep_stmt, param);
         defer exe_res.deinit(allocator);
-        // Just like QueryReselt(TextResultData), QueryResult(BinaryResultData) has 3 variant
-        // QueryResult(BinaryResultData) has 3 variant:
+        // Just like QueryReselt(TextResultData),
+        // QueryResult(BinaryResultData) has 3 variants:
         // - ok:   OkPacket     => error occurred
         // - err:  ErrorPacket  => query is fine
         // - rows: ResultSet(BinaryResultData) => rows returned from server
-        // as we are not expecting any rows, we can just `expect(.ok)` to get the OkPacket
+        // We are not expecting server to return rows, so we just `expect(.ok)`
         const ok: OkPacket = try exe_res.expect(.ok);
         // If you need the id that was last_inserted, here's how to get it.
         const last_insert_id: u64 = ok.last_insert_id;
@@ -252,13 +255,13 @@ fn main() !void {
     const rows: ResultSet(BinaryResultData) = try res.expect(.rows);
     const iter: ResultSetIter(BinaryResultData) = rows.iter();
 
-    // Interate over the rows,
+    // Iterating over rows from server
     while (try iter.next(allocator)) |row| {
         defer row.deinit(allocator);
         const data: BinaryResultData = try row.expect(.data);
 
         // If you preallocated `my_guy` and want to copy result into it
-        var my_guy: Person = undefined;
+        var my_guy: Person = undefined; // preallocated somewhere
         try data.scan(&my_guy, allocator);
         std.debug.print("my_guy: {any}\n", .{my_guy});
 
@@ -268,9 +271,9 @@ fn main() !void {
         std.debug.print("person: {any}\n", .{person});
     }
 
-    // There is another convenient method that uses the interator
-    // to interate through all the rows until EOF
-    // and collecting them into a data structure.
+    // `collectStructs` is a method that iterate through all the rows
+    // returned by server and put it into `TableStructs` data structure.
+    // under the hood, it makes network call and allocation until EOF
     const people_structs: TableStructs(Person) = try iter.collectStructs(DateTimeDuration, allocator);
     defer people_structs.deinit(allocator);
     const people []const Person = people_structs.rows;
