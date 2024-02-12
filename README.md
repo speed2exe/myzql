@@ -155,6 +155,7 @@ pub fn main() !void {
     try data.scan(&dest);
     // If you want to allocate on the fly: you can do:
     const dest: []?[]const u8 = try data.scanAlloc(allocator);
+    // In both cases, results are only valid until `deinit` is called on ResultRow(TextResultData)
 
     // Iterating over rows
     // This is more convenient and probably suitable for most use cases.
@@ -166,15 +167,11 @@ pub fn main() !void {
 
     // You can also use `collectTexts` method to collect all rows.
     // Under the hood, it does network call and allocations, until EOF or error
+    // Results are valid until `deinit` is called on TableTexts.
     const table: TableTexts = try it.collectTexts(allocator);
     defer table.deinit(allocator);
     const all_rows: []const []const ?[]const u8 = table.rows;
     all_rows.debugPrint(); // prints out the content to terminal
-
-    // IMPORTANT:
-    // Underlying data remains in the ResultRow(TextResultData), which is in the network reader buffer.
-    // Results return will be valid until it goes out of scope, do a copy if needed.
-    // If you find a common tedious use case, feel free to file a Feature Request.
 }
 
 ```
