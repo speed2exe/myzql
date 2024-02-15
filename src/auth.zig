@@ -206,7 +206,6 @@ test "scrambleSHA256Password" {
 
     for (tests) |t| {
         const actual = scrambleSHA256Password(&scramble, t.password);
-        // std.debug.print("actual: {x}", .{ std.fmt.fmtSliceHexLower(&actual) });
         try std.testing.expectEqual(t.expected, actual);
     }
 }

@@ -99,7 +99,6 @@ pub fn main() !void {
     // Here, we do a switch statement to handle all possible variant or results.
     switch (result.value) {
         .ok => |ok| {
-            std.debug.print("ok packet from server = {any}", .{ok});
         },
         // `asError` is also another convenient method to print message and return error.
         // You may also choose to inspect individual elements for more control.
@@ -220,7 +219,6 @@ pub fn main() void {
         const ok: OkPacket = try exe_res.expect(.ok);
         // If you need the id that was last_inserted, here's how to get it.
         const last_insert_id: u64 = ok.last_insert_id;
-        std.debug.print("last_insert_id: {any}\n", .{last_insert_id});
     }
 
     // Currently only tuples are supported as an argument for insertion.
@@ -260,12 +258,10 @@ fn main() !void {
         // If you preallocated `my_guy` and want to copy result into it
         var my_guy: Person = undefined; // preallocated somewhere
         try data.scan(&my_guy, allocator);
-        std.debug.print("my_guy: {any}\n", .{my_guy});
 
         // If you want to allocate on the fly
         const person = try data.scanAlloc(Person, allocator);
         defer allocator.destroy(person); // make sure you destroy the allocated after use
-        std.debug.print("person: {any}\n", .{person});
     }
 
     // `collectStructs` is a method that iterate through all the rows
@@ -344,7 +340,6 @@ fn main() !void {
 
         const structs = try rows_iter.collectStructs(DateTimeDuration, allocator);
         defer structs.deinit(allocator);
-        std.debug.print("structs: {any}\n", .{structs.rows}); // structs.rows: []const DateTimeDuration
         // Do something with structs
         // ...
     }

@@ -5,6 +5,8 @@ const Packet = @import("./packet.zig");
 pub const PacketReader = struct {
     stream: std.net.Stream,
     allocator: std.mem.Allocator,
+
+    // valid data: buf[pos..len]
     buf: []u8,
     pos: usize,
     len: usize,
@@ -14,7 +16,7 @@ pub const PacketReader = struct {
 
     pub fn init(stream: std.net.Stream, allocator: std.mem.Allocator) !PacketReader {
         return .{
-            .buf = try allocator.alloc(u8, 4),
+            .buf = &.{},
             .stream = stream,
             .allocator = allocator,
             .pos = 0,
@@ -50,17 +52,17 @@ pub const PacketReader = struct {
         p.pos += payload_length;
         return .{
             .sequence_id = sequence_id,
-            .payload = p.buf[4..],
+            .payload = p.buf[4..p.pos],
         };
     }
 
     fn readAtLeast(p: *PacketReader, at_least: usize) !void {
         try p.expandBufIfNeeded(at_least);
-
         const n = try p.stream.readAtLeast(p.buf[p.len..], at_least);
         if (n == 0) {
             return error.UnexpectedEndOfStream;
         }
+
         p.len += n;
         if (p.pos == 0 and p.len == p.buf.len) {
             p.should_double_buf = true;
@@ -69,37 +71,42 @@ pub const PacketReader = struct {
 
     // ensure that the buffer has at least req_n bytes for reading
     fn expandBufIfNeeded(p: *PacketReader, req_n: usize) !void {
-        if (req_n <= p.len - p.pos) {
+        if (p.buf.len - p.pos >= req_n) {
             return;
         }
 
-        // move remaining data to the beginning of the buffer
-        const remaining = p.len - p.pos;
-        @memcpy(p.buf, p.buf[p.pos..p.len]);
-        p.pos = 0;
-        p.len = remaining;
+        if (p.pos > 0) {
+            // move remaining data to the beginning of the buffer
+            const n_remain = p.len - p.pos;
+            utils.memMove(p.buf, p.buf[p.pos..p.len]);
+            p.pos = 0;
+            p.len = n_remain;
+            // check again if the buffer is large enough
+            if (p.buf.len - p.pos >= req_n) {
+                return;
+            }
+        }
 
         const new_len = blk: {
-            var current_len = p.buf.len;
+            var current_len = utils.nextPowerOf2(@truncate(req_n));
             if (p.should_double_buf) {
                 current_len *= 2;
                 p.should_double_buf = false;
-            }
-            while (current_len < req_n) {
-                current_len *= 2;
             }
             break :blk current_len;
         };
 
         // try resize
         if (p.allocator.resize(p.buf, new_len)) {
+            p.buf = p.buf[0..new_len];
             return;
         }
 
         // if resize failed, try to allocate a new buffer
         const new_buf = try p.allocator.alloc(u8, new_len);
-        @memcpy(new_buf, p.buf);
+        utils.memMove(new_buf, p.buf[p.pos..p.len]);
         p.allocator.free(p.buf);
+
         p.buf = new_buf;
     }
 };

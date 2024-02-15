@@ -4,12 +4,12 @@ const constants = @import("./constants.zig");
 const prep_stmts = protocol.prepared_statements;
 const PrepareOk = prep_stmts.PrepareOk;
 const Packet = protocol.packet.Packet;
+const PayloadReader = protocol.packet.PayloadReader;
 const OkPacket = protocol.generic_response.OkPacket;
 const ErrorPacket = protocol.generic_response.ErrorPacket;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 const Conn = @import("./conn.zig").Conn;
 const EofPacket = protocol.generic_response.EofPacket;
-const PacketReader = @import("./protocol/packet_reader.zig").PayloadReader;
 const DateTime = @import("./temporal.zig").DateTime;
 const Duration = @import("./temporal.zig").Duration;
 const EnumFieldType = constants.EnumFieldType;
@@ -26,17 +26,16 @@ pub fn QueryResult(comptime T: type) type {
 
         pub fn init(conn: *Conn, allocator: std.mem.Allocator) !QueryResult(T) {
             const packet = try conn.newPacketStream(allocator);
-            var packet_reader = PacketReader.initFromPacket(&packet);
-            const first_byte = packet_reader.readByte();
             return .{
                 .packet = packet,
-                .value = switch (first_byte) {
+                .value = switch (packet.payload[0]) {
                     constants.OK => .{ .ok = OkPacket.init(&packet, conn.client_capabilities) },
-                    constants.ERR => .{ .err = ErrorPacket.init(&packet_reader) },
+                    constants.ERR => .{ .err = ErrorPacket.init(&packet) },
                     constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
                     else => .{ .rows = blk: {
-                        const column_count = packet_reader.readLengthEncodedInteger();
-                        std.debug.assert(packet_reader.finished());
+                        const reader = packet.reader();
+                        const column_count = reader.readLengthEncodedInteger();
+                        std.debug.assert(reader.finished());
                         break :blk try ResultSet(T).init(allocator, conn, column_count);
                     } },
                 },
@@ -296,7 +295,7 @@ pub const PreparedStatement = struct {
 
 // dest is a pointer to a struct
 fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const ColumnDefinition41) !void {
-    var reader = PacketReader.initFromPayload(raw);
+    var reader = PayloadReader.init(raw);
     const first = reader.readByte();
     std.debug.assert(first == constants.BINARY_PROTOCOL_RESULTSET_ROW_HEADER);
 
@@ -336,7 +335,7 @@ fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const ColumnDefi
     std.debug.assert(reader.finished());
 }
 
-fn decodeDateTime(reader: *PacketReader) DateTime {
+fn decodeDateTime(reader: *PayloadReader) DateTime {
     const length = reader.readByte();
     switch (length) {
         11 => return .{
@@ -366,7 +365,7 @@ fn decodeDateTime(reader: *PacketReader) DateTime {
     }
 }
 
-fn decodeDuration(reader: *PacketReader) Duration {
+fn decodeDuration(reader: *PayloadReader) Duration {
     const length = reader.readByte();
     switch (length) {
         12 => return .{
@@ -392,7 +391,7 @@ fn decodeDuration(reader: *PacketReader) Duration {
 }
 
 pub fn scanTextResultRow(dest: []?[]const u8, raw: []const u8) !void {
-    var packet_reader = PacketReader.initFromPayload(raw);
+    var packet_reader = PayloadReader.init(raw);
     for (dest) |*d| {
         d.* = blk: {
             const first_byte = blk2: {
@@ -415,7 +414,7 @@ inline fn logConversionError(comptime FieldType: type, field_name: []const u8, c
     );
 }
 
-inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, reader: *PacketReader) !FieldType {
+inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, reader: *PayloadReader) !FieldType {
     const field_info = @typeInfo(FieldType);
     const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
 
@@ -670,15 +669,15 @@ pub const TableTexts = struct {
     }
 
     pub fn debugPrint(t: *const TableTexts) void {
-        const print = std.debug.print;
+        const w = std.io.getStdOut().writer();
         for (t.rows, 0..) |row, i| {
-            print("row: {d} -> ", .{i});
-            print("|", .{});
+            try w.print("row: {d} -> ", .{i});
+            try w.print("|", .{});
             for (row) |elem| {
-                print("{?s}", .{elem});
-                print("|", .{});
+                try w.print("{?s}", .{elem});
+                try w.print("|", .{});
             }
-            print("\n", .{});
+            try w.print("\n", .{});
         }
     }
 };
@@ -697,11 +696,11 @@ pub fn TableStructs(comptime Struct: type) type {
         }
 
         pub fn debugPrint(t: *const TableStructs(Struct)) void {
-            const print = std.debug.print;
+            const w = std.io.getStdOut().writer();
             for (t.rows, 0..) |row, i| {
-                print("row: {d} -> ", .{i});
-                print("{any}", .{row});
-                print("\n", .{});
+                try w.print("row: {d} -> ", .{i});
+                try w.print("{any}", .{row});
+                try w.print("\n", .{});
             }
         }
     };

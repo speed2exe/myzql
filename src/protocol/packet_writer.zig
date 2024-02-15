@@ -10,13 +10,13 @@ pub const PacketWriter = struct {
     pub fn init(s: std.net.Stream, allocator: std.mem.Allocator) !PacketWriter {
         return .{
             .stream = s,
-            .buf = try allocator.alloc(u8, 1),
+            .buf = &.{},
             .pos = 0,
             .allocator = allocator,
         };
     }
 
-    pub fn deinit(w: *PacketWriter) void {
+    pub fn deinit(w: *const PacketWriter) void {
         w.allocator.free(w.buf);
     }
 
@@ -140,13 +140,7 @@ pub const PacketWriter = struct {
         }
 
         const target_len = w.buf.len + req_n;
-        const new_len = blk: {
-            var current_len = w.buf.len;
-            while (current_len < target_len) {
-                current_len *= 2;
-            }
-            break :blk current_len;
-        };
+        const new_len = utils.nextPowerOf2(@truncate(target_len));
 
         // try resize
         if (w.allocator.resize(w.buf, new_len)) {

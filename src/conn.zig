@@ -42,36 +42,34 @@ pub const Conn = struct {
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn init(allocator: std.mem.Allocator, config: *const Config) !Conn {
-        const stream = try std.net.tcpConnectToAddress(config.address);
-        errdefer stream.close();
-        var packet_reader = try PacketReader.init(stream, allocator);
-        errdefer packet_reader.deinit();
-        var packer_writer = try PacketWriter.init(stream, allocator);
-        errdefer packer_writer.deinit();
-
-        var conn: Conn = .{
-            .stream = stream,
-            .reader = packet_reader,
-            .writer = packer_writer,
-            .capabilities = undefined, // not known until we get the first packet
-            .sequence_id = undefined, // not known until we get the first packet
+        var conn: Conn = blk: {
+            const stream = try std.net.tcpConnectToAddress(config.address);
+            break :blk .{
+                .stream = stream,
+                .reader = try PacketReader.init(stream, allocator),
+                .writer = try PacketWriter.init(stream, allocator),
+                .capabilities = undefined, // not known until we get the first packet
+                .sequence_id = undefined, // not known until we get the first packet
+            };
         };
+        errdefer conn.deinit();
 
-        const packet = try conn.readPacket();
+        const auth_plugin, const auth_data = blk: {
+            const packet = try conn.readPacket();
+            std.debug.print("packet: {s}\n", .{packet.payload});
+            const handshake_v10 = switch (packet.payload[0]) {
+                constants.HANDSHAKE_V10 => HandshakeV10.init(&packet),
+                else => return packet.asError(),
+            };
+            conn.capabilities = handshake_v10.capability_flags() & config.capability_flags();
 
-        const handshake_v10 = switch (packet.payload[0]) {
-            constants.HANDSHAKE_V10 => HandshakeV10.init(&packet),
-            else => return packet.asError(),
+            if (conn.capabilities & constants.CLIENT_PROTOCOL_41 == 0) {
+                std.log.err("protocol older than 4.1 is not supported\n", .{});
+                return error.UnsupportedProtocol;
+            }
+
+            break :blk .{ handshake_v10.get_auth_plugin(), handshake_v10.get_auth_data() };
         };
-        conn.capabilities = handshake_v10.capability_flags() & config.capability_flags();
-
-        if (conn.capabilities & constants.CLIENT_PROTOCOL_41 == 0) {
-            std.log.err("protocol older than 4.1 is not supported\n", .{});
-            return error.UnsupportedProtocol;
-        }
-
-        const auth_plugin = handshake_v10.get_auth_plugin();
-        const auth_data = handshake_v10.get_auth_data();
 
         // TODO: TLS handshake if enabled
 
@@ -90,7 +88,7 @@ pub const Conn = struct {
         return conn;
     }
 
-    pub fn deinit(c: *const Conn) !void {
+    pub fn deinit(c: *const Conn) void {
         c.stream.close();
         c.reader.deinit();
         c.writer.deinit();
