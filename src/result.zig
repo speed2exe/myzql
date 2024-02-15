@@ -9,7 +9,7 @@ const ErrorPacket = protocol.generic_response.ErrorPacket;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 const Conn = @import("./conn.zig").Conn;
 const EofPacket = protocol.generic_response.EofPacket;
-const PacketReader = @import("./protocol/packet_reader.zig").PacketReader;
+const PacketReader = @import("./protocol/packet_reader.zig").PayloadReader;
 const DateTime = @import("./temporal.zig").DateTime;
 const Duration = @import("./temporal.zig").Duration;
 const EnumFieldType = constants.EnumFieldType;
@@ -25,15 +25,16 @@ pub fn QueryResult(comptime T: type) type {
         value: Value,
 
         pub fn init(conn: *Conn, allocator: std.mem.Allocator) !QueryResult(T) {
-            const response_packet = try conn.readPacket(allocator);
+            const packet = try conn.newPacketStream(allocator);
+            var packet_reader = PacketReader.initFromPacket(&packet);
+            const first_byte = packet_reader.readByte();
             return .{
-                .packet = response_packet,
-                .value = switch (response_packet.payload[0]) {
-                    constants.OK => .{ .ok = OkPacket.initFromPacket(&response_packet, conn.client_capabilities) },
-                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet) },
+                .packet = packet,
+                .value = switch (first_byte) {
+                    constants.OK => .{ .ok = OkPacket.init(&packet, conn.client_capabilities) },
+                    constants.ERR => .{ .err = ErrorPacket.init(&packet_reader) },
                     constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
                     else => .{ .rows = blk: {
-                        var packet_reader = PacketReader.initFromPacket(&response_packet);
                         const column_count = packet_reader.readLengthEncodedInteger();
                         std.debug.assert(packet_reader.finished());
                         break :blk try ResultSet(T).init(allocator, conn, column_count);
@@ -88,7 +89,7 @@ pub fn ResultSet(comptime T: type) type {
             errdefer allocator.free(col_defs);
 
             for (col_packets, col_defs) |*pac, *def| {
-                pac.* = try conn.readPacket(allocator);
+                pac.* = try conn.newPacketStream(allocator);
                 def.* = ColumnDefinition41.initFromPacket(pac);
             }
 
@@ -168,12 +169,12 @@ pub fn ResultRow(comptime T: type) type {
         value: Value,
 
         fn init(conn: *Conn, allocator: std.mem.Allocator, col_defs: []const ColumnDefinition41) !ResultRow(T) {
-            const packet = try conn.readPacket(allocator);
+            const packet = try conn.newPacketStream(allocator);
             return .{
                 .packet = packet,
                 .value = switch (packet.payload[0]) {
-                    constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &packet) },
-                    constants.EOF => .{ .ok = OkPacket.initFromPacket(&packet, conn.client_capabilities) },
+                    constants.ERR => .{ .err = ErrorPacket.init(false, &packet) },
+                    constants.EOF => .{ .ok = OkPacket.init(&packet, conn.client_capabilities) },
                     else => .{ .data = .{ .raw = packet.payload, .col_defs = col_defs } },
                 },
             };
@@ -214,11 +215,11 @@ pub const PrepareResult = struct {
     value: Value,
 
     pub fn init(conn: *Conn, allocator: std.mem.Allocator) !PrepareResult {
-        const response_packet = try conn.readPacket(allocator);
+        const response_packet = try conn.newPacketStream(allocator);
         return .{
             .packet = response_packet,
             .value = switch (response_packet.payload[0]) {
-                constants.ERR => .{ .err = ErrorPacket.initFromPacket(false, &response_packet) },
+                constants.ERR => .{ .err = ErrorPacket.init(false, &response_packet) },
                 constants.OK => .{ .ok = try PreparedStatement.initFromPacket(&response_packet, conn, allocator) },
                 else => return response_packet.asError(),
             },
@@ -271,7 +272,7 @@ pub const PreparedStatement = struct {
         errdefer allocator.free(col_defs);
 
         for (packets, col_defs) |*packet, *col_def| {
-            packet.* = try conn.readPacket(allocator);
+            packet.* = try conn.newPacketStream(allocator);
             col_def.* = ColumnDefinition41.initFromPacket(packet);
         }
 

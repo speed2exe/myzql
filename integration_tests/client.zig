@@ -1,6 +1,6 @@
 const std = @import("std");
 const myzql = @import("myzql");
-const Client = myzql.client.Client;
+const Conn = myzql.conn.Conn;
 const test_config = @import("./config.zig").test_config;
 const allocator = std.testing.allocator;
 const ErrorPacket = myzql.protocol.generic_response.ErrorPacket;
@@ -10,21 +10,19 @@ const DateTime = myzql.temporal.DateTime;
 const Duration = myzql.temporal.Duration;
 
 // convenient function for testing
-fn queryExpectOk(c: *Client, query: []const u8) !void {
+fn queryExpectOk(c: *Conn, query: []const u8) !void {
     const query_res = try c.query(allocator, query);
     defer query_res.deinit(allocator);
     _ = try query_res.expect(.ok);
 }
 
 test "ping" {
-    var c = Client.init(test_config);
-    defer c.deinit();
-
-    try c.ping(allocator);
+    var c = try Conn.init(std.testing.allocator, &test_config);
+    try c.ping();
 }
 
 test "query database create and drop" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
     {
         const qr = try c.query(allocator, "CREATE DATABASE testdb");
@@ -39,7 +37,7 @@ test "query database create and drop" {
 }
 
 test "query syntax error" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
     const qr = try c.query(allocator, "garbage query");
@@ -48,7 +46,7 @@ test "query syntax error" {
 }
 
 test "query text protocol" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
     {
@@ -128,7 +126,7 @@ test "query text protocol" {
 }
 
 test "query text table" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
     {
@@ -154,7 +152,7 @@ test "query text table" {
 }
 
 test "prepare check" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
     { // prepare no execute
         const prep_res = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
@@ -177,7 +175,7 @@ test "prepare check" {
 }
 
 test "prepare execute - 1" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
     {
         const prep_res = try c.prepare(allocator, "CREATE DATABASE testdb2");
@@ -198,7 +196,7 @@ test "prepare execute - 1" {
 }
 
 test "prepare execute - 2" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
     const prep_res_1 = try c.prepare(allocator, "CREATE DATABASE testdb3");
@@ -222,7 +220,7 @@ test "prepare execute - 2" {
 }
 
 test "prepare execute with result" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
     {
@@ -293,7 +291,7 @@ test "prepare execute with result" {
 }
 
 test "binary data types - int" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
     try queryExpectOk(&c, "CREATE DATABASE test");
@@ -440,7 +438,7 @@ test "binary data types - int" {
 }
 
 test "binary data types - float" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
     try queryExpectOk(&c, "CREATE DATABASE test");
@@ -523,7 +521,7 @@ test "binary data types - float" {
 }
 
 test "binary data types - string" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
     try queryExpectOk(&c, "CREATE DATABASE test");
@@ -619,7 +617,7 @@ test "binary data types - string" {
 }
 
 test "binary data types - temporal" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
     try queryExpectOk(&c, "CREATE DATABASE test");
@@ -729,7 +727,7 @@ test "binary data types - temporal" {
 }
 
 test "select concat with params" {
-    var c = Client.init(test_config);
+    var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
     { // Select (Binary Protocol)

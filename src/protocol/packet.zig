@@ -1,49 +1,112 @@
 const std = @import("std");
 const constants = @import("../constants.zig");
-const buffered_stream = @import("../stream_buffered.zig");
 const ErrorPacket = @import("./generic_response.zig").ErrorPacket;
-const Config = @import("../config.zig").Config;
+// const PacketReader = @import("./packet_reader.zig").PacketReader;
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html#sect_protocol_basic_packets_packet
 pub const Packet = struct {
-    payload_length: u24,
     sequence_id: u8,
     payload: []const u8,
 
-    pub fn initFromReader(allocator: std.mem.Allocator, sbr: *buffered_stream.Reader) !Packet {
-        var packet: Packet = undefined;
-
-        packet.payload_length = try readUInt24(sbr);
-        packet.sequence_id = try readUInt8(sbr);
-        packet.payload = blk: {
-            const payload = try allocator.alloc(u8, @as(usize, packet.payload_length));
-            try sbr.read(payload);
-            break :blk payload;
-        };
-        return packet;
+    pub fn init(sequence_id: u8, payload: []const u8) Packet {
+        return .{ .sequence_id = sequence_id, .payload = payload };
     }
 
     pub fn asError(packet: *const Packet) error{ UnexpectedPacket, ErrorPacket } {
         if (packet.payload[0] == constants.ERR) {
-            return ErrorPacket.initFromPacket(false, packet).asError();
+            return ErrorPacket.init(packet).asError();
         }
         std.log.warn("unexpected packet: {any}", .{packet});
         return error.UnexpectedPacket;
     }
 
-    pub fn deinit(packet: *const Packet, allocator: std.mem.Allocator) void {
-        allocator.free(packet.payload);
+    pub fn reader(packet: *const Packet) PayloadReader {
+        return PayloadReader.init(packet.payload);
     }
 };
 
-fn readUInt24(reader: *buffered_stream.Reader) !u24 {
-    var bytes: [3]u8 = undefined;
-    try reader.read(&bytes);
-    return std.mem.readInt(u24, &bytes, .little);
-}
+pub const PayloadReader = struct {
+    payload: []const u8,
+    pos: usize,
 
-fn readUInt8(reader: *buffered_stream.Reader) !u8 {
-    var bytes: [1]u8 = undefined;
-    try reader.read(&bytes);
-    return bytes[0];
-}
+    fn init(payload: []const u8) PayloadReader {
+        return .{ .payload = payload, .pos = 0 };
+    }
+
+    pub fn peek(p: *const PayloadReader) ?u8 {
+        std.debug.assert(p.pos <= p.payload.len);
+        if (p.pos == p.payload.len) {
+            return null;
+        }
+        return p.payload[p.pos];
+    }
+
+    pub fn readInt(p: *PayloadReader, Int: type) Int {
+        const bytes = p.readRefComptime(@divExact(@typeInfo(Int).Int.bits, 8));
+        return std.mem.readInt(Int, bytes, .little);
+    }
+
+    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_eof
+    pub fn readRefRemaining(p: *PayloadReader) []const u8 {
+        return p.readRefRuntime(p.payload.len - p.pos);
+    }
+
+    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_integers.html#sect_protocol_basic_dt_int_le
+    // max possible value is 2^64 - 1, so return type is u64
+    pub fn readLengthEncodedInteger(p: *PayloadReader) u64 {
+        const first_byte = p.readInt(u8);
+        switch (first_byte) {
+            0xFC => return p.readInt(u16),
+            0xFD => return p.readInt(u24),
+            0xFE => return p.readInt(u64),
+            else => return first_byte,
+        }
+    }
+
+    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_le
+    pub fn readLengthEncodedString(p: *PayloadReader) []const u8 {
+        const length = p.readLengthEncodedInteger();
+        return p.readRefRuntime(@as(usize, length));
+    }
+
+    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_null
+    pub fn readNullTerminatedString(p: *PayloadReader) [:0]const u8 {
+        const i = std.mem.indexOfScalarPos(u8, p.payload, p.pos, 0) orelse {
+            std.log.warn(
+                "null terminated string not found\n, pos: {any}, payload: {any}",
+                .{ p.pos, p.payload },
+            );
+            unreachable;
+        };
+
+        const bytes = p.readRefRuntime(i);
+        return @ptrCast(bytes);
+    }
+
+    pub fn skipComptime(p: *PayloadReader, comptime n: usize) void {
+        std.debug.assert(p.pos + n <= p.payload.len);
+        p.pos += n;
+    }
+
+    pub fn finished(p: *PayloadReader) bool {
+        return p.payload.len == p.pos;
+    }
+
+    pub fn remained(p: *PayloadReader) usize {
+        return p.payload.len - p.pos;
+    }
+
+    pub fn readRefComptime(p: *PayloadReader, comptime n: usize) *const [n]u8 {
+        std.debug.assert(p.pos + n <= p.payload.len);
+        const bytes = p.payload[p.pos..][0..n];
+        p.pos += n;
+        return bytes;
+    }
+
+    pub fn readRefRuntime(p: *PayloadReader, n: usize) []const u8 {
+        std.debug.assert(p.pos + n <= p.payload.len);
+        const bytes = p.payload[p.pos .. p.pos + n];
+        p.pos += n;
+        return bytes;
+    }
+};

@@ -1,7 +1,7 @@
 const std = @import("std");
 const constants = @import("../constants.zig");
 const Packet = @import("./packet.zig").Packet;
-const PacketReader = @import("./packet_reader.zig").PacketReader;
+const PacketReader = @import("./packet_reader.zig").PayloadReader;
 
 pub const ColumnDefinition41 = struct {
     catalog: []const u8,

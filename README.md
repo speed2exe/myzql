@@ -44,11 +44,11 @@
 ### Connection
 ```zig
 const myzql = @import("myzql");
-const Client = myzql.client.Client;
+const Conn = myzql.conn.Conn;
 
 pub fn main() !void {
     // Setting up client
-    var client = Client.init(.{
+    var client = Conn.init(.{
         .username = "some-user",   // default: "root"
         .password = "password123", // default: ""
         .database = "customers",   // default: ""
@@ -65,7 +65,7 @@ pub fn main() !void {
 ```
 Note:
 - Allocation and network are lazy by default and will only be invoked when needed (e.g. query or ping).
-- Allocator is not stored in `Client`, and will NOT do implicit allocation for user. Every function or method
+- Allocator is not stored in `Conn`, and will NOT do implicit allocation for user. Every function or method
 that requires allocation will require an allocator to be passed in as parameter.
 This is done so that allocation strategy can be optimized.
 
@@ -76,7 +76,7 @@ const OkPacket = protocol.generic_response.OkPacket;
 
 pub fn main() !void {
     // ...
-    // You can do a text query (text protocol) by using `query` method on `Client`
+    // You can do a text query (text protocol) by using `query` method on `Conn`
     // Observe that an allocator is required. Allocation and network will be invoked.
     // If you are able to have an upper bound of this operation, you can provide a more optimized allocator.
     // You may also do insertion query here, but it will not be optimal and will be more

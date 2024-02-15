@@ -10,23 +10,24 @@ pub const ErrorPacket = struct {
     sql_state: ?*const [5]u8,
     error_message: []const u8,
 
-    pub fn initFromPacket(comptime is_first_packet: bool, packet: *const Packet) ErrorPacket {
-        var error_packet: ErrorPacket = undefined;
+    pub fn initFirst(packet: *const Packet) ErrorPacket {
+        var reader = packet.reader();
+        return .{
+            .error_code = reader.readUInt16(),
+            .sql_state_marker = null,
+            .sql_state = null,
+            .error_message = reader.readRestOfPacketString(),
+        };
+    }
 
-        var reader = PacketReader.initFromPacket(packet);
-        const header = reader.readByte();
-        std.debug.assert(header == constants.ERR);
-
-        error_packet.error_code = reader.readUInt16();
-        if (!is_first_packet) {
-            error_packet.sql_state_marker = reader.readByte();
-            error_packet.sql_state = reader.readFixed(5);
-        } else {
-            error_packet.sql_state_marker = null;
-            error_packet.sql_state = null;
-        }
-        error_packet.error_message = reader.readRestOfPacketString();
-        return error_packet;
+    pub fn init(packet: *const Packet) ErrorPacket {
+        var reader = packet.reader();
+        return .{
+            .error_code = reader.readInt(u16),
+            .sql_state_marker = reader.readInt(u8),
+            .sql_state = reader.readRefComptime(5),
+            .error_message = reader.readRefRemaining(),
+        };
     }
 
     pub fn asError(err: *const ErrorPacket) error{ErrorPacket} {
@@ -48,21 +49,21 @@ pub const OkPacket = struct {
     info: ?[]const u8,
     session_state_info: ?[]const u8,
 
-    pub fn initFromPacket(packet: *const Packet, capabilities: u32) OkPacket {
+    pub fn init(packet: *const Packet, capabilities: u32) OkPacket {
         var ok_packet: OkPacket = undefined;
 
-        var reader = PacketReader.initFromPacket(packet);
-        const header = reader.readByte();
+        var reader = packet.reader();
+        const header = reader.readInt(u8);
         std.debug.assert(header == constants.OK or header == constants.EOF);
 
         ok_packet.affected_rows = reader.readLengthEncodedInteger();
         ok_packet.last_insert_id = reader.readLengthEncodedInteger();
 
         if (capabilities & constants.CLIENT_PROTOCOL_41 > 0) {
-            ok_packet.status_flags = reader.readUInt16();
-            ok_packet.warnings = reader.readUInt16();
+            ok_packet.status_flags = reader.readInt(u16);
+            ok_packet.warnings = reader.readInt(u16);
         } else if (capabilities & constants.CLIENT_TRANSACTIONS > 0) {
-            ok_packet.status_flags = reader.readUInt16();
+            ok_packet.status_flags = reader.readInt(u16);
             ok_packet.warnings = null;
         } else {
             ok_packet.status_flags = null;
@@ -78,7 +79,7 @@ pub const OkPacket = struct {
                 }
             }
         } else {
-            ok_packet.info = reader.readRestOfPacketString();
+            ok_packet.info = reader.readRefRemaining();
         }
 
         std.debug.assert(reader.finished());
@@ -91,10 +92,10 @@ pub const EofPacket = struct {
     status_flags: ?u16,
     warnings: ?u16,
 
-    pub fn initFromPacket(packet: *const Packet, capabilities: u32) EofPacket {
+    pub fn init(packet: *const Packet, capabilities: u32) EofPacket {
         var eof_packet: EofPacket = undefined;
 
-        std.debug.assert(packet.payload.len < 9);
+        std.debug.assert(packet.payload.payload_length < 9);
         var reader = PacketReader.initFromPacket(packet);
         const header = reader.readByte();
         std.debug.assert(header == constants.EOF);

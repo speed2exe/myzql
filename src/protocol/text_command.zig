@@ -1,6 +1,5 @@
 const std = @import("std");
-const stream_buffered = @import("../stream_buffered.zig");
-const packet_writer = @import("./packet_writer.zig");
+const PacketWriter = @import("./packet_writer.zig").PacketWriter;
 const constants = @import("../constants.zig");
 
 pub const QueryParam = struct {
@@ -17,28 +16,28 @@ pub const QueryRequest = struct {
     capabilities: u32 = 0,
     params: []const ?QueryParam = &.{},
 
-    pub fn write(q: *const QueryRequest, writer: *stream_buffered.SmallPacketWriter) !void {
+    pub fn write(q: *const QueryRequest, writer: *PacketWriter) !void {
         // Packet Header
-        try packet_writer.writeUInt8(writer, constants.COM_QUERY);
+        try writer.writeUInt8(constants.COM_QUERY);
 
         // Query Parameters
         if (q.capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) {
-            try packet_writer.writeLengthEncodedInteger(writer, q.params.len);
-            try packet_writer.writeLengthEncodedInteger(writer, 1); // Number of parameter sets. Currently always 1
+            try writer.writeLengthEncodedInteger(q.params.len);
+            try writer.writeLengthEncodedInteger(1); // Number of parameter sets. Currently always 1
             if (q.params.len > 0) {
                 // NULL bitmap, length= (num_params + 7) / 8
-                try writeNullBitmap(q.params, writer);
+                try writeNullBitmap(q.params);
 
                 // new_params_bind_flag
                 // Always 1. Malformed packet error if not 1
-                try packet_writer.writeUInt8(writer, 1);
+                try writer.writeUInt8(1);
 
                 // write type_and_flag, name and values
                 // for each parameter
                 for (q.params) |p_opt| {
                     const p = p_opt orelse continue; // TODO: may not be correct
                     try writer.write(&p.type_and_flag);
-                    try packet_writer.writeLengthEncodedString(writer, p.name);
+                    try writer.writeLengthEncodedString(p.name);
                     try writer.write(p.value);
                 }
             }
@@ -49,11 +48,11 @@ pub const QueryRequest = struct {
     }
 };
 
-pub fn writeNullBitmap(params: []const ?QueryParam, writer: anytype) !void {
+pub fn writeNullBitmap(params: []const ?QueryParam, writer: PacketWriter) !void {
     const byte_count = (params.len + 7) / 8;
     for (0..byte_count) |i| {
         const byte = nullBits(params[i * 8 ..]);
-        try packet_writer.writeUInt8(writer, byte);
+        try writer.writeInt(u8, byte);
     }
 }
 
