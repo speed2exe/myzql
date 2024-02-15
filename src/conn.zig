@@ -56,7 +56,6 @@ pub const Conn = struct {
 
         const auth_plugin, const auth_data = blk: {
             const packet = try conn.readPacket();
-            std.debug.print("packet: {s}\n", .{packet.payload});
             const handshake_v10 = switch (packet.payload[0]) {
                 constants.HANDSHAKE_V10 => HandshakeV10.init(&packet),
                 else => return packet.asError(),
@@ -138,6 +137,7 @@ pub const Conn = struct {
         const auth_resp = auth.scramblePassword(auth_data, config.password);
         const response = HandshakeResponse41.init(.mysql_native_password, config, &auth_resp);
         try conn.writePacket(response);
+        try conn.writer.flush();
 
         const packet = try conn.readPacket();
         return switch (packet.payload[0]) {
@@ -212,7 +212,7 @@ pub const Conn = struct {
 
     inline fn readPacket(conn: *Conn) !Packet {
         const packet = try conn.reader.readPacket();
-        conn.sequence_id = packet.sequence_id;
+        conn.sequence_id = packet.sequence_id + 1;
         return packet;
     }
 

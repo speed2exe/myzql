@@ -49,10 +49,11 @@ pub const PacketReader = struct {
             try p.readAtLeast(payload_length - n_valid_data);
         }
 
+        const payload = p.buf[p.pos .. p.pos + payload_length];
         p.pos += payload_length;
         return .{
             .sequence_id = sequence_id,
-            .payload = p.buf[4..p.pos],
+            .payload = payload,
         };
     }
 

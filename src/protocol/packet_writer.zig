@@ -3,7 +3,7 @@ const utils = @import("./utils.zig");
 
 pub const PacketWriter = struct {
     buf: []u8,
-    pos: usize,
+    pos: usize, // buf[0..pos]: buffer is written but not flushed
     stream: std.net.Stream,
     allocator: std.mem.Allocator,
 
@@ -55,8 +55,8 @@ pub const PacketWriter = struct {
     }
 
     // flush the buffer to the stream
-    inline fn flush(p: *PacketWriter) !void {
-        try p.stream.writeAll(p.buf[0..p.len]);
+    pub inline fn flush(p: *PacketWriter) !void {
+        try p.stream.writeAll(p.buf[0..p.pos]);
         p.pos = 0;
     }
 
@@ -94,6 +94,7 @@ pub const PacketWriter = struct {
         const written = p.buf.len - start;
         const written_buf = p.buf[start..][0..3];
         std.mem.writeInt(u24, written_buf, @intCast(written), .little);
+        std.debug.print("sequence_id: {d}\n", .{sequence_id});
         p.buf[start + 3] = sequence_id;
     }
 
@@ -149,7 +150,7 @@ pub const PacketWriter = struct {
 
         // if resize failed, try to allocate a new buffer
         const new_buf = try w.allocator.alloc(u8, new_len);
-        @memcpy(new_buf, w.buf);
+        @memcpy(new_buf[0..w.buf.len], w.buf);
         w.allocator.free(w.buf);
         w.buf = new_buf;
     }

@@ -79,7 +79,8 @@ pub const PayloadReader = struct {
             unreachable;
         };
 
-        const bytes = p.readRefRuntime(i);
+        const bytes = p.payload[p.pos..i];
+        p.pos = i + 1;
         return @ptrCast(bytes);
     }
 
