@@ -6,7 +6,8 @@ pub const PacketReader = struct {
     stream: std.net.Stream,
     allocator: std.mem.Allocator,
 
-    // valid data: buf[pos..len]
+    // valid buffer read from network but yet to consume to create packet:
+    // buf[pos..len]
     buf: []u8,
     pos: usize,
     len: usize,
@@ -34,30 +35,34 @@ pub const PacketReader = struct {
         if (p.pos == p.len) {
             p.pos = 0;
             p.len = 0;
+            try p.readToBufferAtLeast(4);
+        } else if (p.len - p.pos < 4) {
+            try p.readToBufferAtLeast(4);
         }
 
-        if (p.len < 4) {
-            try p.readAtLeast(4);
-        }
-
-        p.pos += 4;
-        const payload_length = std.mem.readInt(u24, p.buf[0..3], .little);
+        // Packet header
+        const payload_length = std.mem.readInt(u24, p.buf[p.pos..][0..3], .little);
         const sequence_id = p.buf[3];
+        p.pos += 4;
 
-        const n_valid_data = p.len - p.pos;
-        if (n_valid_data < payload_length) {
-            try p.readAtLeast(payload_length - n_valid_data);
+        { // read more bytes from network if required
+            const n_valid_unread = p.len - p.pos;
+            if (n_valid_unread < payload_length) {
+                try p.readToBufferAtLeast(payload_length - n_valid_unread);
+            }
         }
 
+        // Packet payload
         const payload = p.buf[p.pos .. p.pos + payload_length];
         p.pos += payload_length;
+
         return .{
             .sequence_id = sequence_id,
             .payload = payload,
         };
     }
 
-    fn readAtLeast(p: *PacketReader, at_least: usize) !void {
+    fn readToBufferAtLeast(p: *PacketReader, at_least: usize) !void {
         try p.expandBufIfNeeded(at_least);
         const n = try p.stream.readAtLeast(p.buf[p.len..], at_least);
         if (n == 0) {

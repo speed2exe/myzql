@@ -37,7 +37,8 @@ pub const Conn = struct {
     stream: std.net.Stream,
     reader: PacketReader,
     writer: PacketWriter,
-    capabilities: u32,
+    server_capabilities: u32,
+    client_capabilities: u32,
     sequence_id: u8,
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
@@ -48,7 +49,8 @@ pub const Conn = struct {
                 .stream = stream,
                 .reader = try PacketReader.init(stream, allocator),
                 .writer = try PacketWriter.init(stream, allocator),
-                .capabilities = undefined, // not known until we get the first packet
+                .client_capabilities = config.capability_flags(),
+                .server_capabilities = undefined, // not known until we get the first packet
                 .sequence_id = undefined, // not known until we get the first packet
             };
         };
@@ -60,9 +62,9 @@ pub const Conn = struct {
                 constants.HANDSHAKE_V10 => HandshakeV10.init(&packet),
                 else => return packet.asError(),
             };
-            conn.capabilities = handshake_v10.capability_flags() & config.capability_flags();
+            conn.server_capabilities = handshake_v10.capability_flags() & config.capability_flags();
 
-            if (conn.capabilities & constants.CLIENT_PROTOCOL_41 == 0) {
+            if (conn.server_capabilities & constants.CLIENT_PROTOCOL_41 == 0) {
                 std.log.err("protocol older than 4.1 is not supported\n", .{});
                 return error.UnsupportedProtocol;
             }
@@ -94,64 +96,67 @@ pub const Conn = struct {
     }
 
     pub fn ping(c: *Conn) !void {
+        c.sequence_id = 0;
         try c.writeBytesAsPacket(&[_]u8{constants.COM_PING});
+        try c.writer.flush();
         const packet = try c.readPacket();
+
         switch (packet.payload[0]) {
-            constants.OK => _ = OkPacket.init(&packet, c.capabilities),
+            constants.OK => _ = OkPacket.init(&packet, c.client_capabilities),
             else => return packet.asError(),
         }
     }
 
     // TODO: add options
     /// caller must consume the result by switching on the result's value
-    pub fn query(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult(TextResultData) {
-        std.debug.assert(conn.state == .connected);
+    pub fn query(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult(TextResultData) {
+        std.debug.assert(c.state == .connected);
         const query_request: QueryRequest = .{ .query = query_string };
-        conn.writer.reset();
-        conn.writePacket(query_request);
-        try conn.sendPacketUsingSmallPacketWriter(query_request);
-        return QueryResult(TextResultData).init(conn, allocator);
+        c.writer.reset();
+        c.writePacket(query_request);
+        try c.sendPacketUsingSmallPacketWriter(query_request);
+        return QueryResult(TextResultData).init(c, allocator);
     }
 
     // TODO: add options
-    pub fn prepare(conn: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
-        std.debug.assert(conn.state == .connected);
-        conn.sequence_id = 0;
+    pub fn prepare(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
+        std.debug.assert(c.state == .connected);
+        c.sequence_id = 0;
         const prepare_request: PrepareRequest = .{ .query = query_string };
-        try conn.sendPacketUsingSmallPacketWriter(prepare_request);
-        return PrepareResult.init(conn, allocator);
+        try c.sendPacketUsingSmallPacketWriter(prepare_request);
+        return PrepareResult.init(c, allocator);
     }
 
-    pub fn execute(conn: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultData) {
-        std.debug.assert(conn.state == .connected);
-        conn.sequence_id = 0;
+    pub fn execute(c: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultData) {
+        std.debug.assert(c.state == .connected);
+        c.sequence_id = 0;
         const execute_request: ExecuteRequest = .{
-            .capabilities = conn.capabilities,
+            .capabilities = c.client_capabilities,
             .prep_stmt = prep_stmt,
         };
-        try conn.sendPacketUsingSmallPacketWriterWithParams(execute_request, params);
-        return QueryResult(BinaryResultData).init(conn, allocator);
+        try c.sendPacketUsingSmallPacketWriterWithParams(execute_request, params);
+        return QueryResult(BinaryResultData).init(c, allocator);
     }
 
-    fn auth_mysql_native_password(conn: *Conn, auth_data: *const [20]u8, config: *const Config) !void {
+    fn auth_mysql_native_password(c: *Conn, auth_data: *const [20]u8, config: *const Config) !void {
         const auth_resp = auth.scramblePassword(auth_data, config.password);
         const response = HandshakeResponse41.init(.mysql_native_password, config, &auth_resp);
-        try conn.writePacket(response);
-        try conn.writer.flush();
+        try c.writePacket(response);
+        try c.writer.flush();
 
-        const packet = try conn.readPacket();
+        const packet = try c.readPacket();
         return switch (packet.payload[0]) {
             constants.OK => {},
             else => packet.asError(),
         };
     }
 
-    fn auth_sha256_password(conn: *Conn, allocator: std.mem.Allocator, auth_data: *const [20]u8, config: *const Config) !void {
+    fn auth_sha256_password(c: *Conn, allocator: std.mem.Allocator, auth_data: *const [20]u8, config: *const Config) !void {
         // TODO: if there is already a pub key, skip requesting it
         const response = HandshakeResponse41.init(.sha256_password, config, &[_]u8{auth.sha256_password_public_key_request});
-        try conn.writePacket(response);
+        try c.writePacket(response);
 
-        const pk_packet = try conn.readPacket();
+        const pk_packet = try c.readPacket();
 
         // Decode public key
         const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
@@ -160,22 +165,23 @@ pub const Conn = struct {
         const enc_pw = try auth.encryptPassword(allocator, config.password, auth_data, &decoded_pk.value);
         defer allocator.free(enc_pw);
 
-        try conn.writeBytesAsPacket(enc_pw);
+        try c.writeBytesAsPacket(enc_pw);
 
-        const resp_packet = try conn.readPacket();
+        const resp_packet = try c.readPacket();
         return switch (resp_packet.payload[0]) {
             constants.OK => {},
             else => resp_packet.asError(),
         };
     }
 
-    fn auth_caching_sha2_password(conn: *Conn, allocator: std.mem.Allocator, auth_data: *const [20]u8, config: *const Config) !void {
+    fn auth_caching_sha2_password(c: *Conn, allocator: std.mem.Allocator, auth_data: *const [20]u8, config: *const Config) !void {
         const auth_resp = auth.scrambleSHA256Password(auth_data, config.password);
         const response = HandshakeResponse41.init(.caching_sha2_password, config, &auth_resp);
-        try conn.writePacket(&response);
+        try c.writePacket(&response);
+        try c.writer.flush();
 
         while (true) {
-            const packet = try conn.readPacket();
+            const packet = try c.readPacket();
             switch (packet.payload[0]) {
                 constants.OK => return,
                 constants.AUTH_MORE_DATA => {
@@ -189,8 +195,8 @@ pub const Conn = struct {
                             // // if TLS, send password as plain text
                             // try conn.sendBytesAsPacket(config.password);
 
-                            try conn.writeBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
-                            const pk_packet = try conn.readPacket();
+                            try c.writeBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
+                            const pk_packet = try c.readPacket();
 
                             // Decode public key
                             const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
@@ -200,7 +206,7 @@ pub const Conn = struct {
                             const enc_pw = try auth.encryptPassword(allocator, config.password, auth_data, &decoded_pk.value);
                             defer allocator.free(enc_pw);
 
-                            try conn.writeBytesAsPacket(enc_pw);
+                            try c.writeBytesAsPacket(enc_pw);
                         },
                         else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
@@ -210,23 +216,23 @@ pub const Conn = struct {
         }
     }
 
-    inline fn readPacket(conn: *Conn) !Packet {
-        const packet = try conn.reader.readPacket();
-        conn.sequence_id = packet.sequence_id + 1;
+    inline fn readPacket(c: *Conn) !Packet {
+        const packet = try c.reader.readPacket();
+        c.sequence_id = packet.sequence_id + 1;
         return packet;
     }
 
-    inline fn writePacket(conn: *Conn, packet: anytype) !void {
-        try conn.writer.writePacket(conn.generateSequenceId(), packet);
+    inline fn writePacket(c: *Conn, packet: anytype) !void {
+        try c.writer.writePacket(c.generateSequenceId(), packet);
     }
 
-    inline fn writeBytesAsPacket(conn: *Conn, packet: anytype) !void {
-        try conn.writer.writeBytesAsPacket(conn.generateSequenceId(), packet);
+    inline fn writeBytesAsPacket(c: *Conn, packet: anytype) !void {
+        try c.writer.writeBytesAsPacket(c.generateSequenceId(), packet);
     }
 
-    inline fn generateSequenceId(conn: *Conn) u8 {
-        const sequence_id = conn.sequence_id;
-        conn.sequence_id += 1;
+    inline fn generateSequenceId(c: *Conn) u8 {
+        const sequence_id = c.sequence_id;
+        c.sequence_id += 1;
         return sequence_id;
     }
 };

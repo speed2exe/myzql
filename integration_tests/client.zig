@@ -18,6 +18,7 @@ fn queryExpectOk(c: *Conn, query: []const u8) !void {
 
 test "ping" {
     var c = try Conn.init(std.testing.allocator, &test_config);
+    defer c.deinit();
     try c.ping();
 }
 

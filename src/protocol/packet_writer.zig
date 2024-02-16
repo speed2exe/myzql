@@ -82,8 +82,11 @@ pub const PacketWriter = struct {
         params: anytype,
     ) !void {
         const start = p.buf.len;
-        try p.skip(4); // we need to write the length of the packet later
-        // we need to write the length of the packet later
+        try p.skip(4);
+        // we need to write the payload length and sequence id later
+        // after the packet is written
+        // [0..3]               [4]         [......]
+        // ^u24 payload_length  ^u8 seq_id  ^payload
 
         if (has_params) {
             try packet.write(p, params);
@@ -91,10 +94,9 @@ pub const PacketWriter = struct {
             try packet.write(p);
         }
 
-        const written = p.buf.len - start;
+        const written = p.pos - start - 4;
         const written_buf = p.buf[start..][0..3];
         std.mem.writeInt(u24, written_buf, @intCast(written), .little);
-        std.debug.print("sequence_id: {d}\n", .{sequence_id});
         p.buf[start + 3] = sequence_id;
     }
 

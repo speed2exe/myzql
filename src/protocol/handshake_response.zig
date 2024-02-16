@@ -31,6 +31,7 @@ pub const HandshakeResponse41 = struct {
 
     pub fn write(h: *const HandshakeResponse41, writer: *PacketWriter) !void {
         try writer.writeInt(u32, h.client_flag);
+
         try writer.writeInt(u32, h.max_packet_size);
         try writer.writeInt(u8, h.character_set);
         try writer.write(&([_]u8{0} ** 23)); // filler
