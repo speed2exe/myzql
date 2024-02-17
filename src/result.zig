@@ -15,36 +15,24 @@ const Duration = @import("./temporal.zig").Duration;
 const EnumFieldType = constants.EnumFieldType;
 
 pub fn QueryResult(comptime T: type) type {
-    return struct {
-        const Value = union(enum) {
-            ok: OkPacket,
-            err: ErrorPacket,
-            rows: ResultSet(T),
-        };
-        packet: Packet,
-        value: Value,
+    return union(enum) {
+        ok: OkPacket,
+        err: ErrorPacket,
+        rows: ResultSet(T),
 
-        pub fn init(conn: *Conn, allocator: std.mem.Allocator) !QueryResult(T) {
-            const packet = try conn.newPacketStream(allocator);
-            return .{
-                .packet = packet,
-                .value = switch (packet.payload[0]) {
-                    constants.OK => .{ .ok = OkPacket.init(&packet, conn.client_capabilities) },
-                    constants.ERR => .{ .err = ErrorPacket.init(&packet) },
-                    constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-                    else => .{ .rows = blk: {
-                        const reader = packet.reader();
-                        const column_count = reader.readLengthEncodedInteger();
-                        std.debug.assert(reader.finished());
-                        break :blk try ResultSet(T).init(allocator, conn, column_count);
-                    } },
-                },
+        // allocation happens when a result set is returned
+        pub fn init(c: *Conn, allocator: std.mem.Allocator) !QueryResult(T) {
+            const packet = try c.readPacket();
+            return switch (packet.payload[0]) {
+                constants.OK => .{ .ok = OkPacket.init(&packet, c.client_capabilities) },
+                constants.ERR => .{ .err = ErrorPacket.init(&packet) },
+                constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
+                else => .{ .rows = try ResultSet(T).init(allocator, c, &packet) },
             };
         }
 
         pub fn deinit(q: *const QueryResult(T), allocator: std.mem.Allocator) void {
-            q.packet.deinit(allocator);
-            switch (q.value) {
+            switch (q.*) {
                 .rows => |rows| rows.deinit(allocator),
                 else => {},
             }
@@ -52,12 +40,12 @@ pub fn QueryResult(comptime T: type) type {
 
         pub fn expect(
             q: *const QueryResult(T),
-            comptime value_variant: std.meta.FieldEnum(Value),
-        ) !std.meta.FieldType(Value, value_variant) {
-            return switch (q.value) {
-                value_variant => @field(q.value, @tagName(value_variant)),
+            comptime value_variant: std.meta.FieldEnum(QueryResult(T)),
+        ) !*const std.meta.FieldType(QueryResult(T), value_variant) {
+            return switch (q.*) {
+                value_variant => &@field(q, @tagName(value_variant)),
                 else => {
-                    return switch (q.value) {
+                    return switch (q.*) {
                         .err => |err| return err.asError(),
                         .ok => |ok| {
                             std.log.err("Unexpected OkPacket: {any}\n", .{ok});
@@ -74,30 +62,88 @@ pub fn QueryResult(comptime T: type) type {
     };
 }
 
+// pub fn QueryResult2(comptime T: type) type {
+//     return struct {
+//         const Value = union(enum) {
+//             ok: OkPacket,
+//             err: ErrorPacket,
+//             rows: ResultSet(T),
+//         };
+//         packet: Packet,
+//         value: Value,
+//
+//         pub fn init(conn: *Conn, allocator: std.mem.Allocator) !QueryResult2(T) {
+//             const packet = try conn.newPacketStream(allocator);
+//             return .{
+//                 .packet = packet,
+//                 .value = switch (packet.payload[0]) {
+//                     constants.OK => .{ .ok = OkPacket.init(&packet, conn.client_capabilities) },
+//                     constants.ERR => .{ .err = ErrorPacket.init(&packet) },
+//                     constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
+//                     else => .{ .rows = blk: {
+//                         const reader = packet.reader();
+//                         const column_count = reader.readLengthEncodedInteger();
+//                         std.debug.assert(reader.finished());
+//                         break :blk try ResultSet(T).init(allocator, conn, column_count);
+//                     } },
+//                 },
+//             };
+//         }
+//
+//         pub fn deinit(q: *const QueryResult2(T), allocator: std.mem.Allocator) void {
+//             q.packet.deinit(allocator);
+//             switch (q.value) {
+//                 .rows => |rows| rows.deinit(allocator),
+//                 else => {},
+//             }
+//         }
+//
+//         pub fn expect(
+//             q: *const QueryResult2(T),
+//             comptime value_variant: std.meta.FieldEnum(Value),
+//         ) !std.meta.FieldType(Value, value_variant) {
+//             return switch (q.value) {
+//                 value_variant => @field(q.value, @tagName(value_variant)),
+//                 else => {
+//                     return switch (q.value) {
+//                         .err => |err| return err.asError(),
+//                         .ok => |ok| {
+//                             std.log.err("Unexpected OkPacket: {any}\n", .{ok});
+//                             return error.UnexpectedOk;
+//                         },
+//                         .rows => |rows| {
+//                             std.log.err("Unexpected ResultSet: {any}\n", .{rows});
+//                             return error.UnexpectedResultSet;
+//                         },
+//                     };
+//                 },
+//             };
+//         }
+//     };
+// }
+
 pub fn ResultSet(comptime T: type) type {
     return struct {
         conn: *Conn,
         col_packets: []const Packet,
         col_defs: []const ColumnDefinition41,
 
-        pub fn init(allocator: std.mem.Allocator, conn: *Conn, column_count: u64) !ResultSet(T) {
-            const col_packets = try allocator.alloc(Packet, column_count);
+        pub fn init(allocator: std.mem.Allocator, conn: *Conn, packet: *const Packet) !ResultSet(T) {
+            var reader = packet.reader();
+            const n_columns = reader.readLengthEncodedInteger();
+            std.debug.assert(reader.finished());
+
+            const col_packets = try allocator.alloc(Packet, n_columns);
             errdefer allocator.free(col_packets);
 
-            const col_defs = try allocator.alloc(ColumnDefinition41, column_count);
+            const col_defs = try allocator.alloc(ColumnDefinition41, n_columns);
             errdefer allocator.free(col_defs);
 
             for (col_packets, col_defs) |*pac, *def| {
-                pac.* = try conn.newPacketStream(allocator);
-                def.* = ColumnDefinition41.initFromPacket(pac);
+                const col_def_packet = try conn.readPacket();
+                pac.* = try col_def_packet.cloneAlloc(allocator);
+                def.* = ColumnDefinition41.init(pac);
             }
-
-            // const packet = try conn.readPacket(allocator);
-            // defer packet.deinit(allocator);
-            // switch (packet.payload[0]) {
-            //     constants.EOF, constants.OK => _ = OkPacket.initFromPacket(&packet, conn.client_capabilities),
-            //     else => return packet.asError(conn.client_capabilities),
-            // }
 
             return .{
                 .conn = conn,
@@ -272,7 +318,7 @@ pub const PreparedStatement = struct {
 
         for (packets, col_defs) |*packet, *col_def| {
             packet.* = try conn.newPacketStream(allocator);
-            col_def.* = ColumnDefinition41.initFromPacket(packet);
+            col_def.* = ColumnDefinition41.init(packet);
         }
 
         return .{

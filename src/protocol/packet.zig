@@ -23,6 +23,15 @@ pub const Packet = struct {
     pub fn reader(packet: *const Packet) PayloadReader {
         return PayloadReader.init(packet.payload);
     }
+
+    pub fn cloneAlloc(packet: *const Packet, allocator: std.mem.Allocator) !Packet {
+        const payload_copy = try allocator.alloc(u8, packet.payload.len);
+        return .{ .sequence_id = packet.sequence_id, .payload = payload_copy };
+    }
+
+    pub fn deinit(packet: *const Packet, allocator: std.mem.Allocator) void {
+        allocator.free(packet.payload);
+    }
 };
 
 pub const PayloadReader = struct {

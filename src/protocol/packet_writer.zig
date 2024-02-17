@@ -81,7 +81,7 @@ pub const PacketWriter = struct {
         packet: anytype,
         params: anytype,
     ) !void {
-        const start = p.buf.len;
+        const start = p.pos;
         try p.skip(4);
         // we need to write the payload length and sequence id later
         // after the packet is written

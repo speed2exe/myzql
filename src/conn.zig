@@ -108,13 +108,11 @@ pub const Conn = struct {
     }
 
     // TODO: add options
-    /// caller must consume the result by switching on the result's value
     pub fn query(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult(TextResultData) {
-        std.debug.assert(c.state == .connected);
-        const query_request: QueryRequest = .{ .query = query_string };
-        c.writer.reset();
-        c.writePacket(query_request);
-        try c.sendPacketUsingSmallPacketWriter(query_request);
+        c.sequence_id = 0;
+        const query_req: QueryRequest = .{ .query = query_string };
+        try c.writePacket(query_req);
+        try c.writer.flush();
         return QueryResult(TextResultData).init(c, allocator);
     }
 
@@ -216,7 +214,7 @@ pub const Conn = struct {
         }
     }
 
-    inline fn readPacket(c: *Conn) !Packet {
+    pub inline fn readPacket(c: *Conn) !Packet {
         const packet = try c.reader.readPacket();
         c.sequence_id = packet.sequence_id + 1;
         return packet;

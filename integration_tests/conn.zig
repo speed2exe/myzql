@@ -27,7 +27,6 @@ test "query database create and drop" {
     defer c.deinit();
     {
         const qr = try c.query(allocator, "CREATE DATABASE testdb");
-        defer qr.deinit(allocator);
         _ = try qr.expect(.ok);
     }
     {
