@@ -143,14 +143,14 @@ test "prepare check" {
         const prep_res = try c.prepare(allocator, "SELECT CONCAT(?, ?) as my_col");
         defer prep_res.deinit(allocator);
 
-        switch (prep_res.value) {
+        switch (prep_res) {
             .ok => |prep_stmt| {
                 try std.testing.expectEqual(prep_stmt.prep_ok.num_params, 2);
                 try std.testing.expectEqual(prep_stmt.prep_ok.num_columns, 1);
             },
             .err => |err| return err.asError(),
         }
-        try std.testing.expectEqual(c.conn.reader.pos, c.conn.reader.len);
+        try std.testing.expectEqual(c.reader.len, c.reader.pos);
     }
 }
 

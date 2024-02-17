@@ -118,10 +118,10 @@ pub const Conn = struct {
 
     // TODO: add options
     pub fn prepare(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
-        std.debug.assert(c.state == .connected);
         c.sequence_id = 0;
         const prepare_request: PrepareRequest = .{ .query = query_string };
-        try c.sendPacketUsingSmallPacketWriter(prepare_request);
+        try c.writePacket(prepare_request);
+        try c.writer.flush();
         return PrepareResult.init(c, allocator);
     }
 

@@ -10,9 +10,6 @@ const ErrorPacket = protocol.generic_response.ErrorPacket;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 const Conn = @import("./conn.zig").Conn;
 const EofPacket = protocol.generic_response.EofPacket;
-// const DateTime = @import("./temporal.zig").DateTime;
-// const Duration = @import("./temporal.zig").Duration;
-// const EnumFieldType = constants.EnumFieldType;
 const conversion = @import("./conversion.zig");
 
 pub fn QueryResult(comptime T: type) type {
@@ -107,6 +104,7 @@ pub fn ResultSet(comptime T: type) type {
 
         pub fn tableTexts(r: *const ResultSet(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
             const all_rows = try collectAllRowsPacketUntilEof(r.conn, allocator);
+            errdefer deinitOwnedPacketList(all_rows);
             return try TableTexts.init(all_rows, allocator, r.col_defs.len);
         }
 
@@ -234,9 +232,16 @@ pub fn ResultRow(comptime T: type) type {
     };
 }
 
+fn deinitOwnedPacketList(packet_list: std.ArrayList(Packet)) void {
+    for (packet_list.items) |packet| {
+        packet.deinit(packet_list.allocator);
+    }
+    packet_list.deinit();
+}
+
 fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: std.mem.Allocator) !std.ArrayList(Packet) {
     var packet_list = std.ArrayList(Packet).init(allocator);
-    errdefer packet_list.deinit();
+    errdefer deinitOwnedPacketList(packet_list);
 
     // Accumulate all packets until EOF
     while (true) {
@@ -256,30 +261,21 @@ fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: std.mem.Allocator) !std.
     }
 }
 
-pub const PrepareResult = struct {
-    const Value = union(enum) {
-        err: ErrorPacket,
-        ok: PreparedStatement,
-    };
-
-    packet: Packet,
-    value: Value,
+pub const PrepareResult = union(enum) {
+    err: ErrorPacket,
+    ok: PreparedStatement,
 
     pub fn init(conn: *Conn, allocator: std.mem.Allocator) !PrepareResult {
-        const response_packet = try conn.newPacketStream(allocator);
-        return .{
-            .packet = response_packet,
-            .value = switch (response_packet.payload[0]) {
-                constants.ERR => .{ .err = ErrorPacket.init(false, &response_packet) },
-                constants.OK => .{ .ok = try PreparedStatement.initFromPacket(&response_packet, conn, allocator) },
-                else => return response_packet.asError(),
-            },
+        const response_packet = try conn.readPacket();
+        return switch (response_packet.payload[0]) {
+            constants.ERR => .{ .err = ErrorPacket.init(&response_packet) },
+            constants.OK => .{ .ok = try PreparedStatement.init(&response_packet, conn, allocator) },
+            else => return response_packet.asError(),
         };
     }
 
     pub fn deinit(p: *const PrepareResult, allocator: std.mem.Allocator) void {
-        p.packet.deinit(allocator);
-        switch (p.value) {
+        switch (p.*) {
             .ok => |prep_stmt| prep_stmt.deinit(allocator),
             else => {},
         }
@@ -287,12 +283,12 @@ pub const PrepareResult = struct {
 
     pub fn expect(
         p: *const PrepareResult,
-        comptime value_variant: std.meta.FieldEnum(Value),
-    ) !std.meta.FieldType(Value, value_variant) {
-        return switch (p.value) {
-            value_variant => @field(p.value, @tagName(value_variant)),
+        comptime value_variant: std.meta.FieldEnum(PrepareResult),
+    ) !*const std.meta.FieldType(PrepareResult, value_variant) {
+        return switch (p.*) {
+            value_variant => &@field(p, @tagName(value_variant)),
             else => {
-                return switch (p.value) {
+                return switch (p.*) {
                     .err => |err| return err.asError(),
                     .ok => |ok| {
                         std.log.err("Unexpected OkPacket: {any}\n", .{ok});
@@ -305,30 +301,39 @@ pub const PrepareResult = struct {
 };
 
 pub const PreparedStatement = struct {
-    prep_ok: PrepareOk,
+    prep_ok: *const PrepareOk,
     packets: []const Packet,
     col_defs: []const ColumnDefinition41,
     params: []const ColumnDefinition41, // parameters that would be passed when executing the query
     res_cols: []const ColumnDefinition41, // columns that would be returned when executing the query
 
-    pub fn initFromPacket(resp_packet: *const Packet, conn: *Conn, allocator: std.mem.Allocator) !PreparedStatement {
-        const prep_ok = PrepareOk.initFromPacket(resp_packet, conn.client_capabilities);
+    pub fn init(packet_ref: *const Packet, conn: *Conn, allocator: std.mem.Allocator) !PreparedStatement {
+        const packet_owned = try packet_ref.cloneAlloc(allocator);
+        errdefer packet_owned.deinit(allocator);
+        const prep_ok = PrepareOk.init(&packet_owned, conn.client_capabilities);
 
         const col_count = prep_ok.num_params + prep_ok.num_columns;
 
-        const packets = try allocator.alloc(Packet, col_count);
-        errdefer allocator.free(packets);
+        const packets = try allocator.alloc(Packet, col_count + 1);
+        packets[0] = packet_owned;
+        @memset(packets[1..], .{ .sequence_id = 0, .payload = &.{} });
+        errdefer {
+            for (packets) |packet| {
+                packet.deinit(allocator);
+            }
+            allocator.free(packets);
+        }
 
         const col_defs = try allocator.alloc(ColumnDefinition41, col_count);
         errdefer allocator.free(col_defs);
 
-        for (packets, col_defs) |*packet, *col_def| {
-            packet.* = try conn.newPacketStream(allocator);
+        for (packets[1..], col_defs) |*packet, *col_def| {
+            packet.* = try (try conn.readPacket()).cloneAlloc(allocator);
             col_def.* = ColumnDefinition41.init(packet);
         }
 
         return .{
-            .prep_ok = prep_ok,
+            .prep_ok = &prep_ok,
             .packets = packets,
             .col_defs = col_defs,
             .params = col_defs[0..prep_ok.num_params],
@@ -336,7 +341,7 @@ pub const PreparedStatement = struct {
         };
     }
 
-    pub fn deinit(prep_stmt: *const PreparedStatement, allocator: std.mem.Allocator) void {
+    fn deinit(prep_stmt: *const PreparedStatement, allocator: std.mem.Allocator) void {
         allocator.free(prep_stmt.col_defs);
         for (prep_stmt.packets) |packet| {
             packet.deinit(allocator);
@@ -387,6 +392,7 @@ pub const TableTexts = struct {
 
     fn init(packet_list: std.ArrayList(Packet), allocator: std.mem.Allocator, n_cols: usize) !TableTexts {
         var table = try allocator.alloc([]?[]const u8, packet_list.items.len); // TODO: alloc once instead
+        errdefer allocator.free(table);
         var flattened = try allocator.alloc(?[]const u8, packet_list.items.len * n_cols);
 
         for (packet_list.items, 0..) |packet, i| {
@@ -403,11 +409,7 @@ pub const TableTexts = struct {
     }
 
     pub fn deinit(t: *const TableTexts, allocator: std.mem.Allocator) void {
-        for (t.packet_list.items) |packet| {
-            packet.deinit(t.packet_list.allocator);
-        }
-
-        t.packet_list.deinit();
+        deinitOwnedPacketList(t.packet_list);
         allocator.free(t.table);
         allocator.free(t.flattened);
     }

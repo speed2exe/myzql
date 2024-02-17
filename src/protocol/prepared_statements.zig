@@ -15,7 +15,7 @@ pub const PrepareRequest = struct {
 
     pub fn write(q: *const PrepareRequest, writer: *PacketWriter) !void {
         try writer.writeInt(u8, constants.COM_STMT_PREPARE);
-        try writer.writeNullTerminatedString(q.query);
+        try writer.write(q.query);
     }
 };
 
@@ -28,17 +28,17 @@ pub const PrepareOk = struct {
     warning_count: ?u16,
     metadata_follows: ?u8,
 
-    pub fn initFromPacket(packet: *const Packet, capabilities: u32) PrepareOk {
+    pub fn init(packet: *const Packet, capabilities: u32) PrepareOk {
         var prepare_ok_packet: PrepareOk = undefined;
 
-        var reader = PacketReader.init(packet);
-        prepare_ok_packet.status = reader.readByte();
-        prepare_ok_packet.statement_id = reader.readUInt32();
-        prepare_ok_packet.num_columns = reader.readUInt16();
-        prepare_ok_packet.num_params = reader.readUInt16();
+        var reader = packet.reader();
+        prepare_ok_packet.status = reader.readInt(u8);
+        prepare_ok_packet.statement_id = reader.readInt(u32);
+        prepare_ok_packet.num_columns = reader.readInt(u16);
+        prepare_ok_packet.num_params = reader.readInt(u16);
 
         // Reserved 1 byte
-        const b = reader.readByte();
+        const b = reader.readInt(u8);
         std.debug.assert(b == 0);
 
         if (reader.finished()) {
@@ -47,9 +47,9 @@ pub const PrepareOk = struct {
             return prepare_ok_packet;
         }
 
-        prepare_ok_packet.warning_count = reader.readUInt16();
+        prepare_ok_packet.warning_count = reader.readInt(u16);
         if (capabilities & constants.CLIENT_OPTIONAL_RESULTSET_METADATA > 0) {
-            prepare_ok_packet.metadata_follows = reader.readByte();
+            prepare_ok_packet.metadata_follows = reader.readInt(u8);
         } else {
             prepare_ok_packet.metadata_follows = null;
         }
