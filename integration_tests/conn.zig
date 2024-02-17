@@ -14,6 +14,7 @@ const ResultRowIter = myzql.result.ResultRowIter;
 const TextResultRow = myzql.result.TextResultRow;
 const TextElemIter = myzql.result.TextElemIter;
 const TextElems = myzql.result.TextElems;
+const PreparedStatement = myzql.result.PreparedStatement;
 
 // convenient function for testing
 fn queryExpectOk(c: *Conn, query: []const u8) !void {
@@ -158,17 +159,17 @@ test "prepare execute - 1" {
     var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
     {
-        const prep_res = try c.prepare(allocator, "CREATE DATABASE testdb2");
+        const prep_res = try c.prepare(allocator, "CREATE DATABASE testdb");
         defer prep_res.deinit(allocator);
-        const prep_stmt = try prep_res.expect(.ok);
+        const prep_stmt: *const PreparedStatement = try prep_res.expect(.stmt);
         const query_res = try c.execute(allocator, prep_stmt, .{});
         defer query_res.deinit(allocator);
         _ = try query_res.expect(.ok);
     }
     {
-        const prep_res = try c.prepare(allocator, "DROP DATABASE testdb2");
+        const prep_res = try c.prepare(allocator, "DROP DATABASE testdb");
         defer prep_res.deinit(allocator);
-        const prep_ok = try prep_res.expect(.ok);
+        const prep_ok: *const PreparedStatement = try prep_res.expect(.stmt);
         const query_res = try c.execute(allocator, prep_ok, .{});
         defer query_res.deinit(allocator);
         _ = try query_res.expect(.ok);
@@ -179,21 +180,21 @@ test "prepare execute - 2" {
     var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
-    const prep_res_1 = try c.prepare(allocator, "CREATE DATABASE testdb3");
+    const prep_res_1 = try c.prepare(allocator, "CREATE DATABASE testdb");
     defer prep_res_1.deinit(allocator);
-    const prep_stmt_1 = try prep_res_1.expect(.ok);
+    const prep_stmt_1: *const PreparedStatement = try prep_res_1.expect(.stmt);
 
-    const prep_res_2 = try c.prepare(allocator, "DROP DATABASE testdb3");
+    const prep_res_2 = try c.prepare(allocator, "DROP DATABASE testdb");
     defer prep_res_2.deinit(allocator);
-    const prep_stmt_2 = try prep_res_2.expect(.ok);
+    const prep_stmt_2: *const PreparedStatement = try prep_res_2.expect(.stmt);
 
     {
-        const query_res = try c.execute(allocator, &prep_stmt_1, .{});
+        const query_res = try c.execute(allocator, prep_stmt_1, .{});
         defer query_res.deinit(allocator);
         _ = try query_res.expect(.ok);
     }
     {
-        const query_res = try c.execute(allocator, &prep_stmt_2, .{});
+        const query_res = try c.execute(allocator, prep_stmt_2, .{});
         defer query_res.deinit(allocator);
         _ = try query_res.expect(.ok);
     }

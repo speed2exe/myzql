@@ -263,20 +263,20 @@ fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: std.mem.Allocator) !std.
 
 pub const PrepareResult = union(enum) {
     err: ErrorPacket,
-    ok: PreparedStatement,
+    stmt: PreparedStatement,
 
     pub fn init(conn: *Conn, allocator: std.mem.Allocator) !PrepareResult {
         const response_packet = try conn.readPacket();
         return switch (response_packet.payload[0]) {
             constants.ERR => .{ .err = ErrorPacket.init(&response_packet) },
-            constants.OK => .{ .ok = try PreparedStatement.init(&response_packet, conn, allocator) },
+            constants.OK => .{ .stmt = try PreparedStatement.init(&response_packet, conn, allocator) },
             else => return response_packet.asError(),
         };
     }
 
     pub fn deinit(p: *const PrepareResult, allocator: std.mem.Allocator) void {
         switch (p.*) {
-            .ok => |prep_stmt| prep_stmt.deinit(allocator),
+            .stmt => |prep_stmt| prep_stmt.deinit(allocator),
             else => {},
         }
     }
@@ -290,8 +290,8 @@ pub const PrepareResult = union(enum) {
             else => {
                 return switch (p.*) {
                     .err => |err| return err.asError(),
-                    .ok => |ok| {
-                        std.log.err("Unexpected OkPacket: {any}\n", .{ok});
+                    .stmt => |ok| {
+                        std.log.err("Unexpected PreparedStatement: {any}\n", .{ok});
                         return error.UnexpectedOk;
                     },
                 };
@@ -301,22 +301,19 @@ pub const PrepareResult = union(enum) {
 };
 
 pub const PreparedStatement = struct {
-    prep_ok: *const PrepareOk,
+    prep_ok: PrepareOk,
     packets: []const Packet,
     col_defs: []const ColumnDefinition41,
     params: []const ColumnDefinition41, // parameters that would be passed when executing the query
     res_cols: []const ColumnDefinition41, // columns that would be returned when executing the query
 
-    pub fn init(packet_ref: *const Packet, conn: *Conn, allocator: std.mem.Allocator) !PreparedStatement {
-        const packet_owned = try packet_ref.cloneAlloc(allocator);
-        errdefer packet_owned.deinit(allocator);
-        const prep_ok = PrepareOk.init(&packet_owned, conn.client_capabilities);
+    pub fn init(ok_packet: *const Packet, conn: *Conn, allocator: std.mem.Allocator) !PreparedStatement {
+        const prep_ok = PrepareOk.init(ok_packet, conn.client_capabilities);
 
         const col_count = prep_ok.num_params + prep_ok.num_columns;
 
-        const packets = try allocator.alloc(Packet, col_count + 1);
-        packets[0] = packet_owned;
-        @memset(packets[1..], .{ .sequence_id = 0, .payload = &.{} });
+        const packets = try allocator.alloc(Packet, col_count);
+        @memset(packets, .{ .sequence_id = 0, .payload = &.{} });
         errdefer {
             for (packets) |packet| {
                 packet.deinit(allocator);
@@ -327,13 +324,13 @@ pub const PreparedStatement = struct {
         const col_defs = try allocator.alloc(ColumnDefinition41, col_count);
         errdefer allocator.free(col_defs);
 
-        for (packets[1..], col_defs) |*packet, *col_def| {
+        for (packets, col_defs) |*packet, *col_def| {
             packet.* = try (try conn.readPacket()).cloneAlloc(allocator);
             col_def.* = ColumnDefinition41.init(packet);
         }
 
         return .{
-            .prep_ok = &prep_ok,
+            .prep_ok = prep_ok,
             .packets = packets,
             .col_defs = col_defs,
             .params = col_defs[0..prep_ok.num_params],
