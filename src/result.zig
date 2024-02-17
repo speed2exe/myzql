@@ -37,13 +37,13 @@ pub fn QueryResult(comptime T: type) type {
         }
 
         pub fn expect(
-            q: *const QueryResult(T),
+            q: QueryResult(T),
             comptime value_variant: std.meta.FieldEnum(QueryResult(T)),
-        ) !*const std.meta.FieldType(QueryResult(T), value_variant) {
-            return switch (q.*) {
-                value_variant => &@field(q, @tagName(value_variant)),
+        ) !std.meta.FieldType(QueryResult(T), value_variant) {
+            return switch (q) {
+                value_variant => @field(q, @tagName(value_variant)),
                 else => {
-                    return switch (q.*) {
+                    return switch (q) {
                         .err => |err| return err.asError(),
                         .ok => |ok| {
                             std.log.err("Unexpected OkPacket: {any}\n", .{ok});
@@ -177,12 +177,12 @@ fn scanTextResultRow(dest: []?[]const u8, packet: *const Packet) void {
 }
 
 pub const BinaryResultRow = struct {
-    raw: []const u8,
+    packet: *const Packet,
     col_defs: []const ColumnDefinition41,
 
     // dest: pointer to a struct
     pub fn scan(b: *const BinaryResultRow, dest: anytype) !void {
-        try conversion.scanBinResultRow(dest, b.raw, b.col_defs);
+        try conversion.scanBinResultRow(dest, b.packet, b.col_defs);
     }
 
     // returns a pointer to allocated struct object, caller must remember to call destroy on the object after use
@@ -209,13 +209,13 @@ pub fn ResultRow(comptime T: type) type {
         }
 
         pub fn expect(
-            r: *const ResultRow(T),
+            r: ResultRow(T),
             comptime value_variant: std.meta.FieldEnum(ResultRow(T)),
-        ) !*const std.meta.FieldType(ResultRow(T), value_variant) {
-            return switch (r.*) {
-                value_variant => &@field(r, @tagName(value_variant)),
+        ) !std.meta.FieldType(ResultRow(T), value_variant) {
+            return switch (r) {
+                value_variant => @field(r, @tagName(value_variant)),
                 else => {
-                    return switch (r.*) {
+                    return switch (r) {
                         .err => |err| return err.asError(),
                         .ok => |ok| {
                             std.log.err("Unexpected OkPacket: {any}\n", .{ok});
@@ -282,13 +282,13 @@ pub const PrepareResult = union(enum) {
     }
 
     pub fn expect(
-        p: *const PrepareResult,
+        p: PrepareResult,
         comptime value_variant: std.meta.FieldEnum(PrepareResult),
-    ) !*const std.meta.FieldType(PrepareResult, value_variant) {
-        return switch (p.*) {
-            value_variant => &@field(p, @tagName(value_variant)),
+    ) !std.meta.FieldType(PrepareResult, value_variant) {
+        return switch (p) {
+            value_variant => @field(p, @tagName(value_variant)),
             else => {
-                return switch (p.*) {
+                return switch (p) {
                     .err => |err| return err.asError(),
                     .stmt => |ok| {
                         std.log.err("Unexpected PreparedStatement: {any}\n", .{ok});
@@ -369,7 +369,7 @@ pub fn ResultRowIter(comptime T: type) type {
 
             const structs = try allocator.alloc(Struct, row_acc.items.len);
             for (row_acc.items, structs) |row, *s| {
-                const data = try row.expect(.data);
+                const data = try row.expect(.row);
                 try data.scan(s);
             }
 

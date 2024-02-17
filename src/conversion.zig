@@ -5,16 +5,17 @@ const constants = @import("./constants.zig");
 const DateTime = @import("./temporal.zig").DateTime;
 const Duration = @import("./temporal.zig").Duration;
 const EnumFieldType = @import("./constants.zig").EnumFieldType;
+const Packet = @import("./protocol/packet.zig").Packet;
 
 // dest is a pointer to a struct
-pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const ColumnDefinition41) !void {
-    var reader = PayloadReader.init(raw);
-    const first = reader.readByte();
+pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const ColumnDefinition41) !void {
+    var reader = packet.reader();
+    const first = reader.readInt(u8);
     std.debug.assert(first == constants.BINARY_PROTOCOL_RESULTSET_ROW_HEADER);
 
     // null bitmap
     const null_bitmap_len = (col_defs.len + 7 + 2) / 8;
-    const null_bitmap = reader.readFixedRuntime(null_bitmap_len);
+    const null_bitmap = reader.readRefRuntime(null_bitmap_len);
 
     const child_type = @typeInfo(@TypeOf(dest)).Pointer.child;
     const struct_fields = @typeInfo(child_type).Struct.fields;
@@ -49,29 +50,29 @@ pub fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const Column
 }
 
 fn decodeDateTime(reader: *PayloadReader) DateTime {
-    const length = reader.readByte();
+    const length = reader.readInt(u8);
     switch (length) {
         11 => return .{
-            .year = reader.readUInt16(),
-            .month = reader.readByte(),
-            .day = reader.readByte(),
-            .hour = reader.readByte(),
-            .minute = reader.readByte(),
-            .second = reader.readByte(),
-            .microsecond = reader.readUInt32(),
+            .year = reader.readInt(16),
+            .month = reader.readInt(8),
+            .day = reader.readInt(8),
+            .hour = reader.readInt(8),
+            .minute = reader.readInt(8),
+            .second = reader.readInt(8),
+            .microsecond = reader.readInt(32),
         },
         7 => return .{
-            .year = reader.readUInt16(),
-            .month = reader.readByte(),
-            .day = reader.readByte(),
-            .hour = reader.readByte(),
-            .minute = reader.readByte(),
-            .second = reader.readByte(),
+            .year = reader.readInt(16),
+            .month = reader.readInt(8),
+            .day = reader.readInt(8),
+            .hour = reader.readInt(8),
+            .minute = reader.readInt(8),
+            .second = reader.readInt(8),
         },
         4 => return .{
-            .year = reader.readUInt16(),
-            .month = reader.readByte(),
-            .day = reader.readByte(),
+            .year = reader.readInt(16),
+            .month = reader.readInt(8),
+            .day = reader.readInt(8),
         },
         0 => return .{},
         else => unreachable,
@@ -82,19 +83,19 @@ fn decodeDuration(reader: *PayloadReader) Duration {
     const length = reader.readByte();
     switch (length) {
         12 => return .{
-            .is_negative = reader.readByte(),
-            .days = reader.readUInt32(),
-            .hours = reader.readByte(),
-            .minutes = reader.readByte(),
-            .seconds = reader.readByte(),
-            .microseconds = reader.readUInt32(),
+            .is_negative = reader.readInt(u8),
+            .days = reader.readInt(u32),
+            .hours = reader.readInt(u8),
+            .minutes = reader.readInt(u8),
+            .seconds = reader.readInt(u8),
+            .microseconds = reader.readInt(u32),
         },
         8 => return .{
-            .is_negative = reader.readByte(),
-            .days = reader.readUInt32(),
-            .hours = reader.readByte(),
-            .minutes = reader.readByte(),
-            .seconds = reader.readByte(),
+            .is_negative = reader.readInt(u8),
+            .days = reader.readInt(u32),
+            .hours = reader.readInt(u8),
+            .minutes = reader.readInt(u8),
+            .seconds = reader.readInt(u8),
         },
         0 => return .{},
         else => {
@@ -194,34 +195,34 @@ inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_d
             switch (int.signedness) {
                 .unsigned => {
                     switch (col_type) {
-                        .MYSQL_TYPE_LONGLONG => return @intCast(reader.readUInt64()),
+                        .MYSQL_TYPE_LONGLONG => return @intCast(reader.readInt(u64)),
 
                         .MYSQL_TYPE_LONG,
                         .MYSQL_TYPE_INT24,
-                        => return @intCast(reader.readUInt32()),
+                        => return @intCast(reader.readInt(u32)),
 
                         .MYSQL_TYPE_SHORT,
                         .MYSQL_TYPE_YEAR,
-                        => return @intCast(reader.readUInt16()),
+                        => return @intCast(reader.readInt(u16)),
 
-                        .MYSQL_TYPE_TINY => return @intCast(reader.readByte()),
+                        .MYSQL_TYPE_TINY => return @intCast(reader.readInt(u8)),
 
                         else => {},
                     }
                 },
                 .signed => {
                     switch (col_type) {
-                        .MYSQL_TYPE_LONGLONG => return @intCast(@as(i64, @bitCast(reader.readUInt64()))),
+                        .MYSQL_TYPE_LONGLONG => return @intCast(@as(i64, @bitCast(reader.readInt(u64)))),
 
                         .MYSQL_TYPE_LONG,
                         .MYSQL_TYPE_INT24,
-                        => return @intCast(@as(i32, @bitCast(reader.readUInt32()))),
+                        => return @intCast(@as(i32, @bitCast(reader.readInt(u32)))),
 
                         .MYSQL_TYPE_SHORT,
                         .MYSQL_TYPE_YEAR,
-                        => return @intCast(@as(i16, @bitCast(reader.readUInt16()))),
+                        => return @intCast(@as(i16, @bitCast(reader.readInt(u16)))),
 
-                        .MYSQL_TYPE_TINY => return @intCast(@as(i8, @bitCast(reader.readByte()))),
+                        .MYSQL_TYPE_TINY => return @intCast(@as(i8, @bitCast(reader.readInt(u8)))),
 
                         else => {},
                     }
@@ -231,14 +232,14 @@ inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_d
         .Float => |float| {
             if (float.bits >= 64) {
                 switch (col_type) {
-                    .MYSQL_TYPE_DOUBLE => return @as(f64, @bitCast(reader.readUInt64())),
-                    .MYSQL_TYPE_FLOAT => return @as(f32, @bitCast(reader.readUInt32())),
+                    .MYSQL_TYPE_DOUBLE => return @as(f64, @bitCast(reader.readInt(u64))),
+                    .MYSQL_TYPE_FLOAT => return @as(f32, @bitCast(reader.readInt(u32))),
                     else => {},
                 }
             }
             if (float.bits >= 32) {
                 switch (col_type) {
-                    .MYSQL_TYPE_FLOAT => return @as(f32, @bitCast(reader.readUInt32())),
+                    .MYSQL_TYPE_FLOAT => return @as(f32, @bitCast(reader.readInt(u32))),
                     else => {},
                 }
             }
