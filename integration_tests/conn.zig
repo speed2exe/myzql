@@ -63,8 +63,7 @@ test "query text protocol" {
 
         const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
         const rows_iter: ResultRowIter(TextResultRow) = rows.iter();
-        while (try rows_iter.next()) |result_row| { // ResultRow(TextResultRow)
-            const row: TextResultRow = try result_row.expect(.row);
+        while (try rows_iter.next()) |row| { // ResultRow(TextResultRow)
             var elems_iter: TextElemIter = row.iter();
             while (elems_iter.next()) |elem| { // ?[] const u8
                 try std.testing.expectEqualDeep(@as(?[]const u8, "1"), elem);
@@ -78,8 +77,7 @@ test "query text protocol" {
 
         const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
         const rows_iter: ResultRowIter(TextResultRow) = rows.iter();
-        while (try rows_iter.next()) |result_row| {
-            const row: TextResultRow = try result_row.expect(.row);
+        while (try rows_iter.next()) |row| {
             const elems: TextElems = try row.textElems(allocator);
             defer elems.deinit(allocator);
 
@@ -201,90 +199,89 @@ test "prepare execute - 2" {
     }
 }
 
-// test "prepare execute with result" {
-//     var c = try Conn.init(std.testing.allocator, &test_config);
-//     defer c.deinit();
-//
-//     {
-//         const query =
-//             \\SELECT null, "hello", 3
-//         ;
-//         const prep_res = try c.prepare(allocator, query);
-//         defer prep_res.deinit(allocator);
-//         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-//         const query_res = try c.execute(allocator, prep_stmt, .{});
-//         defer query_res.deinit(allocator);
-//         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
-//         {
-//             const res_row = try rows.readRow();
-//             const row: BinaryResultRow = try res_row.expect(.row);
-//             std.debug.print("row: {any}\n", .{row.packet.payload.ptr});
-//         }
-//         {
-//             const res_row = try rows.readRow();
-//             const row: BinaryResultRow = try res_row.expect(.row);
-//             std.debug.print("row: {any}\n", .{row.packet.payload.ptr});
-//             // std.debug.print("row: {any}\n", .{row.packet});
-//         }
-//
-//         // while (try rows.readRow()) |row| {
-//         //     std.debug.print("row: {d}\n", .{row});
-//         // }
-//
-//         // const MyType = struct {
-//         //     a: ?u8,
-//         //     b: []const u8,
-//         //     c: ?u8,
-//         // };
-//         // const expected = MyType{
-//         //     .a = null,
-//         //     .b = "hello",
-//         //     .c = 3,
-//         // };
-//
-//         // while (try rows.next()) |row| {
-//         //     {
-//         //         var dest: MyType = undefined;
-//         //         const data = try row.expect(.row);
-//         //         try data.scan(&dest);
-//         //         try std.testing.expectEqualDeep(expected, dest);
-//         //     }
-//         //     {
-//         //         const data = try row.expect(.row);
-//         //         const dest = try data.scanAlloc(MyType, allocator);
-//         //         defer allocator.destroy(dest);
-//         //         try std.testing.expectEqualDeep(&expected, dest);
-//         //     }
-//         // }
-//     }
-//     // {
-//     //     const query =
-//     //         \\SELECT 1, 2, 3
-//     //         \\UNION ALL
-//     //         \\SELECT 4, 5, 6
-//     //     ;
-//     //     const prep_res = try c.prepare(allocator, query);
-//     //     defer prep_res.deinit(allocator);
-//     //     const prep_stmt = try prep_res.expect(.ok);
-//     //     const query_res = try c.execute(allocator, &prep_stmt, .{});
-//     //     defer query_res.deinit(allocator);
-//     //     const rows = (try query_res.expect(.rows)).iter();
-//
-//     //     const MyType = struct {
-//     //         a: u8,
-//     //         b: u8,
-//     //         c: u8,
-//     //     };
-//     //     const expected: []const MyType = &.{
-//     //         .{ .a = 1, .b = 2, .c = 3 },
-//     //         .{ .a = 4, .b = 5, .c = 6 },
-//     //     };
-//
-//     //     const structs = try rows.collectStructs(MyType, allocator);
-//     //     defer structs.deinit(allocator);
-//     //     try std.testing.expectEqualDeep(expected, structs.rows);
-//     // }
-// }
+test "prepare execute with result" {
+    var c = try Conn.init(std.testing.allocator, &test_config);
+    defer c.deinit();
+
+    {
+        const query =
+            \\SELECT null, "hello", 3
+        ;
+        const prep_res = try c.prepare(allocator, query);
+        defer prep_res.deinit(allocator);
+        const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
+        const query_res = try c.execute(allocator, &prep_stmt, .{});
+        defer query_res.deinit(allocator);
+        const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
+
+        const MyType = struct {
+            a: ?u8,
+            b: []const u8,
+            c: ?u8,
+        };
+        const expected = MyType{
+            .a = null,
+            .b = "hello",
+            .c = 3,
+        };
+
+        const rows_iter = rows.iter();
+
+        var dest_ptr: *MyType = undefined;
+        while (try rows_iter.next()) |row| {
+            {
+                var dest: MyType = undefined;
+                try row.scan(&dest);
+                try std.testing.expectEqualDeep(expected, dest);
+            }
+            {
+                dest_ptr = try row.structCreate(MyType, allocator);
+                try std.testing.expectEqualDeep(expected, dest_ptr.*);
+            }
+        }
+        defer BinaryResultRow.structDestroy(dest_ptr, allocator);
+
+        { // Dummy query to test for invalid memory reuse
+            const query_res2 = try c.query(allocator, "SELECT 3, 4, null, 6, 7");
+            defer query_res2.deinit(allocator);
+
+            const rows2: ResultSet(TextResultRow) = try query_res2.expect(.rows);
+            const rows_iter2: ResultRowIter(TextResultRow) = rows2.iter();
+            while (try rows_iter2.next()) |row| {
+                _ = row;
+            }
+        }
+
+        try std.testing.expectEqualDeep(dest_ptr.b, "hello");
+    }
+    // {
+    //     const query =
+    //         \\SELECT 1, 2, 3
+    //         \\UNION ALL
+    //         \\SELECT 4, 5, 6
+    //     ;
+    //     const prep_res = try c.prepare(allocator, query);
+    //     defer prep_res.deinit(allocator);
+    //     const prep_stmt = try prep_res.expect(.stmt);
+    //     const query_res = try c.execute(allocator, &prep_stmt, .{});
+    //     defer query_res.deinit(allocator);
+    //     const rows = (try query_res.expect(.rows)).iter();
+
+    //     const MyType = struct {
+    //         a: u8,
+    //         b: u8,
+    //         c: u8,
+    //     };
+    //     const expected: []const MyType = &.{
+    //         .{ .a = 1, .b = 2, .c = 3 },
+    //         .{ .a = 4, .b = 5, .c = 6 },
+    //     };
+
+    //     const structs = try rows.collectStructs(MyType, allocator);
+    //     defer structs.deinit(allocator);
+    //     try std.testing.expectEqualDeep(expected, structs.rows);
+    // }
+}
 
 // test "binary data types - int" {
 //     var c = try Conn.init(std.testing.allocator, &test_config);

@@ -115,7 +115,7 @@ pub fn ResultSet(comptime T: type) type {
 }
 
 pub const TextResultRow = struct {
-    packet: *const Packet,
+    packet: Packet,
     col_defs: []const ColumnDefinition41,
 
     pub fn iter(t: *const TextResultRow) TextElemIter {
@@ -123,7 +123,7 @@ pub const TextResultRow = struct {
     }
 
     pub fn textElems(t: *const TextResultRow, allocator: std.mem.Allocator) !TextElems {
-        return TextElems.init(t.packet, allocator, t.col_defs.len);
+        return TextElems.init(&t.packet, allocator, t.col_defs.len);
     }
 };
 
@@ -177,19 +177,49 @@ fn scanTextResultRow(dest: []?[]const u8, packet: *const Packet) void {
 }
 
 pub const BinaryResultRow = struct {
-    packet: *const Packet,
+    packet: Packet,
     col_defs: []const ColumnDefinition41,
 
     // dest: pointer to a struct
+    // string types like []u8, []const u8, ?[]u8 are shallow copied, data may be invalidated
+    // from next scan, or network request.
+    // use structCreate and structDestroy to allocate and deallocate struct objects
+    // from binary result values
     pub fn scan(b: *const BinaryResultRow, dest: anytype) !void {
-        try conversion.scanBinResultRow(dest, b.packet, b.col_defs);
+        try conversion.scanBinResultRow(dest, &b.packet, b.col_defs, null);
     }
 
-    // returns a pointer to allocated struct object, caller must remember to call destroy on the object after use
-    pub fn scanAlloc(b: *const BinaryResultRow, comptime S: type, allocator: std.mem.Allocator) !*S {
-        const s = try allocator.create(S);
-        try b.scan(s);
+    // returns a pointer to allocated struct object, caller must remember to call structDestroy
+    // after use
+    pub fn structCreate(b: *const BinaryResultRow, comptime Struct: type, allocator: std.mem.Allocator) !*Struct {
+        const s = try allocator.create(Struct);
+        try conversion.scanBinResultRow(s, &b.packet, b.col_defs, allocator);
         return s;
+    }
+
+    // deallocate struct object created from `structCreate`
+    // s: *Struct
+    pub fn structDestroy(s: anytype, allocator: std.mem.Allocator) void {
+        structFreeDynamic(s.*, allocator);
+        allocator.destroy(s);
+    }
+
+    fn structFreeDynamic(s: anytype, allocator: std.mem.Allocator) void {
+        const s_ti = @typeInfo(@TypeOf(s)).Struct;
+        inline for (s_ti.fields) |field| {
+            structFreeStr(field.type, @field(s, field.name), allocator);
+        }
+    }
+
+    fn structFreeStr(comptime StructField: type, value: StructField, allocator: std.mem.Allocator) void {
+        switch (@typeInfo(StructField)) {
+            .Pointer => |p| switch (@typeInfo(p.child)) {
+                .Int => |int| if (int.bits == 8) allocator.free(value),
+                else => {},
+            },
+            .Optional => |o| if (value) |some| structFreeStr(o.child, some, allocator),
+            else => {},
+        }
     }
 };
 
@@ -204,7 +234,7 @@ pub fn ResultRow(comptime T: type) type {
             return switch (packet.payload[0]) {
                 constants.ERR => .{ .err = ErrorPacket.init(&packet) },
                 constants.EOF => .{ .ok = OkPacket.init(&packet, conn.client_capabilities) },
-                else => .{ .row = .{ .packet = &packet, .col_defs = col_defs } },
+                else => .{ .row = .{ .packet = packet, .col_defs = col_defs } },
             };
         }
 
@@ -351,32 +381,17 @@ pub fn ResultRowIter(comptime T: type) type {
     return struct {
         result_set: *const ResultSet(T),
 
-        pub fn next(iter: *const ResultRowIter(T)) !?ResultRow(T) {
-            const row = try iter.result_set.readRow();
-            return switch (row) {
+        pub fn next(iter: *const ResultRowIter(T)) !?T {
+            const row_res = try iter.result_set.readRow();
+            return switch (row_res) {
                 .ok => return null,
                 .err => |err| err.asError(),
-                else => row,
+                .row => |row| row,
             };
         }
 
-        pub fn collectStructs(iter: *const ResultRowIter(BinaryResultRow), comptime Struct: type, allocator: std.mem.Allocator) !TableStructs(Struct) {
-            var row_acc = std.ArrayList(ResultRow(BinaryResultRow)).init(allocator);
-            while (try iter.next(allocator)) |row| {
-                const new_row_ptr = try row_acc.addOne();
-                new_row_ptr.* = row;
-            }
-
-            const structs = try allocator.alloc(Struct, row_acc.items.len);
-            for (row_acc.items, structs) |row, *s| {
-                const data = try row.expect(.row);
-                try data.scan(s);
-            }
-
-            return .{
-                .result_rows = try row_acc.toOwnedSlice(),
-                .rows = structs,
-            };
+        pub fn tableStructs(iter: *const ResultRowIter(BinaryResultRow), comptime Struct: type, allocator: std.mem.Allocator) !TableStructs(Struct) {
+            return TableStructs(Struct).init(iter, allocator);
         }
     };
 }
@@ -427,20 +442,29 @@ pub const TableTexts = struct {
 
 pub fn TableStructs(comptime Struct: type) type {
     return struct {
-        result_rows: []const ResultRow(BinaryResultRow),
-        rows: []const Struct,
+        struct_list: std.ArrayList(Struct),
+
+        pub fn init(iter: *const ResultRowIter(BinaryResultRow), allocator: std.mem.Allocator) !TableStructs(Struct) {
+            var struct_list = std.ArrayList(Struct).init(allocator);
+            while (try iter.next()) |row| {
+                const new_struct_ptr = try struct_list.addOne();
+                try conversion.scanBinResultRow(new_struct_ptr, &row.packet, row.col_defs, null);
+                new_struct_ptr.* = row;
+            }
+
+            return .{ .rows = struct_list };
+        }
 
         pub fn deinit(t: *const TableStructs(Struct), allocator: std.mem.Allocator) void {
-            for (t.result_rows) |row| {
-                row.deinit(allocator);
+            for (t.struct_list.items) |s| {
+                BinaryResultRow.structFreeDynamic(s, allocator);
             }
-            allocator.free(t.result_rows);
-            allocator.free(t.rows);
+            t.struct_list.deinit();
         }
 
         pub fn debugPrint(t: *const TableStructs(Struct)) void {
             const w = std.io.getStdOut().writer();
-            for (t.rows, 0..) |row, i| {
+            for (t.struct_list.items, 0..) |row, i| {
                 try w.print("row: {d} -> ", .{i});
                 try w.print("{any}", .{row});
                 try w.print("\n", .{});

@@ -8,7 +8,7 @@ const EnumFieldType = @import("./constants.zig").EnumFieldType;
 const Packet = @import("./protocol/packet.zig").Packet;
 
 // dest is a pointer to a struct
-pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const ColumnDefinition41) !void {
+pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const ColumnDefinition41, allocator: ?std.mem.Allocator) !void {
     var reader = packet.reader();
     const first = reader.readInt(u8);
     std.debug.assert(first == constants.BINARY_PROTOCOL_RESULTSET_ROW_HEADER);
@@ -34,7 +34,7 @@ pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const 
                 if (isNull) {
                     @field(dest, field.name) = null;
                 } else {
-                    @field(dest, field.name) = try binElemToValue(field_info.Optional.child, field.name, &col_def, &reader);
+                    @field(dest, field.name) = try binElemToValue(field_info.Optional.child, field.name, &col_def, &reader, allocator);
                 }
             },
             else => {
@@ -42,7 +42,7 @@ pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const 
                     std.log.err("column: {s} value is null, but field: {s} is not nullable\n", .{ col_def.name, field.name });
                     return error.UnexpectedNullMySQLValue;
                 }
-                @field(dest, field.name) = try binElemToValue(field.type, field.name, &col_def, &reader);
+                @field(dest, field.name) = try binElemToValue(field.type, field.name, &col_def, &reader, allocator);
             },
         }
     }
@@ -104,14 +104,25 @@ fn decodeDuration(reader: *PayloadReader) Duration {
     }
 }
 
-inline fn logConversionError(comptime FieldType: type, field_name: []const u8, col_name: []const u8, col_type: EnumFieldType) void {
+inline fn logConversionError(
+    comptime FieldType: type,
+    comptime field_name: []const u8,
+    col_name: []const u8,
+    col_type: EnumFieldType,
+) void {
     std.log.err(
         "Conversion Error: MySQL Column: (name: {s}, type: {any}), Zig Value: (name: {s}, type: {any})\n",
         .{ col_name, col_type, field_name, FieldType },
     );
 }
 
-inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, reader: *PayloadReader) !FieldType {
+inline fn binElemToValue(
+    comptime FieldType: type,
+    comptime field_name: []const u8,
+    col_def: *const ColumnDefinition41,
+    reader: *PayloadReader,
+    allocator: ?std.mem.Allocator,
+) !FieldType {
     const field_info = @typeInfo(FieldType);
     const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
 
@@ -153,7 +164,16 @@ inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_d
                             .MYSQL_TYPE_BIT,
                             .MYSQL_TYPE_DECIMAL,
                             .MYSQL_TYPE_NEWDECIMAL,
-                            => return reader.readLengthEncodedString(),
+                            => {
+                                const str = reader.readLengthEncodedString();
+                                if (allocator) |a| {
+                                    if (pointer.sentinel) |_| {
+                                        return try a.dupeZ(u8, str);
+                                    }
+                                    return try a.dupe(u8, str);
+                                }
+                                return str;
+                            },
                             else => {},
                         }
                     }
