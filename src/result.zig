@@ -93,20 +93,25 @@ pub fn ResultSet(comptime T: type) type {
             };
         }
 
-        fn deinit(t: *const ResultSet(T), allocator: std.mem.Allocator) void {
-            for (t.col_packets) |packet| {
+        fn deinit(r: *const ResultSet(T), allocator: std.mem.Allocator) void {
+            for (r.col_packets) |packet| {
                 packet.deinit(allocator);
             }
-            allocator.free(t.col_packets);
-            allocator.free(t.col_defs);
+            allocator.free(r.col_packets);
+            allocator.free(r.col_defs);
         }
 
-        pub fn readRow(t: *const ResultSet(T)) !ResultRow(T) {
-            return ResultRow(T).init(t.conn, t.col_defs);
+        pub fn readRow(r: *const ResultSet(T)) !ResultRow(T) {
+            return ResultRow(T).init(r.conn, r.col_defs);
         }
 
-        pub fn iter(t: *const ResultSet(T)) ResultRowIter(T) {
-            return .{ .result_set = t };
+        pub fn tableTexts(r: *const ResultSet(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
+            const all_rows = try collectAllRowsPacketUntilEof(r.conn, allocator);
+            return try TableTexts.init(all_rows, allocator, r.col_defs.len);
+        }
+
+        pub fn iter(r: *const ResultSet(T)) ResultRowIter(T) {
+            return .{ .result_set = r };
         }
     };
 }
@@ -122,17 +127,6 @@ pub const TextResultRow = struct {
     pub fn textElems(t: *const TextResultRow, allocator: std.mem.Allocator) !TextElems {
         return TextElems.init(t.packet, allocator, t.col_defs.len);
     }
-
-    // pub fn scan(t: *const TextResultRow, dest: []?[]const u8) !void {
-    //     std.debug.assert(dest.len == t.col_defs.len);
-    //     try scanTextResultRow(dest, t.packet);
-    // }
-
-    // pub fn scanAlloc(t: *const TextResultRow, allocator: std.mem.Allocator) ![]?[]const u8 {
-    //     const record = try allocator.alloc(?[]const u8, t.col_defs.len);
-    //     try t.scan(record);
-    //     return record;
-    // }
 };
 
 pub const TextElems = struct {
@@ -143,17 +137,7 @@ pub const TextElems = struct {
         const packet = try p.cloneAlloc(allocator);
         errdefer packet.deinit(allocator);
         const elems = try allocator.alloc(?[]const u8, n);
-        var reader = packet.reader();
-        for (elems) |*e| {
-            e.* = blk: {
-                const first_byte = reader.peek() orelse unreachable;
-                if (first_byte == constants.TEXT_RESULT_ROW_NULL) {
-                    reader.skipComptime(1);
-                    break :blk null;
-                }
-                break :blk reader.readLengthEncodedString();
-            };
-        }
+        scanTextResultRow(elems, &packet);
         return .{ .packet = packet, .elems = elems };
     }
 
@@ -180,19 +164,16 @@ pub const TextElemIter = struct {
     }
 };
 
-pub fn scanTextResultRow(dest: []?[]const u8, packet: *const Packet) !void {
-    var packet_reader = packet.reader();
+fn scanTextResultRow(dest: []?[]const u8, packet: *const Packet) void {
+    var reader = packet.reader();
     for (dest) |*d| {
         d.* = blk: {
-            const first_byte = blk2: {
-                const byte_opt = packet_reader.peek();
-                break :blk2 byte_opt orelse return error.NoNextByte;
-            };
+            const first_byte = reader.peek() orelse unreachable;
             if (first_byte == constants.TEXT_RESULT_ROW_NULL) {
-                packet_reader.forward_one();
+                reader.skipComptime(1);
                 break :blk null;
             }
-            break :blk packet_reader.readLengthEncodedString();
+            break :blk reader.readLengthEncodedString();
         };
     }
 }
@@ -251,6 +232,28 @@ pub fn ResultRow(comptime T: type) type {
             };
         }
     };
+}
+
+fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: std.mem.Allocator) !std.ArrayList(Packet) {
+    var packet_list = std.ArrayList(Packet).init(allocator);
+    errdefer packet_list.deinit();
+
+    // Accumulate all packets until EOF
+    while (true) {
+        const packet = try conn.readPacket();
+        return switch (packet.payload[0]) {
+            constants.ERR => ErrorPacket.init(&packet).asError(),
+            constants.EOF => {
+                _ = OkPacket.init(&packet, conn.client_capabilities);
+                return packet_list;
+            },
+            else => {
+                const owned_packet = try packet.cloneAlloc(allocator);
+                try packet_list.append(owned_packet);
+                continue;
+            },
+        };
+    }
 }
 
 pub const PrepareResult = struct {
@@ -355,30 +358,6 @@ pub fn ResultRowIter(comptime T: type) type {
             };
         }
 
-        pub fn collectTexts(iter: *const ResultRowIter(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
-            var row_acc = std.ArrayList(ResultRow(TextResultRow)).init(allocator);
-            while (try iter.next(allocator)) |row| {
-                const new_row_ptr = try row_acc.addOne();
-                new_row_ptr.* = row;
-            }
-
-            const num_cols = iter.result_set.col_defs.len;
-            var rows = try allocator.alloc([]?[]const u8, row_acc.items.len); //TODO: alloc once inst instead
-            var elems = try allocator.alloc(?[]const u8, row_acc.items.len * num_cols);
-            for (row_acc.items, 0..) |row, i| {
-                const dest_row = elems[i * num_cols .. (i + 1) * num_cols];
-                const data = try row.expect(.data);
-                try data.scan(dest_row);
-                rows[i] = dest_row;
-            }
-
-            return .{
-                .result_rows = try row_acc.toOwnedSlice(),
-                .elems = elems,
-                .rows = rows,
-            };
-        }
-
         pub fn collectStructs(iter: *const ResultRowIter(BinaryResultRow), comptime Struct: type, allocator: std.mem.Allocator) !TableStructs(Struct) {
             var row_acc = std.ArrayList(ResultRow(BinaryResultRow)).init(allocator);
             while (try iter.next(allocator)) |row| {
@@ -401,22 +380,41 @@ pub fn ResultRowIter(comptime T: type) type {
 }
 
 pub const TableTexts = struct {
-    result_rows: []const ResultRow(TextResultRow),
-    elems: []const ?[]const u8,
-    rows: []const []const ?[]const u8,
+    packet_list: std.ArrayList(Packet),
 
-    pub fn deinit(t: *const TableTexts, allocator: std.mem.Allocator) void {
-        for (t.result_rows) |row| {
-            row.deinit(allocator);
+    flattened: []const ?[]const u8,
+    table: []const []const ?[]const u8,
+
+    fn init(packet_list: std.ArrayList(Packet), allocator: std.mem.Allocator, n_cols: usize) !TableTexts {
+        var table = try allocator.alloc([]?[]const u8, packet_list.items.len); // TODO: alloc once instead
+        var flattened = try allocator.alloc(?[]const u8, packet_list.items.len * n_cols);
+
+        for (packet_list.items, 0..) |packet, i| {
+            const dest_row = flattened[i * n_cols .. (i + 1) * n_cols];
+            scanTextResultRow(dest_row, &packet);
+            table[i] = dest_row;
         }
-        allocator.free(t.result_rows);
-        allocator.free(t.rows);
-        allocator.free(t.elems);
+
+        return .{
+            .packet_list = packet_list,
+            .flattened = flattened,
+            .table = table,
+        };
     }
 
-    pub fn debugPrint(t: *const TableTexts) void {
+    pub fn deinit(t: *const TableTexts, allocator: std.mem.Allocator) void {
+        for (t.packet_list.items) |packet| {
+            packet.deinit(t.packet_list.allocator);
+        }
+
+        t.packet_list.deinit();
+        allocator.free(t.table);
+        allocator.free(t.flattened);
+    }
+
+    pub fn debugPrint(t: *const TableTexts) !void {
         const w = std.io.getStdOut().writer();
-        for (t.rows, 0..) |row, i| {
+        for (t.table, 0..) |row, i| {
             try w.print("row: {d} -> ", .{i});
             try w.print("|", .{});
             for (row) |elem| {

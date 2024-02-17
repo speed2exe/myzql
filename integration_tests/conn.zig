@@ -55,24 +55,23 @@ test "query text protocol" {
     var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
 
-    {
+    { // Iterating over rows and elements
         const query_res = try c.query(allocator, "SELECT 1");
         defer query_res.deinit(allocator);
 
         const rows: *const ResultSet(TextResultRow) = try query_res.expect(.rows);
         const rows_iter: ResultRowIter(TextResultRow) = rows.iter();
-        while (try rows_iter.next()) |result_row| {
+        while (try rows_iter.next()) |result_row| { // ResultRow(TextResultRow)
             const row: *const TextResultRow = try result_row.expect(.row);
             var elems_iter: TextElemIter = row.iter();
-            const elem: ??[]const u8 = elems_iter.next();
-            try std.testing.expectEqualDeep(@as(?[]const u8, "1"), elem);
-
-            const elem2: ??[]const u8 = elems_iter.next();
-            try std.testing.expectEqualDeep(@as(??[]const u8, null), elem2);
+            while (elems_iter.next()) |elem| { // ?[] const u8
+                try std.testing.expectEqualDeep(@as(?[]const u8, "1"), elem);
+            }
         }
     }
     {
-        const query_res = try c.query(allocator, "SELECT 3, 4");
+        // Iterating over rows, collecting elements into []const ?[]const u8
+        const query_res = try c.query(allocator, "SELECT 3, 4, null, 6, 7");
         defer query_res.deinit(allocator);
 
         const rows: *const ResultSet(TextResultRow) = try query_res.expect(.rows);
@@ -82,61 +81,28 @@ test "query text protocol" {
             const elems: TextElems = try row.textElems(allocator);
             defer elems.deinit(allocator);
 
-            // var elems_iter: TextElemIter = row.iter();
-            // const elem: ??[]const u8 = elems_iter.next();
-            // try std.testing.expectEqualDeep(@as(?[]const u8, "1"), elem);
-
-            // const elem2: ??[]const u8 = elems_iter.next();
-            // try std.testing.expectEqualDeep(@as(??[]const u8, null), elem2);
+            try std.testing.expectEqualDeep(
+                @as([]const ?[]const u8, &.{ "3", "4", null, "6", "7" }),
+                elems.elems,
+            );
         }
     }
-    // {
-    //     const query_res = try c.query(allocator, "SELECT 5,null,7");
-    //     defer query_res.deinit(allocator);
-    //     const rows = (try query_res.expect(.rows)).iter();
-    //     var dest = [_]?[]const u8{ undefined, undefined, undefined };
-    //     while (try rows.next(allocator)) |row| {
-    //         defer row.deinit(allocator);
-    //         const data = try row.expect(.data);
-    //         try data.scan(&dest);
-    //         try std.testing.expectEqualSlices(u8, "5", dest[0].?);
-    //         try std.testing.expectEqual(@as(?[]const u8, null), dest[1]);
-    //         try std.testing.expectEqualSlices(u8, "7", dest[2].?);
-    //     }
-    // }
-    // {
-    //     const query_res = try c.query(allocator, "SELECT 8,9 UNION ALL SELECT 10,11");
-    //     defer query_res.deinit(allocator);
-    //     const rows = try query_res.expect(.rows);
+    {
+        const query_res = try c.query(allocator, "SELECT 8,9 UNION ALL SELECT 10,11");
+        defer query_res.deinit(allocator);
 
-    //     {
-    //         var dest = [_]?[]const u8{ undefined, undefined };
-    //         const row = try rows.readRow(allocator);
-    //         defer row.deinit(std.testing.allocator);
-    //         const data = try row.expect(.data);
-    //         try data.scan(&dest);
-    //         try std.testing.expectEqualSlices(u8, "8", dest[0].?);
-    //         try std.testing.expectEqualSlices(u8, "9", dest[1].?);
-    //     }
-    //     {
-    //         const row = try rows.readRow(allocator);
-    //         defer row.deinit(std.testing.allocator);
-    //         const data = try row.expect(.data);
-    //         const dest = try data.scanAlloc(allocator);
-    //         defer allocator.free(dest);
-    //         try std.testing.expectEqualSlices(u8, "10", dest[0].?);
-    //         try std.testing.expectEqualSlices(u8, "11", dest[1].?);
-    //     }
-    //     {
-    //         const row = try rows.readRow(std.testing.allocator);
-    //         defer row.deinit(std.testing.allocator);
-    //         switch (row.value) {
-    //             .ok => {},
-    //             .err => |err| return err.asError(),
-    //             .data => @panic("unexpected data"),
-    //         }
-    //     }
-    // }
+        const rows: *const ResultSet(TextResultRow) = try query_res.expect(.rows);
+        const table = try rows.tableTexts(allocator);
+        defer table.deinit(allocator);
+
+        try std.testing.expectEqualDeep(
+            @as([]const []const ?[]const u8, &.{
+                &.{ "8", "9" },
+                &.{ "10", "11" },
+            }),
+            table.table,
+        );
+    }
 }
 
 test "query text table" {
