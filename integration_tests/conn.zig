@@ -161,7 +161,7 @@ test "prepare execute - 1" {
         const prep_res = try c.prepare(allocator, "CREATE DATABASE testdb2");
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.ok);
-        const query_res = try c.execute(allocator, &prep_stmt, .{});
+        const query_res = try c.execute(allocator, prep_stmt, .{});
         defer query_res.deinit(allocator);
         _ = try query_res.expect(.ok);
     }
@@ -169,7 +169,7 @@ test "prepare execute - 1" {
         const prep_res = try c.prepare(allocator, "DROP DATABASE testdb2");
         defer prep_res.deinit(allocator);
         const prep_ok = try prep_res.expect(.ok);
-        const query_res = try c.execute(allocator, &prep_ok, .{});
+        const query_res = try c.execute(allocator, prep_ok, .{});
         defer query_res.deinit(allocator);
         _ = try query_res.expect(.ok);
     }

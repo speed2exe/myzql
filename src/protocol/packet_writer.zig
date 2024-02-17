@@ -89,7 +89,7 @@ pub const PacketWriter = struct {
         // ^u24 payload_length  ^u8 seq_id  ^payload
 
         if (has_params) {
-            try packet.write(p, params);
+            try packet.writeWithParams(p, params);
         } else {
             try packet.write(p);
         }

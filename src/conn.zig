@@ -126,13 +126,13 @@ pub const Conn = struct {
     }
 
     pub fn execute(c: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultData) {
-        std.debug.assert(c.state == .connected);
         c.sequence_id = 0;
         const execute_request: ExecuteRequest = .{
             .capabilities = c.client_capabilities,
             .prep_stmt = prep_stmt,
         };
-        try c.sendPacketUsingSmallPacketWriterWithParams(execute_request, params);
+        try c.writePacketWithParam(execute_request, params);
+        try c.writer.flush();
         return QueryResult(BinaryResultData).init(c, allocator);
     }
 
@@ -222,6 +222,10 @@ pub const Conn = struct {
 
     inline fn writePacket(c: *Conn, packet: anytype) !void {
         try c.writer.writePacket(c.generateSequenceId(), packet);
+    }
+
+    inline fn writePacketWithParam(c: *Conn, packet: anytype, params: anytype) !void {
+        try c.writer.writePacketWithParams(c.generateSequenceId(), packet, params);
     }
 
     inline fn writeBytesAsPacket(c: *Conn, packet: anytype) !void {
