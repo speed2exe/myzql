@@ -119,7 +119,7 @@ pub const TextResultRow = struct {
     col_defs: []const ColumnDefinition41,
 
     pub fn iter(t: *const TextResultRow) TextElemIter {
-        return TextElemIter.init(t.packet);
+        return TextElemIter.init(&t.packet);
     }
 
     pub fn textElems(t: *const TextResultRow, allocator: std.mem.Allocator) !TextElems {
@@ -449,10 +449,8 @@ pub fn TableStructs(comptime Struct: type) type {
             while (try iter.next()) |row| {
                 const new_struct_ptr = try struct_list.addOne();
                 try conversion.scanBinResultRow(new_struct_ptr, &row.packet, row.col_defs, null);
-                new_struct_ptr.* = row;
             }
-
-            return .{ .rows = struct_list };
+            return .{ .struct_list = struct_list };
         }
 
         pub fn deinit(t: *const TableStructs(Struct), allocator: std.mem.Allocator) void {

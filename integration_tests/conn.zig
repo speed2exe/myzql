@@ -254,33 +254,34 @@ test "prepare execute with result" {
 
         try std.testing.expectEqualDeep(dest_ptr.b, "hello");
     }
-    // {
-    //     const query =
-    //         \\SELECT 1, 2, 3
-    //         \\UNION ALL
-    //         \\SELECT 4, 5, 6
-    //     ;
-    //     const prep_res = try c.prepare(allocator, query);
-    //     defer prep_res.deinit(allocator);
-    //     const prep_stmt = try prep_res.expect(.stmt);
-    //     const query_res = try c.execute(allocator, &prep_stmt, .{});
-    //     defer query_res.deinit(allocator);
-    //     const rows = (try query_res.expect(.rows)).iter();
+    {
+        const query =
+            \\SELECT 1, 2, 3
+            \\UNION ALL
+            \\SELECT 4, 5, 6
+        ;
+        const prep_res = try c.prepare(allocator, query);
+        defer prep_res.deinit(allocator);
+        const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
+        const query_res = try c.execute(allocator, &prep_stmt, .{});
+        defer query_res.deinit(allocator);
+        const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
+        const rows_iter = rows.iter();
 
-    //     const MyType = struct {
-    //         a: u8,
-    //         b: u8,
-    //         c: u8,
-    //     };
-    //     const expected: []const MyType = &.{
-    //         .{ .a = 1, .b = 2, .c = 3 },
-    //         .{ .a = 4, .b = 5, .c = 6 },
-    //     };
+        const MyType = struct {
+            a: u8,
+            b: u8,
+            c: u8,
+        };
+        const expected: []const MyType = &.{
+            .{ .a = 1, .b = 2, .c = 3 },
+            .{ .a = 4, .b = 5, .c = 6 },
+        };
 
-    //     const structs = try rows.collectStructs(MyType, allocator);
-    //     defer structs.deinit(allocator);
-    //     try std.testing.expectEqualDeep(expected, structs.rows);
-    // }
+        const structs = try rows_iter.tableStructs(MyType, allocator);
+        defer structs.deinit(allocator);
+        try std.testing.expectEqualDeep(expected, structs.struct_list.items);
+    }
 }
 
 // test "binary data types - int" {
