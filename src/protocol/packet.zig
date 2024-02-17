@@ -25,7 +25,7 @@ pub const Packet = struct {
     }
 
     pub fn cloneAlloc(packet: *const Packet, allocator: std.mem.Allocator) !Packet {
-        const payload_copy = try allocator.alloc(u8, packet.payload.len);
+        const payload_copy = try allocator.dupe(u8, packet.payload);
         return .{ .sequence_id = packet.sequence_id, .payload = payload_copy };
     }
 
@@ -98,11 +98,11 @@ pub const PayloadReader = struct {
         p.pos += n;
     }
 
-    pub fn finished(p: *PayloadReader) bool {
+    pub fn finished(p: *const PayloadReader) bool {
         return p.payload.len == p.pos;
     }
 
-    pub fn remained(p: *PayloadReader) usize {
+    pub fn remained(p: *const PayloadReader) usize {
         return p.payload.len - p.pos;
     }
 

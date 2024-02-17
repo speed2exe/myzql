@@ -10,9 +10,10 @@ const ErrorPacket = protocol.generic_response.ErrorPacket;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 const Conn = @import("./conn.zig").Conn;
 const EofPacket = protocol.generic_response.EofPacket;
-const DateTime = @import("./temporal.zig").DateTime;
-const Duration = @import("./temporal.zig").Duration;
-const EnumFieldType = constants.EnumFieldType;
+// const DateTime = @import("./temporal.zig").DateTime;
+// const Duration = @import("./temporal.zig").Duration;
+// const EnumFieldType = constants.EnumFieldType;
+const conversion = @import("./conversion.zig");
 
 pub fn QueryResult(comptime T: type) type {
     return union(enum) {
@@ -62,66 +63,6 @@ pub fn QueryResult(comptime T: type) type {
     };
 }
 
-// pub fn QueryResult2(comptime T: type) type {
-//     return struct {
-//         const Value = union(enum) {
-//             ok: OkPacket,
-//             err: ErrorPacket,
-//             rows: ResultSet(T),
-//         };
-//         packet: Packet,
-//         value: Value,
-//
-//         pub fn init(conn: *Conn, allocator: std.mem.Allocator) !QueryResult2(T) {
-//             const packet = try conn.newPacketStream(allocator);
-//             return .{
-//                 .packet = packet,
-//                 .value = switch (packet.payload[0]) {
-//                     constants.OK => .{ .ok = OkPacket.init(&packet, conn.client_capabilities) },
-//                     constants.ERR => .{ .err = ErrorPacket.init(&packet) },
-//                     constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-//                     else => .{ .rows = blk: {
-//                         const reader = packet.reader();
-//                         const column_count = reader.readLengthEncodedInteger();
-//                         std.debug.assert(reader.finished());
-//                         break :blk try ResultSet(T).init(allocator, conn, column_count);
-//                     } },
-//                 },
-//             };
-//         }
-//
-//         pub fn deinit(q: *const QueryResult2(T), allocator: std.mem.Allocator) void {
-//             q.packet.deinit(allocator);
-//             switch (q.value) {
-//                 .rows => |rows| rows.deinit(allocator),
-//                 else => {},
-//             }
-//         }
-//
-//         pub fn expect(
-//             q: *const QueryResult2(T),
-//             comptime value_variant: std.meta.FieldEnum(Value),
-//         ) !std.meta.FieldType(Value, value_variant) {
-//             return switch (q.value) {
-//                 value_variant => @field(q.value, @tagName(value_variant)),
-//                 else => {
-//                     return switch (q.value) {
-//                         .err => |err| return err.asError(),
-//                         .ok => |ok| {
-//                             std.log.err("Unexpected OkPacket: {any}\n", .{ok});
-//                             return error.UnexpectedOk;
-//                         },
-//                         .rows => |rows| {
-//                             std.log.err("Unexpected ResultSet: {any}\n", .{rows});
-//                             return error.UnexpectedResultSet;
-//                         },
-//                     };
-//                 },
-//             };
-//         }
-//     };
-// }
-
 pub fn ResultSet(comptime T: type) type {
     return struct {
         conn: *Conn,
@@ -142,7 +83,7 @@ pub fn ResultSet(comptime T: type) type {
             for (col_packets, col_defs) |*pac, *def| {
                 const col_def_packet = try conn.readPacket();
                 pac.* = try col_def_packet.cloneAlloc(allocator);
-                def.* = ColumnDefinition41.init(pac);
+                def.* = ColumnDefinition41.init(&col_def_packet);
             }
 
             return .{
@@ -160,43 +101,113 @@ pub fn ResultSet(comptime T: type) type {
             allocator.free(t.col_defs);
         }
 
-        pub fn readRow(t: *const ResultSet(T), allocator: std.mem.Allocator) !ResultRow(T) {
-            return ResultRow(T).init(t.conn, allocator, t.col_defs);
+        pub fn readRow(t: *const ResultSet(T)) !ResultRow(T) {
+            return ResultRow(T).init(t.conn, t.col_defs);
         }
 
-        pub fn iter(t: *const ResultSet(T)) ResultSetIter(T) {
+        pub fn iter(t: *const ResultSet(T)) ResultRowIter(T) {
             return .{ .result_set = t };
         }
     };
 }
 
-pub const TextResultData = struct {
-    raw: []const u8,
+pub const TextResultRow = struct {
+    packet: *const Packet,
     col_defs: []const ColumnDefinition41,
 
-    pub fn scan(t: *const TextResultData, dest: []?[]const u8) !void {
-        std.debug.assert(dest.len == t.col_defs.len);
-        try scanTextResultRow(dest, t.raw);
+    pub fn iter(t: *const TextResultRow) TextElemIter {
+        return TextElemIter.init(t.packet);
     }
 
-    pub fn scanAlloc(t: *const TextResultData, allocator: std.mem.Allocator) ![]?[]const u8 {
-        const record = try allocator.alloc(?[]const u8, t.col_defs.len);
-        try t.scan(record);
-        return record;
+    pub fn textElems(t: *const TextResultRow, allocator: std.mem.Allocator) !TextElems {
+        return TextElems.init(t.packet, allocator, t.col_defs.len);
+    }
+
+    // pub fn scan(t: *const TextResultRow, dest: []?[]const u8) !void {
+    //     std.debug.assert(dest.len == t.col_defs.len);
+    //     try scanTextResultRow(dest, t.packet);
+    // }
+
+    // pub fn scanAlloc(t: *const TextResultRow, allocator: std.mem.Allocator) ![]?[]const u8 {
+    //     const record = try allocator.alloc(?[]const u8, t.col_defs.len);
+    //     try t.scan(record);
+    //     return record;
+    // }
+};
+
+pub const TextElems = struct {
+    packet: Packet,
+    elems: []const ?[]const u8,
+
+    pub fn init(p: *const Packet, allocator: std.mem.Allocator, n: usize) !TextElems {
+        const packet = try p.cloneAlloc(allocator);
+        errdefer packet.deinit(allocator);
+        const elems = try allocator.alloc(?[]const u8, n);
+        var reader = packet.reader();
+        for (elems) |*e| {
+            e.* = blk: {
+                const first_byte = reader.peek() orelse unreachable;
+                if (first_byte == constants.TEXT_RESULT_ROW_NULL) {
+                    reader.skipComptime(1);
+                    break :blk null;
+                }
+                break :blk reader.readLengthEncodedString();
+            };
+        }
+        return .{ .packet = packet, .elems = elems };
+    }
+
+    pub fn deinit(t: *const TextElems, allocator: std.mem.Allocator) void {
+        t.packet.deinit(allocator);
+        allocator.free(t.elems);
     }
 };
 
-pub const BinaryResultData = struct {
+pub const TextElemIter = struct {
+    reader: PayloadReader,
+
+    pub fn init(packet: *const Packet) TextElemIter {
+        return .{ .reader = packet.reader() };
+    }
+
+    pub fn next(i: *TextElemIter) ??[]const u8 {
+        const first_byte = i.reader.peek() orelse return null;
+        if (first_byte == constants.TEXT_RESULT_ROW_NULL) {
+            i.reader.skipComptime(1);
+            return @as(?[]const u8, null);
+        }
+        return i.reader.readLengthEncodedString();
+    }
+};
+
+pub fn scanTextResultRow(dest: []?[]const u8, packet: *const Packet) !void {
+    var packet_reader = packet.reader();
+    for (dest) |*d| {
+        d.* = blk: {
+            const first_byte = blk2: {
+                const byte_opt = packet_reader.peek();
+                break :blk2 byte_opt orelse return error.NoNextByte;
+            };
+            if (first_byte == constants.TEXT_RESULT_ROW_NULL) {
+                packet_reader.forward_one();
+                break :blk null;
+            }
+            break :blk packet_reader.readLengthEncodedString();
+        };
+    }
+}
+
+pub const BinaryResultRow = struct {
     raw: []const u8,
     col_defs: []const ColumnDefinition41,
 
     // dest: pointer to a struct
-    pub fn scan(b: *const BinaryResultData, dest: anytype) !void {
-        try scanBinResultRow(dest, b.raw, b.col_defs);
+    pub fn scan(b: *const BinaryResultRow, dest: anytype) !void {
+        try conversion.scanBinResultRow(dest, b.raw, b.col_defs);
     }
 
     // returns a pointer to allocated struct object, caller must remember to call destroy on the object after use
-    pub fn scanAlloc(b: *const BinaryResultData, comptime S: type, allocator: std.mem.Allocator) !*S {
+    pub fn scanAlloc(b: *const BinaryResultRow, comptime S: type, allocator: std.mem.Allocator) !*S {
         const s = try allocator.create(S);
         try b.scan(s);
         return s;
@@ -204,48 +215,40 @@ pub const BinaryResultData = struct {
 };
 
 pub fn ResultRow(comptime T: type) type {
-    return struct {
-        const Value = union(enum) {
-            err: ErrorPacket,
-            ok: OkPacket,
-            data: T,
-        };
-        packet: Packet,
-        value: Value,
+    return union(enum) {
+        err: ErrorPacket,
+        ok: OkPacket,
+        row: T,
 
-        fn init(conn: *Conn, allocator: std.mem.Allocator, col_defs: []const ColumnDefinition41) !ResultRow(T) {
-            const packet = try conn.newPacketStream(allocator);
-            return .{
-                .packet = packet,
-                .value = switch (packet.payload[0]) {
-                    constants.ERR => .{ .err = ErrorPacket.init(false, &packet) },
-                    constants.EOF => .{ .ok = OkPacket.init(&packet, conn.client_capabilities) },
-                    else => .{ .data = .{ .raw = packet.payload, .col_defs = col_defs } },
-                },
+        fn init(conn: *Conn, col_defs: []const ColumnDefinition41) !ResultRow(T) {
+            const packet = try conn.readPacket();
+            return switch (packet.payload[0]) {
+                constants.ERR => .{ .err = ErrorPacket.init(&packet) },
+                constants.EOF => .{ .ok = OkPacket.init(&packet, conn.client_capabilities) },
+                else => .{ .row = .{ .packet = &packet, .col_defs = col_defs } },
             };
         }
 
         pub fn expect(
             r: *const ResultRow(T),
-            comptime variant: std.meta.FieldEnum(Value),
-        ) !std.meta.FieldType(Value, variant) {
-            return switch (r.value) {
-                variant => @field(r.value, @tagName(variant)),
+            comptime value_variant: std.meta.FieldEnum(ResultRow(T)),
+        ) !*const std.meta.FieldType(ResultRow(T), value_variant) {
+            return switch (r.*) {
+                value_variant => &@field(r, @tagName(value_variant)),
                 else => {
-                    return switch (r.value) {
+                    return switch (r.*) {
                         .err => |err| return err.asError(),
-                        .ok => |_| return r.packet.asError(),
-                        .data => |data| {
-                            std.log.err("Unexpected ResultData: {any}\n", .{data});
+                        .ok => |ok| {
+                            std.log.err("Unexpected OkPacket: {any}\n", .{ok});
+                            return error.UnexpectedOk;
+                        },
+                        .row => |data| {
+                            std.log.err("Unexpected Row: {any}\n", .{data});
                             return error.UnexpectedResultData;
                         },
                     };
                 },
             };
-        }
-
-        pub fn deinit(r: *const ResultRow(T), allocator: std.mem.Allocator) void {
-            r.packet.deinit(allocator);
         }
     };
 }
@@ -339,324 +342,21 @@ pub const PreparedStatement = struct {
     }
 };
 
-// dest is a pointer to a struct
-fn scanBinResultRow(dest: anytype, raw: []const u8, col_defs: []const ColumnDefinition41) !void {
-    var reader = PayloadReader.init(raw);
-    const first = reader.readByte();
-    std.debug.assert(first == constants.BINARY_PROTOCOL_RESULTSET_ROW_HEADER);
-
-    // null bitmap
-    const null_bitmap_len = (col_defs.len + 7 + 2) / 8;
-    const null_bitmap = reader.readFixedRuntime(null_bitmap_len);
-
-    const child_type = @typeInfo(@TypeOf(dest)).Pointer.child;
-    const struct_fields = @typeInfo(child_type).Struct.fields;
-
-    if (struct_fields.len != col_defs.len) {
-        std.log.err("received {d} columns from mysql, but given {d} fields for struct", .{ struct_fields.len, col_defs.len });
-        return error.ColumnAndFieldCountMismatch;
-    }
-
-    inline for (struct_fields, col_defs, 0..) |field, col_def, i| {
-        const field_info = @typeInfo(field.type);
-        const isNull = binResIsNull(null_bitmap, i);
-
-        switch (field_info) {
-            .Optional => {
-                if (isNull) {
-                    @field(dest, field.name) = null;
-                } else {
-                    @field(dest, field.name) = try binElemToValue(field_info.Optional.child, field.name, &col_def, &reader);
-                }
-            },
-            else => {
-                if (isNull) {
-                    std.log.err("column: {s} value is null, but field: {s} is not nullable\n", .{ col_def.name, field.name });
-                    return error.UnexpectedNullMySQLValue;
-                }
-                @field(dest, field.name) = try binElemToValue(field.type, field.name, &col_def, &reader);
-            },
-        }
-    }
-    std.debug.assert(reader.finished());
-}
-
-fn decodeDateTime(reader: *PayloadReader) DateTime {
-    const length = reader.readByte();
-    switch (length) {
-        11 => return .{
-            .year = reader.readUInt16(),
-            .month = reader.readByte(),
-            .day = reader.readByte(),
-            .hour = reader.readByte(),
-            .minute = reader.readByte(),
-            .second = reader.readByte(),
-            .microsecond = reader.readUInt32(),
-        },
-        7 => return .{
-            .year = reader.readUInt16(),
-            .month = reader.readByte(),
-            .day = reader.readByte(),
-            .hour = reader.readByte(),
-            .minute = reader.readByte(),
-            .second = reader.readByte(),
-        },
-        4 => return .{
-            .year = reader.readUInt16(),
-            .month = reader.readByte(),
-            .day = reader.readByte(),
-        },
-        0 => return .{},
-        else => unreachable,
-    }
-}
-
-fn decodeDuration(reader: *PayloadReader) Duration {
-    const length = reader.readByte();
-    switch (length) {
-        12 => return .{
-            .is_negative = reader.readByte(),
-            .days = reader.readUInt32(),
-            .hours = reader.readByte(),
-            .minutes = reader.readByte(),
-            .seconds = reader.readByte(),
-            .microseconds = reader.readUInt32(),
-        },
-        8 => return .{
-            .is_negative = reader.readByte(),
-            .days = reader.readUInt32(),
-            .hours = reader.readByte(),
-            .minutes = reader.readByte(),
-            .seconds = reader.readByte(),
-        },
-        0 => return .{},
-        else => {
-            unreachable;
-        },
-    }
-}
-
-pub fn scanTextResultRow(dest: []?[]const u8, raw: []const u8) !void {
-    var packet_reader = PayloadReader.init(raw);
-    for (dest) |*d| {
-        d.* = blk: {
-            const first_byte = blk2: {
-                const byte_opt = packet_reader.peek();
-                break :blk2 byte_opt orelse return error.NoNextByte;
-            };
-            if (first_byte == constants.TEXT_RESULT_ROW_NULL) {
-                packet_reader.forward_one();
-                break :blk null;
-            }
-            break :blk packet_reader.readLengthEncodedString();
-        };
-    }
-}
-
-inline fn logConversionError(comptime FieldType: type, field_name: []const u8, col_name: []const u8, col_type: EnumFieldType) void {
-    std.log.err(
-        "Conversion Error: MySQL Column: (name: {s}, type: {any}), Zig Value: (name: {s}, type: {any})\n",
-        .{ col_name, col_type, field_name, FieldType },
-    );
-}
-
-inline fn binElemToValue(comptime FieldType: type, field_name: []const u8, col_def: *const ColumnDefinition41, reader: *PayloadReader) !FieldType {
-    const field_info = @typeInfo(FieldType);
-    const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
-
-    switch (FieldType) {
-        DateTime => {
-            switch (col_type) {
-                .MYSQL_TYPE_DATE,
-                .MYSQL_TYPE_DATETIME,
-                .MYSQL_TYPE_TIMESTAMP,
-                => return decodeDateTime(reader),
-                else => {},
-            }
-        },
-        Duration => {
-            switch (col_type) {
-                .MYSQL_TYPE_TIME => return decodeDuration(reader),
-                else => {},
-            }
-        },
-        else => {},
-    }
-
-    switch (field_info) {
-        .Pointer => |pointer| {
-            switch (@typeInfo(pointer.child)) {
-                .Int => |int| {
-                    if (int.bits == 8) {
-                        switch (col_type) {
-                            .MYSQL_TYPE_STRING,
-                            .MYSQL_TYPE_VARCHAR,
-                            .MYSQL_TYPE_VAR_STRING,
-                            .MYSQL_TYPE_ENUM,
-                            .MYSQL_TYPE_SET,
-                            .MYSQL_TYPE_LONG_BLOB,
-                            .MYSQL_TYPE_MEDIUM_BLOB,
-                            .MYSQL_TYPE_BLOB,
-                            .MYSQL_TYPE_TINY_BLOB,
-                            .MYSQL_TYPE_GEOMETRY,
-                            .MYSQL_TYPE_BIT,
-                            .MYSQL_TYPE_DECIMAL,
-                            .MYSQL_TYPE_NEWDECIMAL,
-                            => return reader.readLengthEncodedString(),
-                            else => {},
-                        }
-                    }
-                },
-                else => {},
-            }
-        },
-        .Enum => |e| {
-            switch (col_type) {
-                .MYSQL_TYPE_STRING,
-                .MYSQL_TYPE_VARCHAR,
-                .MYSQL_TYPE_VAR_STRING,
-                .MYSQL_TYPE_ENUM,
-                .MYSQL_TYPE_SET,
-                .MYSQL_TYPE_LONG_BLOB,
-                .MYSQL_TYPE_MEDIUM_BLOB,
-                .MYSQL_TYPE_BLOB,
-                .MYSQL_TYPE_TINY_BLOB,
-                .MYSQL_TYPE_GEOMETRY,
-                .MYSQL_TYPE_BIT,
-                .MYSQL_TYPE_DECIMAL,
-                .MYSQL_TYPE_NEWDECIMAL,
-                => {
-                    const str = reader.readLengthEncodedString();
-                    inline for (e.fields) |f| {
-                        if (std.mem.eql(u8, str, f.name)) {
-                            return @field(FieldType, f.name);
-                        }
-                    }
-                    std.log.err(
-                        "received string: {s} from mysql, but could not find tag from enum: {s}, field name: {s}\n",
-                        .{ str, @typeName(FieldType), field_name },
-                    );
-                },
-                else => {},
-            }
-        },
-        .Int => |int| {
-            switch (int.signedness) {
-                .unsigned => {
-                    switch (col_type) {
-                        .MYSQL_TYPE_LONGLONG => return @intCast(reader.readUInt64()),
-
-                        .MYSQL_TYPE_LONG,
-                        .MYSQL_TYPE_INT24,
-                        => return @intCast(reader.readUInt32()),
-
-                        .MYSQL_TYPE_SHORT,
-                        .MYSQL_TYPE_YEAR,
-                        => return @intCast(reader.readUInt16()),
-
-                        .MYSQL_TYPE_TINY => return @intCast(reader.readByte()),
-
-                        else => {},
-                    }
-                },
-                .signed => {
-                    switch (col_type) {
-                        .MYSQL_TYPE_LONGLONG => return @intCast(@as(i64, @bitCast(reader.readUInt64()))),
-
-                        .MYSQL_TYPE_LONG,
-                        .MYSQL_TYPE_INT24,
-                        => return @intCast(@as(i32, @bitCast(reader.readUInt32()))),
-
-                        .MYSQL_TYPE_SHORT,
-                        .MYSQL_TYPE_YEAR,
-                        => return @intCast(@as(i16, @bitCast(reader.readUInt16()))),
-
-                        .MYSQL_TYPE_TINY => return @intCast(@as(i8, @bitCast(reader.readByte()))),
-
-                        else => {},
-                    }
-                },
-            }
-        },
-        .Float => |float| {
-            if (float.bits >= 64) {
-                switch (col_type) {
-                    .MYSQL_TYPE_DOUBLE => return @as(f64, @bitCast(reader.readUInt64())),
-                    .MYSQL_TYPE_FLOAT => return @as(f32, @bitCast(reader.readUInt32())),
-                    else => {},
-                }
-            }
-            if (float.bits >= 32) {
-                switch (col_type) {
-                    .MYSQL_TYPE_FLOAT => return @as(f32, @bitCast(reader.readUInt32())),
-                    else => {},
-                }
-            }
-        },
-        else => {},
-    }
-
-    logConversionError(FieldType, field_name, col_def.name, col_type);
-    return error.IncompatibleBinaryConversion;
-}
-
-inline fn binResIsNull(null_bitmap: []const u8, col_idx: usize) bool {
-    // TODO: optimize: divmod
-    const byte_idx = (col_idx + 2) / 8;
-    const bit_idx = (col_idx + 2) % 8;
-    const byte = null_bitmap[byte_idx];
-    return (byte & (1 << bit_idx)) > 0;
-}
-
-test "binResIsNull" {
-    const tests = .{
-        .{
-            .null_bitmap = &.{0b00000100},
-            .col_idx = 0,
-            .expected = true,
-        },
-        .{
-            .null_bitmap = &.{0b00000000},
-            .col_idx = 0,
-            .expected = false,
-        },
-        .{
-            .null_bitmap = &.{ 0b00000000, 0b00000001 },
-            .col_idx = 6,
-            .expected = true,
-        },
-        .{
-            .null_bitmap = &.{ 0b10000000, 0b00000000 },
-            .col_idx = 5,
-            .expected = true,
-        },
-    };
-
-    inline for (tests) |t| {
-        const actual = binResIsNull(t.null_bitmap, t.col_idx);
-        try std.testing.expectEqual(t.expected, actual);
-    }
-}
-
-pub fn ResultSetIter(comptime T: type) type {
+pub fn ResultRowIter(comptime T: type) type {
     return struct {
         result_set: *const ResultSet(T),
 
-        pub fn next(iter: *const ResultSetIter(T), allocator: std.mem.Allocator) !?ResultRow(T) {
-            const row = try iter.result_set.readRow(allocator);
-            return switch (row.value) {
-                .ok => {
-                    // need to deinit as caller would not know to do so
-                    row.deinit(allocator);
-                    return null;
-                },
+        pub fn next(iter: *const ResultRowIter(T)) !?ResultRow(T) {
+            const row = try iter.result_set.readRow();
+            return switch (row) {
+                .ok => return null,
                 .err => |err| err.asError(),
                 else => row,
             };
         }
 
-        pub fn collectTexts(iter: *const ResultSetIter(TextResultData), allocator: std.mem.Allocator) !TableTexts {
-            var row_acc = std.ArrayList(ResultRow(TextResultData)).init(allocator);
+        pub fn collectTexts(iter: *const ResultRowIter(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
+            var row_acc = std.ArrayList(ResultRow(TextResultRow)).init(allocator);
             while (try iter.next(allocator)) |row| {
                 const new_row_ptr = try row_acc.addOne();
                 new_row_ptr.* = row;
@@ -679,8 +379,8 @@ pub fn ResultSetIter(comptime T: type) type {
             };
         }
 
-        pub fn collectStructs(iter: *const ResultSetIter(BinaryResultData), comptime Struct: type, allocator: std.mem.Allocator) !TableStructs(Struct) {
-            var row_acc = std.ArrayList(ResultRow(BinaryResultData)).init(allocator);
+        pub fn collectStructs(iter: *const ResultRowIter(BinaryResultRow), comptime Struct: type, allocator: std.mem.Allocator) !TableStructs(Struct) {
+            var row_acc = std.ArrayList(ResultRow(BinaryResultRow)).init(allocator);
             while (try iter.next(allocator)) |row| {
                 const new_row_ptr = try row_acc.addOne();
                 new_row_ptr.* = row;
@@ -701,7 +401,7 @@ pub fn ResultSetIter(comptime T: type) type {
 }
 
 pub const TableTexts = struct {
-    result_rows: []const ResultRow(TextResultData),
+    result_rows: []const ResultRow(TextResultRow),
     elems: []const ?[]const u8,
     rows: []const []const ?[]const u8,
 
@@ -730,7 +430,7 @@ pub const TableTexts = struct {
 
 pub fn TableStructs(comptime Struct: type) type {
     return struct {
-        result_rows: []const ResultRow(BinaryResultData),
+        result_rows: []const ResultRow(BinaryResultRow),
         rows: []const Struct,
 
         pub fn deinit(t: *const TableStructs(Struct), allocator: std.mem.Allocator) void {
