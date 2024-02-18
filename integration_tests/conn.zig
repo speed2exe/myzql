@@ -284,152 +284,152 @@ test "prepare execute with result" {
     }
 }
 
-// test "binary data types - int" {
-//     var c = try Conn.init(std.testing.allocator, &test_config);
-//     defer c.deinit();
-//
-//     try queryExpectOk(&c, "CREATE DATABASE test");
-//     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
-//
-//     try queryExpectOk(&c,
-//         \\CREATE TABLE test.int_types_example (
-//         \\    tinyint_col TINYINT,
-//         \\    smallint_col SMALLINT,
-//         \\    mediumint_col MEDIUMINT,
-//         \\    int_col INT,
-//         \\    bigint_col BIGINT,
-//         \\    tinyint_unsigned_col TINYINT UNSIGNED,
-//         \\    smallint_unsigned_col SMALLINT UNSIGNED,
-//         \\    mediumint_unsigned_col MEDIUMINT UNSIGNED,
-//         \\    int_unsigned_col INT UNSIGNED,
-//         \\    bigint_unsigned_col BIGINT UNSIGNED
-//         \\)
-//     );
-//     defer queryExpectOk(&c, "DROP TABLE test.int_types_example") catch {};
-//
-//     { // Insert (Binary Protocol)
-//         const prep_res = try c.prepare(
-//             allocator,
-//             "INSERT INTO test.int_types_example VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-//         );
-//         defer prep_res.deinit(allocator);
-//         const prep_stmt = try prep_res.expect(.stmt);
-//
-//         const params = .{
-//             .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-//             .{ -(1 << 7), -(1 << 15), -(1 << 23), -(1 << 31), -(1 << 63), 0, 0, 0, 0, 0 },
-//             .{ (1 << 7) - 1, (1 << 15) - 1, (1 << 23) - 1, (1 << 31) - 1, (1 << 63) - 1, (1 << 8) - 1, (1 << 16) - 1, (1 << 24) - 1, (1 << 32) - 1, (1 << 64) - 1 },
-//             .{ null, null, null, null, null, null, null, null, null, null },
-//             .{ @as(?i8, 0), @as(?i16, 0), @as(?i32, 0), @as(?i64, 0), @as(?u8, 0), @as(?u16, 0), @as(?u32, 0), @as(?u64, 0), @as(?u8, 0), @as(?u64, 0) },
-//             .{ @as(i8, minInt(i8)), @as(i16, minInt(i16)), @as(i32, minInt(i24)), @as(i32, minInt(i32)), @as(i64, minInt(i64)), @as(u8, minInt(u8)), @as(u16, minInt(u16)), @as(u32, minInt(u24)), @as(u32, minInt(u32)), @as(u64, minInt(u64)) },
-//             .{ @as(i8, maxInt(i8)), @as(i16, maxInt(i16)), @as(i32, maxInt(i24)), @as(i32, maxInt(i32)), @as(i64, maxInt(i64)), @as(u8, maxInt(u8)), @as(u16, maxInt(u16)), @as(u32, maxInt(u24)), @as(u32, maxInt(u32)), @as(u64, maxInt(u64)) },
-//             .{ @as(?i8, null), @as(?i16, null), @as(?i32, null), @as(?i64, null), @as(?u8, null), @as(?u16, null), @as(?u32, null), @as(?u64, null), @as(?u8, null), @as(?u64, null) },
-//         };
-//         inline for (params) |param| {
-//             const exe_res = try c.execute(allocator, &prep_stmt, param);
-//             defer exe_res.deinit(allocator);
-//             _ = try exe_res.expect(.ok);
-//         }
-//     }
-//
-//     { // Select (Text Protocol)
-//         const res = try c.query(allocator, "SELECT * FROM test.int_types_example");
-//         defer res.deinit(allocator);
-//         const rows: ResultSet(TextResultRow) = try res.expect(.rows);
-//
-//         const table_texts = try rows.tableTexts(allocator);
-//         defer table_texts.deinit(allocator);
-//
-//         const expected: []const []const ?[]const u8 = &.{
-//             &.{ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" },
-//             &.{ "-128", "-32768", "-8388608", "-2147483648", "-9223372036854775808", "0", "0", "0", "0", "0" },
-//             &.{ "127", "32767", "8388607", "2147483647", "9223372036854775807", "255", "65535", "16777215", "4294967295", "18446744073709551615" },
-//             &.{ null, null, null, null, null, null, null, null, null, null },
-//             &.{ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" },
-//             &.{ "-128", "-32768", "-8388608", "-2147483648", "-9223372036854775808", "0", "0", "0", "0", "0" },
-//             &.{ "127", "32767", "8388607", "2147483647", "9223372036854775807", "255", "65535", "16777215", "4294967295", "18446744073709551615" },
-//             &.{ null, null, null, null, null, null, null, null, null, null },
-//         };
-//         try std.testing.expectEqualDeep(expected, table_texts.table);
-//     }
-//
-//     { // Select (Binary Protocol)
-//         const IntTypesExample = struct {
-//             tinyint_col: ?i8,
-//             smallint_col: ?i16,
-//             mediumint_col: ?i24,
-//             int_col: ?i32,
-//             bigint_col: ?i64,
-//             tinyint_unsigned_col: ?u8,
-//             smallint_unsigned_col: ?u16,
-//             mediumint_unsigned_col: ?u24,
-//             int_unsigned_col: ?u32,
-//             bigint_unsigned_col: ?u64,
-//         };
-//
-//         const prep_res = try c.prepare(allocator, "SELECT * FROM test.int_types_example LIMIT 4");
-//         defer prep_res.deinit(allocator);
-//         const prep_stmt = try prep_res.expect(.stmt);
-//         const res = try c.execute(allocator, &prep_stmt, .{});
-//         defer res.deinit(allocator);
-//         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
-//
-//         const expected: []const IntTypesExample = &.{
-//             .{
-//                 .tinyint_col = 0,
-//                 .smallint_col = 0,
-//                 .mediumint_col = 0,
-//                 .int_col = 0,
-//                 .bigint_col = 0,
-//                 .tinyint_unsigned_col = 0,
-//                 .smallint_unsigned_col = 0,
-//                 .mediumint_unsigned_col = 0,
-//                 .int_unsigned_col = 0,
-//                 .bigint_unsigned_col = 0,
-//             },
-//             .{
-//                 .tinyint_col = -128,
-//                 .smallint_col = -32768,
-//                 .mediumint_col = -8388608,
-//                 .int_col = -2147483648,
-//                 .bigint_col = -9223372036854775808,
-//                 .tinyint_unsigned_col = 0,
-//                 .smallint_unsigned_col = 0,
-//                 .mediumint_unsigned_col = 0,
-//                 .int_unsigned_col = 0,
-//                 .bigint_unsigned_col = 0,
-//             },
-//             .{
-//                 .tinyint_col = 127,
-//                 .smallint_col = 32767,
-//                 .mediumint_col = 8388607,
-//                 .int_col = 2147483647,
-//                 .bigint_col = 9223372036854775807,
-//                 .tinyint_unsigned_col = 255,
-//                 .smallint_unsigned_col = 65535,
-//                 .mediumint_unsigned_col = 16777215,
-//                 .int_unsigned_col = 4294967295,
-//                 .bigint_unsigned_col = 18446744073709551615,
-//             },
-//             .{
-//                 .tinyint_col = null,
-//                 .smallint_col = null,
-//                 .mediumint_col = null,
-//                 .int_col = null,
-//                 .bigint_col = null,
-//                 .tinyint_unsigned_col = null,
-//                 .smallint_unsigned_col = null,
-//                 .mediumint_unsigned_col = null,
-//                 .int_unsigned_col = null,
-//                 .bigint_unsigned_col = null,
-//             },
-//         };
-//
-//         const structs = try rows.iter().tableStructs(IntTypesExample, allocator);
-//         defer structs.deinit(allocator);
-//         try std.testing.expectEqualDeep(expected, structs.struct_list.items);
-//     }
-// }
+test "binary data types - int" {
+    var c = try Conn.init(std.testing.allocator, &test_config);
+    defer c.deinit();
+
+    try queryExpectOk(&c, "CREATE DATABASE test");
+    defer queryExpectOk(&c, "DROP DATABASE test") catch {};
+
+    try queryExpectOk(&c,
+        \\CREATE TABLE test.int_types_example (
+        \\    tinyint_col TINYINT,
+        \\    smallint_col SMALLINT,
+        \\    mediumint_col MEDIUMINT,
+        \\    int_col INT,
+        \\    bigint_col BIGINT,
+        \\    tinyint_unsigned_col TINYINT UNSIGNED,
+        \\    smallint_unsigned_col SMALLINT UNSIGNED,
+        \\    mediumint_unsigned_col MEDIUMINT UNSIGNED,
+        \\    int_unsigned_col INT UNSIGNED,
+        \\    bigint_unsigned_col BIGINT UNSIGNED
+        \\)
+    );
+    defer queryExpectOk(&c, "DROP TABLE test.int_types_example") catch {};
+
+    { // Insert (Binary Protocol)
+        const prep_res = try c.prepare(
+            allocator,
+            "INSERT INTO test.int_types_example VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        );
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.stmt);
+
+        const params = .{
+            .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            .{ -(1 << 7), -(1 << 15), -(1 << 23), -(1 << 31), -(1 << 63), 0, 0, 0, 0, 0 },
+            .{ (1 << 7) - 1, (1 << 15) - 1, (1 << 23) - 1, (1 << 31) - 1, (1 << 63) - 1, (1 << 8) - 1, (1 << 16) - 1, (1 << 24) - 1, (1 << 32) - 1, (1 << 64) - 1 },
+            .{ null, null, null, null, null, null, null, null, null, null },
+            .{ @as(?i8, 0), @as(?i16, 0), @as(?i32, 0), @as(?i64, 0), @as(?u8, 0), @as(?u16, 0), @as(?u32, 0), @as(?u64, 0), @as(?u8, 0), @as(?u64, 0) },
+            .{ @as(i8, minInt(i8)), @as(i16, minInt(i16)), @as(i32, minInt(i24)), @as(i32, minInt(i32)), @as(i64, minInt(i64)), @as(u8, minInt(u8)), @as(u16, minInt(u16)), @as(u32, minInt(u24)), @as(u32, minInt(u32)), @as(u64, minInt(u64)) },
+            .{ @as(i8, maxInt(i8)), @as(i16, maxInt(i16)), @as(i32, maxInt(i24)), @as(i32, maxInt(i32)), @as(i64, maxInt(i64)), @as(u8, maxInt(u8)), @as(u16, maxInt(u16)), @as(u32, maxInt(u24)), @as(u32, maxInt(u32)), @as(u64, maxInt(u64)) },
+            .{ @as(?i8, null), @as(?i16, null), @as(?i32, null), @as(?i64, null), @as(?u8, null), @as(?u16, null), @as(?u32, null), @as(?u64, null), @as(?u8, null), @as(?u64, null) },
+        };
+        inline for (params) |param| {
+            const exe_res = try c.execute(allocator, &prep_stmt, param);
+            defer exe_res.deinit(allocator);
+            _ = try exe_res.expect(.ok);
+        }
+    }
+
+    { // Select (Text Protocol)
+        const res = try c.query(allocator, "SELECT * FROM test.int_types_example");
+        defer res.deinit(allocator);
+        const rows: ResultSet(TextResultRow) = try res.expect(.rows);
+
+        const table_texts = try rows.tableTexts(allocator);
+        defer table_texts.deinit(allocator);
+
+        const expected: []const []const ?[]const u8 = &.{
+            &.{ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" },
+            &.{ "-128", "-32768", "-8388608", "-2147483648", "-9223372036854775808", "0", "0", "0", "0", "0" },
+            &.{ "127", "32767", "8388607", "2147483647", "9223372036854775807", "255", "65535", "16777215", "4294967295", "18446744073709551615" },
+            &.{ null, null, null, null, null, null, null, null, null, null },
+            &.{ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" },
+            &.{ "-128", "-32768", "-8388608", "-2147483648", "-9223372036854775808", "0", "0", "0", "0", "0" },
+            &.{ "127", "32767", "8388607", "2147483647", "9223372036854775807", "255", "65535", "16777215", "4294967295", "18446744073709551615" },
+            &.{ null, null, null, null, null, null, null, null, null, null },
+        };
+        try std.testing.expectEqualDeep(expected, table_texts.table);
+    }
+
+    { // Select (Binary Protocol)
+        const IntTypesExample = struct {
+            tinyint_col: ?i8,
+            smallint_col: ?i16,
+            mediumint_col: ?i24,
+            int_col: ?i32,
+            bigint_col: ?i64,
+            tinyint_unsigned_col: ?u8,
+            smallint_unsigned_col: ?u16,
+            mediumint_unsigned_col: ?u24,
+            int_unsigned_col: ?u32,
+            bigint_unsigned_col: ?u64,
+        };
+
+        const prep_res = try c.prepare(allocator, "SELECT * FROM test.int_types_example LIMIT 4");
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.stmt);
+        const res = try c.execute(allocator, &prep_stmt, .{});
+        defer res.deinit(allocator);
+        const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
+
+        const expected: []const IntTypesExample = &.{
+            .{
+                .tinyint_col = 0,
+                .smallint_col = 0,
+                .mediumint_col = 0,
+                .int_col = 0,
+                .bigint_col = 0,
+                .tinyint_unsigned_col = 0,
+                .smallint_unsigned_col = 0,
+                .mediumint_unsigned_col = 0,
+                .int_unsigned_col = 0,
+                .bigint_unsigned_col = 0,
+            },
+            .{
+                .tinyint_col = -128,
+                .smallint_col = -32768,
+                .mediumint_col = -8388608,
+                .int_col = -2147483648,
+                .bigint_col = -9223372036854775808,
+                .tinyint_unsigned_col = 0,
+                .smallint_unsigned_col = 0,
+                .mediumint_unsigned_col = 0,
+                .int_unsigned_col = 0,
+                .bigint_unsigned_col = 0,
+            },
+            .{
+                .tinyint_col = 127,
+                .smallint_col = 32767,
+                .mediumint_col = 8388607,
+                .int_col = 2147483647,
+                .bigint_col = 9223372036854775807,
+                .tinyint_unsigned_col = 255,
+                .smallint_unsigned_col = 65535,
+                .mediumint_unsigned_col = 16777215,
+                .int_unsigned_col = 4294967295,
+                .bigint_unsigned_col = 18446744073709551615,
+            },
+            .{
+                .tinyint_col = null,
+                .smallint_col = null,
+                .mediumint_col = null,
+                .int_col = null,
+                .bigint_col = null,
+                .tinyint_unsigned_col = null,
+                .smallint_unsigned_col = null,
+                .mediumint_unsigned_col = null,
+                .int_unsigned_col = null,
+                .bigint_unsigned_col = null,
+            },
+        };
+
+        const structs = try rows.iter().tableStructs(IntTypesExample, allocator);
+        defer structs.deinit(allocator);
+        try std.testing.expectEqualDeep(expected, structs.struct_list.items);
+    }
+}
 
 // test "binary data types - float" {
 //     var c = try Conn.init(std.testing.allocator, &test_config);
