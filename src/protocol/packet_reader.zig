@@ -1,119 +1,136 @@
 const std = @import("std");
-const Packet = @import("./packet.zig").Packet;
+const utils = @import("./utils.zig");
+const Packet = @import("./packet.zig");
 
 pub const PacketReader = struct {
-    payload: []const u8,
+    stream: std.net.Stream,
+    allocator: std.mem.Allocator,
+
+    // valid buffer read from network but yet to consume to create packet:
+    // buf[pos..len]
+    buf: []u8,
     pos: usize,
+    len: usize,
 
-    pub fn initFromPacket(packet: *const Packet) PacketReader {
-        return .{ .payload = packet.payload, .pos = 0 };
+    // if in one read, the buffer is filled, we should double the buffer size
+    should_double_buf: bool,
+
+    pub fn init(stream: std.net.Stream, allocator: std.mem.Allocator) !PacketReader {
+        return .{
+            .buf = &.{},
+            .stream = stream,
+            .allocator = allocator,
+            .pos = 0,
+            .len = 0,
+            .should_double_buf = false,
+        };
     }
 
-    pub fn initFromPayload(payload: []const u8) PacketReader {
-        return .{ .payload = payload, .pos = 0 };
+    pub fn deinit(p: *const PacketReader) void {
+        p.allocator.free(p.buf);
     }
 
-    pub fn peek(packet_reader: *const PacketReader) ?u8 {
-        std.debug.assert(packet_reader.payload.len >= packet_reader.pos);
-        if (packet_reader.payload.len == packet_reader.pos) {
-            return null;
+    // invalidates the last packet returned
+    pub fn readPacket(p: *PacketReader) !Packet.Packet {
+        if (p.pos == p.len) {
+            p.pos = 0;
+            p.len = 0;
+            try p.readToBufferAtLeast(4);
+        } else if (p.len - p.pos < 4) {
+            try p.readToBufferAtLeast(4);
         }
-        return packet_reader.payload[packet_reader.pos];
+
+        // Packet header
+        const payload_length = std.mem.readInt(u24, p.buf[p.pos..][0..3], .little);
+        const sequence_id = p.buf[3];
+        p.pos += 4;
+
+        { // read more bytes from network if required
+            const n_valid_unread = p.len - p.pos;
+            if (n_valid_unread < payload_length) {
+                try p.readToBufferAtLeast(payload_length - n_valid_unread);
+            }
+        }
+
+        // Packet payload
+        const payload = p.buf[p.pos .. p.pos + payload_length];
+        p.pos += payload_length;
+
+        return .{
+            .sequence_id = sequence_id,
+            .payload = payload,
+        };
     }
 
-    pub fn forward_one(packet_reader: *PacketReader) void {
-        std.debug.assert(packet_reader.payload.len > packet_reader.pos);
-        packet_reader.pos += 1;
-    }
+    fn readToBufferAtLeast(p: *PacketReader, at_least: usize) !void {
+        try p.expandBufIfNeeded(at_least);
+        const n = try p.stream.readAtLeast(p.buf[p.len..], at_least);
+        if (n == 0) {
+            return error.UnexpectedEndOfStream;
+        }
 
-    pub fn readFixed(packet_reader: *PacketReader, comptime n: usize) *const [n]u8 {
-        const bytes = packet_reader.payload[packet_reader.pos..][0..n];
-        packet_reader.pos += n;
-        return bytes;
-    }
-
-    pub fn readFixedRuntime(packet_reader: *PacketReader, n: usize) []const u8 {
-        const bytes = packet_reader.payload[packet_reader.pos..][0..n];
-        packet_reader.pos += n;
-        return bytes;
-    }
-
-    pub fn readByte(packet_reader: *PacketReader) u8 {
-        const byte = packet_reader.payload[packet_reader.pos];
-        packet_reader.pos += 1;
-        return byte;
-    }
-
-    pub fn readUInt16(packet_reader: *PacketReader) u16 {
-        const bytes = packet_reader.payload[packet_reader.pos..][0..2];
-        packet_reader.pos += 2;
-        return std.mem.readInt(u16, bytes, .little);
-    }
-
-    fn readUInt24(packet_reader: *PacketReader) u24 {
-        const bytes = packet_reader.payload[packet_reader.pos..][0..3];
-        packet_reader.pos += 3;
-        return std.mem.readInt(u24, bytes, .little);
-    }
-
-    pub fn readUInt32(packet_reader: *PacketReader) u32 {
-        const bytes = packet_reader.payload[packet_reader.pos..][0..4];
-        packet_reader.pos += 4;
-        return std.mem.readInt(u32, bytes, .little);
-    }
-
-    pub fn readUInt64(packet_reader: *PacketReader) u64 {
-        const bytes = packet_reader.payload[packet_reader.pos..][0..8];
-        packet_reader.pos += 8;
-        return std.mem.readInt(u64, bytes, .little);
-    }
-
-    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_eof
-    pub fn readRestOfPacketString(packet_reader: *PacketReader) []const u8 {
-        const bytes = packet_reader.payload[packet_reader.pos..];
-        packet_reader.pos += bytes.len;
-        return bytes;
-    }
-
-    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_integers.html#sect_protocol_basic_dt_int_le
-    // max possible value is 2^64 - 1, so return type is u64
-    pub fn readLengthEncodedInteger(packet_reader: *PacketReader) u64 {
-        const first_byte = packet_reader.readByte();
-        switch (first_byte) {
-            0xFC => return packet_reader.readUInt16(),
-            0xFD => return packet_reader.readUInt24(),
-            0xFE => return packet_reader.readUInt64(),
-            else => return first_byte,
+        p.len += n;
+        if (n >= p.buf.len / 2) {
+            p.should_double_buf = true;
         }
     }
 
-    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_le
-    pub fn readLengthEncodedString(packet_reader: *PacketReader) []const u8 {
-        const length = packet_reader.readLengthEncodedInteger();
-        return packet_reader.readFixedRuntime(@as(usize, length));
+    fn moveRemainingDataToBeginning(p: *PacketReader) void {
+        if (p.pos == 0) {
+            return;
+        }
+        const n_remain = p.len - p.pos;
+        if (n_remain > p.pos) { // if overlap
+            utils.memMove(p.buf, p.buf[p.pos..p.len]);
+        } else {
+            @memcpy(p.buf[0..n_remain], p.buf[p.pos..p.len]);
+        }
+        p.pos = 0;
+        p.len = n_remain;
     }
 
-    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_strings.html#sect_protocol_basic_dt_string_null
-    pub fn readNullTerminatedString(packet_reader: *PacketReader) [:0]const u8 {
-        const start = packet_reader.pos;
-        const i = std.mem.indexOfScalarPos(u8, packet_reader.payload, start, 0) orelse {
-            std.log.warn("null terminated string not found\n, pos: {any}, payload: {any}", .{
-                packet_reader.pos,
-                packet_reader.payload,
-            });
-            unreachable;
+    // ensure that the buffer can read extra `req_n` bytes
+    fn expandBufIfNeeded(p: *PacketReader, req_n: usize) !void {
+        if (p.buf.len - p.len >= req_n) {
+            return;
+        }
+
+        const n_remain = p.len - p.pos;
+
+        // possible to move remaining data to the beginning of the buffer
+        // such that it will be enough?
+        if (!p.should_double_buf) {
+            // move remaining data to the beginning of the buffer
+            const unused = p.buf.len - n_remain;
+            if (unused >= req_n) {
+                p.moveRemainingDataToBeginning();
+                return;
+            }
+        }
+
+        const new_len = blk: {
+            var current = p.buf.len;
+            if (p.should_double_buf) {
+                current *= 2;
+                p.should_double_buf = false;
+            }
+            break :blk utils.nextPowerOf2(@truncate(req_n + current));
         };
 
-        const res: [:0]const u8 = @ptrCast(packet_reader.payload[packet_reader.pos..i]);
-        packet_reader.pos = i + 1;
-        return res;
-    }
+        // try resize
+        if (p.allocator.resize(p.buf, new_len)) {
+            p.buf = p.buf[0..new_len];
+            p.moveRemainingDataToBeginning();
+            return;
+        }
 
-    pub fn finished(packet_reader: *PacketReader) bool {
-        return packet_reader.pos == packet_reader.payload.len;
-    }
-
-    pub fn remained(packet_reader: *PacketReader) usize {
-        return packet_reader.payload.len - packet_reader.pos;
+        // if resize failed, try to allocate a new buffer
+        // and copy the remaining data to the new buffer
+        const new_buf = try p.allocator.alloc(u8, new_len);
+        @memcpy(new_buf[0..n_remain], p.buf[p.pos..p.len]);
+        p.allocator.free(p.buf);
+        p.buf = new_buf;
+        p.pos = 0;
+        p.len = n_remain;
     }
 };

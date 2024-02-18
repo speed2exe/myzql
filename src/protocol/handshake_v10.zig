@@ -1,8 +1,8 @@
 const std = @import("std");
 const Packet = @import("./packet.zig").Packet;
-const PacketReader = @import("./packet_reader.zig").PacketReader;
 const constants = @import("../constants.zig");
 const AuthPlugin = @import("../auth.zig").AuthPlugin;
+const PayloadReader = @import("./packet.zig").PayloadReader;
 
 // https://mariadb.com/kb/en/connection/#initial-handshake-packet
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_handshake_v10.html
@@ -18,34 +18,33 @@ pub const HandshakeV10 = struct {
     auth_plugin_data_part_2: [:0]const u8,
     auth_plugin_name: ?[:0]const u8,
 
-    pub fn initFromPacket(packet: *const Packet, capabilities: u32) HandshakeV10 {
+    pub fn init(packet: *const Packet) HandshakeV10 {
+        var reader = packet.reader();
         var handshake_v10: HandshakeV10 = undefined;
 
-        var reader = PacketReader.initFromPacket(packet);
         const protocol_version = reader.readByte();
         std.debug.assert(protocol_version == constants.HANDSHAKE_V10);
 
         handshake_v10.server_version = reader.readNullTerminatedString();
-        handshake_v10.connection_id = reader.readUInt32();
-        handshake_v10.auth_plugin_data_part_1 = reader.readFixed(8);
+        handshake_v10.connection_id = reader.readInt(u32);
+        handshake_v10.auth_plugin_data_part_1 = reader.readRefComptime(8);
         _ = reader.readByte(); // filler
-        handshake_v10.capability_flags_1 = reader.readUInt16();
+        handshake_v10.capability_flags_1 = reader.readInt(u16);
         handshake_v10.character_set = reader.readByte();
-        handshake_v10.status_flags = reader.readUInt16();
-        handshake_v10.capability_flags_2 = reader.readUInt16();
+        handshake_v10.status_flags = reader.readInt(u16);
+        handshake_v10.capability_flags_2 = reader.readInt(u16);
 
         handshake_v10.auth_plugin_data_len = reader.readByte();
 
         // mariadb or mysql specific, ignore for now
-        _ = reader.readFixed(10);
+        reader.skipComptime(10);
 
         // This part ambiguous in mariadb and mysql,
         // It seems like null terminated string works for both, at least for now
         // https://mariadb.com/kb/en/connection/#initial-handshake-packet
         // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_handshake_v10.html
         handshake_v10.auth_plugin_data_part_2 = reader.readNullTerminatedString();
-
-        if (capabilities & constants.CLIENT_PLUGIN_AUTH > 0) {
+        if (handshake_v10.capability_flags() & constants.CLIENT_PLUGIN_AUTH > 0) {
             handshake_v10.auth_plugin_name = reader.readNullTerminatedString();
         } else {
             handshake_v10.auth_plugin_name = null;

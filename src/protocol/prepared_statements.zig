@@ -1,21 +1,20 @@
 const std = @import("std");
-const stream_buffered = @import("../stream_buffered.zig");
-const packet_writer = @import("./packet_writer.zig");
 const constants = @import("../constants.zig");
 const Packet = @import("./packet.zig").Packet;
-const PacketReader = @import("./packet_reader.zig").PacketReader;
 const PreparedStatement = @import("./../result.zig").PreparedStatement;
 const ColumnDefinition41 = @import("./column_definition.zig").ColumnDefinition41;
 const DateTime = @import("../temporal.zig").DateTime;
 const Duration = @import("../temporal.zig").Duration;
+const PacketWriter = @import("./packet_writer.zig").PacketWriter;
+const PacketReader = @import("./packet_reader.zig").PacketReader;
 const maxInt = std.math.maxInt;
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query.html
 pub const PrepareRequest = struct {
     query: []const u8,
 
-    pub fn write(q: *const PrepareRequest, writer: *stream_buffered.SmallPacketWriter) !void {
-        try packet_writer.writeUInt8(writer, constants.COM_STMT_PREPARE);
+    pub fn write(q: *const PrepareRequest, writer: *PacketWriter) !void {
+        try writer.writeInt(u8, constants.COM_STMT_PREPARE);
         try writer.write(q.query);
     }
 };
@@ -29,14 +28,14 @@ pub const PrepareOk = struct {
     warning_count: ?u16,
     metadata_follows: ?u8,
 
-    pub fn initFromPacket(packet: *const Packet, capabilities: u32) PrepareOk {
+    pub fn init(packet: *const Packet, capabilities: u32) PrepareOk {
         var prepare_ok_packet: PrepareOk = undefined;
 
-        var reader = PacketReader.initFromPacket(packet);
+        var reader = packet.reader();
         prepare_ok_packet.status = reader.readByte();
-        prepare_ok_packet.statement_id = reader.readUInt32();
-        prepare_ok_packet.num_columns = reader.readUInt16();
-        prepare_ok_packet.num_params = reader.readUInt16();
+        prepare_ok_packet.statement_id = reader.readInt(u32);
+        prepare_ok_packet.num_columns = reader.readInt(u16);
+        prepare_ok_packet.num_params = reader.readInt(u16);
 
         // Reserved 1 byte
         const b = reader.readByte();
@@ -48,7 +47,7 @@ pub const PrepareOk = struct {
             return prepare_ok_packet;
         }
 
-        prepare_ok_packet.warning_count = reader.readUInt16();
+        prepare_ok_packet.warning_count = reader.readInt(u16);
         if (capabilities & constants.CLIENT_OPTIONAL_RESULTSET_METADATA > 0) {
             prepare_ok_packet.metadata_follows = reader.readByte();
         } else {
@@ -74,11 +73,11 @@ pub const ExecuteRequest = struct {
 
     // attributes: []const BinaryParam = &.{}, // Not supported yet
 
-    pub fn writeWithParams(e: *const ExecuteRequest, writer: anytype, params: anytype) !void {
-        try packet_writer.writeUInt8(writer, constants.COM_STMT_EXECUTE);
-        try packet_writer.writeUInt32(writer, e.prep_stmt.prep_ok.statement_id);
-        try packet_writer.writeUInt8(writer, e.flags);
-        try packet_writer.writeUInt32(writer, e.iteration_count);
+    pub fn writeWithParams(e: *const ExecuteRequest, writer: *PacketWriter, params: anytype) !void {
+        try writer.writeInt(u8, constants.COM_STMT_EXECUTE);
+        try writer.writeInt(u32, e.prep_stmt.prep_ok.statement_id);
+        try writer.writeInt(u8, e.flags);
+        try writer.writeInt(u32, e.iteration_count);
 
         // const has_attributes_to_write = (e.capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) and e.attributes.len > 0;
 
@@ -108,7 +107,7 @@ pub const ExecuteRequest = struct {
             // If a statement is re-executed without changing the params types,
             // the types do not need to be sent to the server again.
             // send type to server (0 / 1)
-            try packet_writer.writeLengthEncodedInteger(writer, e.new_params_bind_flag);
+            try writer.writeLengthEncodedInteger(e.new_params_bind_flag);
             //if (e.new_params_bind_flag > 0) {
             comptime var enum_field_types: [params.len]constants.EnumFieldType = undefined;
             inline for (params, &enum_field_types) |param, *enum_field_type| {
@@ -116,7 +115,7 @@ pub const ExecuteRequest = struct {
             }
 
             inline for (enum_field_types, params) |enum_field_type, param| {
-                try packet_writer.writeUInt8(writer, @intFromEnum(enum_field_type));
+                try writer.writeInt(u8, @intFromEnum(enum_field_type));
                 const sign_flag = comptime switch (@typeInfo(@TypeOf(param))) {
                     .ComptimeInt => switch (enum_field_type) {
                         .MYSQL_TYPE_TINY => if (param > maxInt(i8)) 0x80 else 0,
@@ -128,7 +127,7 @@ pub const ExecuteRequest = struct {
                     .Int => |int| if (int.signedness == .unsigned) 0x80 else 0,
                     else => 0,
                 };
-                try packet_writer.writeUInt8(writer, sign_flag);
+                try writer.writeInt(u8, sign_flag);
 
                 // Not supported yet
                 // if (e.capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) {
@@ -248,7 +247,7 @@ fn enumFieldTypeFromParam(param: anytype) constants.EnumFieldType {
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_binary_resultset.html#sect_protocol_binary_resultset_row_value
 // https://mariadb.com/kb/en/com_stmt_execute/#binary-parameter-encoding
 fn writeParamAsFieldType(
-    writer: anytype,
+    writer: *PacketWriter,
     comptime enum_field_type: constants.EnumFieldType,
     param: anytype,
 ) !void {
@@ -260,15 +259,15 @@ fn writeParamAsFieldType(
         },
         else => switch (enum_field_type) {
             .MYSQL_TYPE_NULL => {},
-            .MYSQL_TYPE_TINY => try packet_writer.writeUInt8(writer, uintCast(u8, i8, param)),
-            .MYSQL_TYPE_SHORT => try packet_writer.writeUInt16(writer, uintCast(u16, i16, param)),
-            .MYSQL_TYPE_LONG => try packet_writer.writeUInt32(writer, uintCast(u32, i32, param)),
-            .MYSQL_TYPE_LONGLONG => try packet_writer.writeUInt64(writer, uintCast(u64, i64, param)),
-            .MYSQL_TYPE_FLOAT => try packet_writer.writeUInt32(writer, @bitCast(@as(f32, param))),
-            .MYSQL_TYPE_DOUBLE => try packet_writer.writeUInt64(writer, @bitCast(@as(f64, param))),
+            .MYSQL_TYPE_TINY => try writer.writeInt(u8, uintCast(u8, i8, param)),
+            .MYSQL_TYPE_SHORT => try writer.writeInt(u16, uintCast(u16, i16, param)),
+            .MYSQL_TYPE_LONG => try writer.writeInt(u32, uintCast(u32, i32, param)),
+            .MYSQL_TYPE_LONGLONG => try writer.writeInt(u64, uintCast(u64, i64, param)),
+            .MYSQL_TYPE_FLOAT => try writer.writeInt(u32, @bitCast(@as(f32, param))),
+            .MYSQL_TYPE_DOUBLE => try writer.writeInt(u64, @bitCast(@as(f64, param))),
             .MYSQL_TYPE_DATETIME => try writeDateTime(param, writer),
             .MYSQL_TYPE_TIME => try writeDuration(param, writer),
-            .MYSQL_TYPE_STRING => try packet_writer.writeLengthEncodedString(writer, stringCast(param)),
+            .MYSQL_TYPE_STRING => try writer.writeLengthEncodedString(stringCast(param)),
             else => {
                 @compileLog(enum_field_type);
                 @compileLog(param);
@@ -317,31 +316,31 @@ fn comptimeIntToUInt(
 // if hour, seconds and microseconds are all 0, length is 4 and no other field is sent.
 // if microseconds is 0, length is 7 and micro_seconds is not sent.
 // otherwise the length is 11
-fn writeDateTime(dt: DateTime, writer: anytype) !void {
+fn writeDateTime(dt: DateTime, writer: *PacketWriter) !void {
     if (dt.microsecond > 0) {
-        try packet_writer.writeUInt8(writer, 11);
-        try packet_writer.writeUInt16(writer, dt.year);
-        try packet_writer.writeUInt8(writer, dt.month);
-        try packet_writer.writeUInt8(writer, dt.day);
-        try packet_writer.writeUInt8(writer, dt.hour);
-        try packet_writer.writeUInt8(writer, dt.minute);
-        try packet_writer.writeUInt8(writer, dt.second);
-        try packet_writer.writeUInt32(writer, dt.microsecond);
+        try writer.writeInt(u8, 11);
+        try writer.writeInt(u16, dt.year);
+        try writer.writeInt(u8, dt.month);
+        try writer.writeInt(u8, dt.day);
+        try writer.writeInt(u8, dt.hour);
+        try writer.writeInt(u8, dt.minute);
+        try writer.writeInt(u8, dt.second);
+        try writer.writeInt(u32, dt.microsecond);
     } else if (dt.hour > 0 or dt.minute > 0 or dt.second > 0) {
-        try packet_writer.writeUInt8(writer, 7);
-        try packet_writer.writeUInt16(writer, dt.year);
-        try packet_writer.writeUInt8(writer, dt.month);
-        try packet_writer.writeUInt8(writer, dt.day);
-        try packet_writer.writeUInt8(writer, dt.hour);
-        try packet_writer.writeUInt8(writer, dt.minute);
-        try packet_writer.writeUInt8(writer, dt.second);
+        try writer.writeInt(u8, 7);
+        try writer.writeInt(u16, dt.year);
+        try writer.writeInt(u8, dt.month);
+        try writer.writeInt(u8, dt.day);
+        try writer.writeInt(u8, dt.hour);
+        try writer.writeInt(u8, dt.minute);
+        try writer.writeInt(u8, dt.second);
     } else if (dt.year > 0 or dt.month > 0 or dt.day > 0) {
-        try packet_writer.writeUInt8(writer, 4);
-        try packet_writer.writeUInt16(writer, dt.year);
-        try packet_writer.writeUInt8(writer, dt.month);
-        try packet_writer.writeUInt8(writer, dt.day);
+        try writer.writeInt(u8, 4);
+        try writer.writeInt(u16, dt.year);
+        try writer.writeInt(u8, dt.month);
+        try writer.writeInt(u8, dt.day);
     } else {
-        try packet_writer.writeUInt8(writer, 0);
+        try writer.writeInt(u8, 0);
     }
 }
 
@@ -349,28 +348,28 @@ fn writeDateTime(dt: DateTime, writer: anytype) !void {
 // if day, hour, minutes, seconds and microseconds are all 0, length is 0 and no other field is sent.
 // if microseconds is 0, length is 8 and micro_seconds is not sent.
 // otherwise the length is 12
-fn writeDuration(d: Duration, writer: anytype) !void {
+fn writeDuration(d: Duration, writer: *PacketWriter) !void {
     if (d.microseconds > 0) {
-        try packet_writer.writeUInt8(writer, 12);
-        try packet_writer.writeUInt8(writer, d.is_negative);
-        try packet_writer.writeUInt32(writer, d.days);
-        try packet_writer.writeUInt8(writer, d.hours);
-        try packet_writer.writeUInt8(writer, d.minutes);
-        try packet_writer.writeUInt8(writer, d.seconds);
-        try packet_writer.writeUInt32(writer, d.microseconds);
+        try writer.writeInt(u8, 12);
+        try writer.writeInt(u8, d.is_negative);
+        try writer.writeInt(u32, d.days);
+        try writer.writeInt(u8, d.hours);
+        try writer.writeInt(u8, d.minutes);
+        try writer.writeInt(u8, d.seconds);
+        try writer.writeInt(u32, d.microseconds);
     } else if (d.days > 0 or d.hours > 0 or d.minutes > 0 or d.seconds > 0) {
-        try packet_writer.writeUInt8(writer, 8);
-        try packet_writer.writeUInt8(writer, d.is_negative);
-        try packet_writer.writeUInt32(writer, d.days);
-        try packet_writer.writeUInt8(writer, d.hours);
-        try packet_writer.writeUInt8(writer, d.minutes);
-        try packet_writer.writeUInt8(writer, d.seconds);
+        try writer.writeInt(u8, 8);
+        try writer.writeInt(u8, d.is_negative);
+        try writer.writeInt(u32, d.days);
+        try writer.writeInt(u8, d.hours);
+        try writer.writeInt(u8, d.minutes);
+        try writer.writeInt(u8, d.seconds);
     } else {
-        try packet_writer.writeUInt8(writer, 0);
+        try writer.writeInt(u8, 0);
     }
 }
 
-fn writeNullBitmap(params: anytype, writer: anytype) !void {
+fn writeNullBitmap(params: anytype, writer: *PacketWriter) !void {
     comptime var pos: usize = 0;
     var byte: u8 = 0;
     var current_bit: u8 = 1;
@@ -382,18 +381,18 @@ fn writeNullBitmap(params: anytype, writer: anytype) !void {
         current_bit <<= 1;
 
         if (pos == 8) {
-            try packet_writer.writeUInt8(writer, byte);
+            try writer.writeInt(u8, byte);
             byte = 0;
             current_bit = 1;
             pos = 0;
         }
     }
     if (pos > 0) {
-        try packet_writer.writeUInt8(writer, byte);
+        try writer.writeInt(u8, byte);
     }
 }
 
-fn writeNullBitmapWithAttrs(params: anytype, attributes: []const BinaryParam, writer: anytype) !void {
+fn writeNullBitmapWithAttrs(params: anytype, attributes: []const BinaryParam, writer: *PacketWriter) !void {
     std.log.warn("\n", .{});
     const byte_count = (params.len + attributes.len + 7) / 8;
     for (0..byte_count) |i| {
@@ -413,7 +412,7 @@ fn writeNullBitmapWithAttrs(params: anytype, attributes: []const BinaryParam, wr
         // [1,1,1,1] [1,1,1]
         // start = 0, end = 8
         std.log.warn("byte: {d}", .{byte});
-        try packet_writer.writeUInt8(writer, byte);
+        try writer.writeInt(u8, writer, byte);
     }
 }
 

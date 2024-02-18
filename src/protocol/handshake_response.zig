@@ -3,9 +3,9 @@
 const packer_writer = @import("./packet_writer.zig");
 const std = @import("std");
 const constants = @import("../constants.zig");
-const stream_buffered = @import("../stream_buffered.zig");
 const Config = @import("../config.zig").Config;
 const AuthPlugin = @import("../auth.zig").AuthPlugin;
+const PacketWriter = @import("./packet_writer.zig").PacketWriter;
 
 pub const HandshakeResponse41 = struct {
     client_flag: u32, // capabilities
@@ -29,38 +29,39 @@ pub const HandshakeResponse41 = struct {
         };
     }
 
-    pub fn write(h: *const HandshakeResponse41, writer: *stream_buffered.SmallPacketWriter) !void {
-        try packer_writer.writeUInt32(writer, h.client_flag);
-        try packer_writer.writeUInt32(writer, h.max_packet_size);
-        try packer_writer.writeUInt8(writer, h.character_set);
+    pub fn write(h: *const HandshakeResponse41, writer: *PacketWriter) !void {
+        try writer.writeInt(u32, h.client_flag);
+
+        try writer.writeInt(u32, h.max_packet_size);
+        try writer.writeInt(u8, h.character_set);
         try writer.write(&([_]u8{0} ** 23)); // filler
-        try packer_writer.writeNullTerminatedString(writer, h.username);
+        try writer.writeNullTerminatedString(h.username);
 
         if ((h.client_flag & constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) > 0) {
-            try packer_writer.writeLengthEncodedString(writer, h.auth_response);
+            try writer.writeLengthEncodedString(h.auth_response);
         } else if ((h.client_flag & constants.CLIENT_SECURE_CONNECTION) > 0) {
-            const length: u8 = @truncate(h.auth_response.len);
-            try packer_writer.writeUInt8(writer, length);
+            const length: u8 = @intCast(h.auth_response.len);
+            try writer.writeInt(u8, length);
             try writer.write(h.auth_response);
         } else {
             try writer.write(h.auth_response);
-            try packer_writer.writeUInt8(writer, 0);
+            try writer.writeInt(u8, 0);
         }
         if ((h.client_flag & constants.CLIENT_CONNECT_WITH_DB) > 0) {
-            try packer_writer.writeNullTerminatedString(writer, h.database);
+            try writer.writeNullTerminatedString(h.database);
         }
         if ((h.client_flag & constants.CLIENT_PLUGIN_AUTH) > 0) {
-            try packer_writer.writeNullTerminatedString(writer, h.client_plugin_name);
+            try writer.writeNullTerminatedString(h.client_plugin_name);
         }
         if ((h.client_flag & constants.CLIENT_CONNECT_ATTRS) > 0) {
-            try packer_writer.writeLengthEncodedInteger(writer, h.key_values.len);
+            try writer.writeLengthEncodedInteger(h.key_values.len);
             for (h.key_values) |key_value| {
-                try packer_writer.writeLengthEncodedString(writer, key_value[0]);
-                try packer_writer.writeLengthEncodedString(writer, key_value[1]);
+                try writer.writeLengthEncodedString(key_value[0]);
+                try writer.writeLengthEncodedString(key_value[1]);
             }
         }
         if ((h.client_flag & constants.CLIENT_ZSTD_COMPRESSION_ALGORITHM) > 0) {
-            try packer_writer.writeUInt8(writer, h.zstd_compression_level);
+            try writer.writeInt(u8, h.zstd_compression_level);
         }
     }
 };
