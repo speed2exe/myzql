@@ -267,7 +267,7 @@ fn writeParamAsFieldType(
             .MYSQL_TYPE_DOUBLE => try writer.writeInt(u64, @bitCast(@as(f64, param))),
             .MYSQL_TYPE_DATETIME => try writeDateTime(param, writer),
             .MYSQL_TYPE_TIME => try writeDuration(param, writer),
-            .MYSQL_TYPE_STRING => try writer.writeLengthEncodedString(writer, stringCast(param)),
+            .MYSQL_TYPE_STRING => try writer.writeLengthEncodedString(stringCast(param)),
             else => {
                 @compileLog(enum_field_type);
                 @compileLog(param);
