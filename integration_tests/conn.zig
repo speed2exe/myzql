@@ -313,7 +313,7 @@ test "prepare execute with result" {
 //             "INSERT INTO test.int_types_example VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 //         );
 //         defer prep_res.deinit(allocator);
-//         const prep_stmt = try prep_res.expect(.ok);
+//         const prep_stmt = try prep_res.expect(.stmt);
 //
 //         const params = .{
 //             .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -335,9 +335,9 @@ test "prepare execute with result" {
 //     { // Select (Text Protocol)
 //         const res = try c.query(allocator, "SELECT * FROM test.int_types_example");
 //         defer res.deinit(allocator);
-//         const rows_iter = (try res.expect(.rows)).iter();
+//         const rows: ResultSet(TextResultRow) = try res.expect(.rows);
 //
-//         const table_texts = try rows_iter.collectTexts(allocator);
+//         const table_texts = try rows.tableTexts(allocator);
 //         defer table_texts.deinit(allocator);
 //
 //         const expected: []const []const ?[]const u8 = &.{
@@ -350,7 +350,7 @@ test "prepare execute with result" {
 //             &.{ "127", "32767", "8388607", "2147483647", "9223372036854775807", "255", "65535", "16777215", "4294967295", "18446744073709551615" },
 //             &.{ null, null, null, null, null, null, null, null, null, null },
 //         };
-//         try std.testing.expectEqualDeep(expected, table_texts.rows);
+//         try std.testing.expectEqualDeep(expected, table_texts.table);
 //     }
 //
 //     { // Select (Binary Protocol)
@@ -369,10 +369,10 @@ test "prepare execute with result" {
 //
 //         const prep_res = try c.prepare(allocator, "SELECT * FROM test.int_types_example LIMIT 4");
 //         defer prep_res.deinit(allocator);
-//         const prep_stmt = try prep_res.expect(.ok);
+//         const prep_stmt = try prep_res.expect(.stmt);
 //         const res = try c.execute(allocator, &prep_stmt, .{});
 //         defer res.deinit(allocator);
-//         const rows_iter = (try res.expect(.rows)).iter();
+//         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
 //
 //         const expected: []const IntTypesExample = &.{
 //             .{
@@ -425,12 +425,12 @@ test "prepare execute with result" {
 //             },
 //         };
 //
-//         const structs = try rows_iter.collectStructs(IntTypesExample, allocator);
+//         const structs = try rows.iter().tableStructs(IntTypesExample, allocator);
 //         defer structs.deinit(allocator);
-//         try std.testing.expectEqualDeep(expected, structs.rows);
+//         try std.testing.expectEqualDeep(expected, structs.struct_list.items);
 //     }
 // }
-//
+
 // test "binary data types - float" {
 //     var c = try Conn.init(std.testing.allocator, &test_config);
 //     defer c.deinit();

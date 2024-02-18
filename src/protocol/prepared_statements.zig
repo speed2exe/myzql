@@ -259,12 +259,12 @@ fn writeParamAsFieldType(
         },
         else => switch (enum_field_type) {
             .MYSQL_TYPE_NULL => {},
-            .MYSQL_TYPE_TINY => try writer.writeInt(u8, writer, uintCast(u8, i8, param)),
-            .MYSQL_TYPE_SHORT => try writer.writeInt(u16, writer, uintCast(u16, i16, param)),
-            .MYSQL_TYPE_LONG => try writer.writeInt(u32, writer, uintCast(u32, i32, param)),
-            .MYSQL_TYPE_LONGLONG => try writer.writeInt(u64, writer, uintCast(u64, i64, param)),
-            .MYSQL_TYPE_FLOAT => try writer.writeInt(u32, writer, @bitCast(@as(f32, param))),
-            .MYSQL_TYPE_DOUBLE => try writer.writeInt(u64, writer, @bitCast(@as(f64, param))),
+            .MYSQL_TYPE_TINY => try writer.writeInt(u8, uintCast(u8, i8, param)),
+            .MYSQL_TYPE_SHORT => try writer.writeInt(u16, uintCast(u16, i16, param)),
+            .MYSQL_TYPE_LONG => try writer.writeInt(u32, uintCast(u32, i32, param)),
+            .MYSQL_TYPE_LONGLONG => try writer.writeInt(u64, uintCast(u64, i64, param)),
+            .MYSQL_TYPE_FLOAT => try writer.writeInt(u32, @bitCast(@as(f32, param))),
+            .MYSQL_TYPE_DOUBLE => try writer.writeInt(u64, @bitCast(@as(f64, param))),
             .MYSQL_TYPE_DATETIME => try writeDateTime(param, writer),
             .MYSQL_TYPE_TIME => try writeDuration(param, writer),
             .MYSQL_TYPE_STRING => try writer.writeLengthEncodedString(writer, stringCast(param)),
@@ -381,14 +381,14 @@ fn writeNullBitmap(params: anytype, writer: *PacketWriter) !void {
         current_bit <<= 1;
 
         if (pos == 8) {
-            try writer.writeInt(u8, writer, byte);
+            try writer.writeInt(u8, byte);
             byte = 0;
             current_bit = 1;
             pos = 0;
         }
     }
     if (pos > 0) {
-        try writer.writeInt(u8, writer, byte);
+        try writer.writeInt(u8, byte);
     }
 }
 

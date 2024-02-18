@@ -70,49 +70,67 @@ pub const PacketReader = struct {
         }
 
         p.len += n;
-        if (p.pos == 0 and p.len == p.buf.len) {
+        if (n >= p.buf.len / 2) {
             p.should_double_buf = true;
         }
     }
 
-    // ensure that the buffer has at least req_n bytes for reading
+    fn moveRemainingDataToBeginning(p: *PacketReader) void {
+        if (p.pos == 0) {
+            return;
+        }
+        const n_remain = p.len - p.pos;
+        if (n_remain > p.pos) { // if overlap
+            utils.memMove(p.buf, p.buf[p.pos..p.len]);
+        } else {
+            @memcpy(p.buf[0..n_remain], p.buf[p.pos..p.len]);
+        }
+        p.pos = 0;
+        p.len = n_remain;
+    }
+
+    // ensure that the buffer can read extra `req_n` bytes
     fn expandBufIfNeeded(p: *PacketReader, req_n: usize) !void {
-        if (p.buf.len - p.pos >= req_n) {
+        if (p.buf.len - p.len >= req_n) {
             return;
         }
 
-        if (p.pos > 0) {
+        const n_remain = p.len - p.pos;
+
+        // possible to move remaining data to the beginning of the buffer
+        // such that it will be enough?
+        if (!p.should_double_buf) {
             // move remaining data to the beginning of the buffer
-            const n_remain = p.len - p.pos;
-            utils.memMove(p.buf, p.buf[p.pos..p.len]);
-            p.pos = 0;
-            p.len = n_remain;
-            // check again if the buffer is large enough
-            if (p.buf.len - p.pos >= req_n) {
+            const unused = p.buf.len - n_remain;
+            if (unused >= req_n) {
+                p.moveRemainingDataToBeginning();
                 return;
             }
         }
 
         const new_len = blk: {
-            var current_len = utils.nextPowerOf2(@truncate(req_n));
+            var current = p.buf.len;
             if (p.should_double_buf) {
-                current_len *= 2;
+                current *= 2;
                 p.should_double_buf = false;
             }
-            break :blk current_len;
+            break :blk utils.nextPowerOf2(@truncate(req_n + current));
         };
 
         // try resize
         if (p.allocator.resize(p.buf, new_len)) {
             p.buf = p.buf[0..new_len];
+            p.moveRemainingDataToBeginning();
             return;
         }
 
         // if resize failed, try to allocate a new buffer
+        // and copy the remaining data to the new buffer
         const new_buf = try p.allocator.alloc(u8, new_len);
-        utils.memMove(new_buf, p.buf[p.pos..p.len]);
+        @memcpy(new_buf[0..n_remain], p.buf[p.pos..p.len]);
         p.allocator.free(p.buf);
-
         p.buf = new_buf;
+        p.pos = 0;
+        p.len = n_remain;
     }
 };
