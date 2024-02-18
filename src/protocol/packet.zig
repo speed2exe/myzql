@@ -70,7 +70,7 @@ pub const PayloadReader = struct {
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_dt_integers.html#sect_protocol_basic_dt_int_le
     // max possible value is 2^64 - 1, so return type is u64
     pub fn readLengthEncodedInteger(p: *PayloadReader) u64 {
-        const first_byte = p.readInt(u8);
+        const first_byte = p.readByte();
         switch (first_byte) {
             0xFC => return p.readInt(u16),
             0xFD => return p.readInt(u24),

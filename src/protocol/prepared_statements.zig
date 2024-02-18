@@ -32,13 +32,13 @@ pub const PrepareOk = struct {
         var prepare_ok_packet: PrepareOk = undefined;
 
         var reader = packet.reader();
-        prepare_ok_packet.status = reader.readInt(u8);
+        prepare_ok_packet.status = reader.readByte();
         prepare_ok_packet.statement_id = reader.readInt(u32);
         prepare_ok_packet.num_columns = reader.readInt(u16);
         prepare_ok_packet.num_params = reader.readInt(u16);
 
         // Reserved 1 byte
-        const b = reader.readInt(u8);
+        const b = reader.readByte();
         std.debug.assert(b == 0);
 
         if (reader.finished()) {
@@ -49,7 +49,7 @@ pub const PrepareOk = struct {
 
         prepare_ok_packet.warning_count = reader.readInt(u16);
         if (capabilities & constants.CLIENT_OPTIONAL_RESULTSET_METADATA > 0) {
-            prepare_ok_packet.metadata_follows = reader.readInt(u8);
+            prepare_ok_packet.metadata_follows = reader.readByte();
         } else {
             prepare_ok_packet.metadata_follows = null;
         }

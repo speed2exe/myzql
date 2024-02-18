@@ -30,9 +30,9 @@ pub const ColumnDefinition41 = struct {
         column_definition_41.fixed_length_fields_length = reader.readLengthEncodedInteger();
         column_definition_41.character_set = reader.readInt(u16);
         column_definition_41.column_length = reader.readInt(u32);
-        column_definition_41.column_type = reader.readInt(u8);
+        column_definition_41.column_type = reader.readByte();
         column_definition_41.flags = reader.readInt(u16);
-        column_definition_41.decimals = reader.readInt(u8);
+        column_definition_41.decimals = reader.readByte();
 
         // https://mariadb.com/kb/en/result-set-packets/#column-definition-packet
         // According to mariadb, there seem to be extra 2 bytes at the end that is not being used

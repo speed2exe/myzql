@@ -22,19 +22,19 @@ pub const HandshakeV10 = struct {
         var reader = packet.reader();
         var handshake_v10: HandshakeV10 = undefined;
 
-        const protocol_version = reader.readInt(u8);
+        const protocol_version = reader.readByte();
         std.debug.assert(protocol_version == constants.HANDSHAKE_V10);
 
         handshake_v10.server_version = reader.readNullTerminatedString();
         handshake_v10.connection_id = reader.readInt(u32);
         handshake_v10.auth_plugin_data_part_1 = reader.readRefComptime(8);
-        _ = reader.readInt(u8); // filler
+        _ = reader.readByte(); // filler
         handshake_v10.capability_flags_1 = reader.readInt(u16);
-        handshake_v10.character_set = reader.readInt(u8);
+        handshake_v10.character_set = reader.readByte();
         handshake_v10.status_flags = reader.readInt(u16);
         handshake_v10.capability_flags_2 = reader.readInt(u16);
 
-        handshake_v10.auth_plugin_data_len = reader.readInt(u8);
+        handshake_v10.auth_plugin_data_len = reader.readByte();
 
         // mariadb or mysql specific, ignore for now
         reader.skipComptime(10);

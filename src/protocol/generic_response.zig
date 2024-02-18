@@ -24,7 +24,7 @@ pub const ErrorPacket = struct {
         var reader = packet.reader();
         return .{
             .error_code = reader.readInt(u16),
-            .sql_state_marker = reader.readInt(u8),
+            .sql_state_marker = reader.readByte(),
             .sql_state = reader.readRefComptime(5),
             .error_message = reader.readRefRemaining(),
         };
@@ -53,7 +53,7 @@ pub const OkPacket = struct {
         var ok_packet: OkPacket = undefined;
 
         var reader = packet.reader();
-        const header = reader.readInt(u8);
+        const header = reader.readByte();
         std.debug.assert(header == constants.OK or header == constants.EOF);
 
         ok_packet.affected_rows = reader.readLengthEncodedInteger();

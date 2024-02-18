@@ -10,7 +10,7 @@ const Packet = @import("./protocol/packet.zig").Packet;
 // dest is a pointer to a struct
 pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const ColumnDefinition41, allocator: ?std.mem.Allocator) !void {
     var reader = packet.reader();
-    const first = reader.readInt(u8);
+    const first = reader.readByte();
     std.debug.assert(first == constants.BINARY_PROTOCOL_RESULTSET_ROW_HEADER);
 
     // null bitmap
@@ -50,29 +50,29 @@ pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const 
 }
 
 fn decodeDateTime(reader: *PayloadReader) DateTime {
-    const length = reader.readInt(u8);
+    const length = reader.readByte();
     switch (length) {
         11 => return .{
             .year = reader.readInt(u16),
-            .month = reader.readInt(u8),
-            .day = reader.readInt(u8),
-            .hour = reader.readInt(u8),
-            .minute = reader.readInt(u8),
-            .second = reader.readInt(u8),
+            .month = reader.readByte(),
+            .day = reader.readByte(),
+            .hour = reader.readByte(),
+            .minute = reader.readByte(),
+            .second = reader.readByte(),
             .microsecond = reader.readInt(u32),
         },
         7 => return .{
             .year = reader.readInt(u16),
-            .month = reader.readInt(u8),
-            .day = reader.readInt(u8),
-            .hour = reader.readInt(u8),
-            .minute = reader.readInt(u8),
-            .second = reader.readInt(u8),
+            .month = reader.readByte(),
+            .day = reader.readByte(),
+            .hour = reader.readByte(),
+            .minute = reader.readByte(),
+            .second = reader.readByte(),
         },
         4 => return .{
             .year = reader.readInt(u16),
-            .month = reader.readInt(u8),
-            .day = reader.readInt(u8),
+            .month = reader.readByte(),
+            .day = reader.readByte(),
         },
         0 => return .{},
         else => unreachable,
@@ -80,22 +80,22 @@ fn decodeDateTime(reader: *PayloadReader) DateTime {
 }
 
 fn decodeDuration(reader: *PayloadReader) Duration {
-    const length = reader.readInt(u8);
+    const length = reader.readByte();
     switch (length) {
         12 => return .{
-            .is_negative = reader.readInt(u8),
+            .is_negative = reader.readByte(),
             .days = reader.readInt(u32),
-            .hours = reader.readInt(u8),
-            .minutes = reader.readInt(u8),
-            .seconds = reader.readInt(u8),
+            .hours = reader.readByte(),
+            .minutes = reader.readByte(),
+            .seconds = reader.readByte(),
             .microseconds = reader.readInt(u32),
         },
         8 => return .{
-            .is_negative = reader.readInt(u8),
+            .is_negative = reader.readByte(),
             .days = reader.readInt(u32),
-            .hours = reader.readInt(u8),
-            .minutes = reader.readInt(u8),
-            .seconds = reader.readInt(u8),
+            .hours = reader.readByte(),
+            .minutes = reader.readByte(),
+            .seconds = reader.readByte(),
         },
         0 => return .{},
         else => {
@@ -225,7 +225,7 @@ inline fn binElemToValue(
                         .MYSQL_TYPE_YEAR,
                         => return @intCast(reader.readInt(u16)),
 
-                        .MYSQL_TYPE_TINY => return @intCast(reader.readInt(u8)),
+                        .MYSQL_TYPE_TINY => return @intCast(reader.readByte()),
 
                         else => {},
                     }
@@ -242,7 +242,7 @@ inline fn binElemToValue(
                         .MYSQL_TYPE_YEAR,
                         => return @intCast(@as(i16, @bitCast(reader.readInt(u16)))),
 
-                        .MYSQL_TYPE_TINY => return @intCast(@as(i8, @bitCast(reader.readInt(u8)))),
+                        .MYSQL_TYPE_TINY => return @intCast(@as(i8, @bitCast(reader.readByte()))),
 
                         else => {},
                     }
