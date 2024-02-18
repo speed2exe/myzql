@@ -735,23 +735,24 @@ test "binary data types - temporal" {
         try std.testing.expectEqualDeep(expected, structs.struct_list.items);
     }
 }
-//
-// test "select concat with params" {
-//     var c = try Conn.init(std.testing.allocator, &test_config);
-//     defer c.deinit();
-//
-//     { // Select (Binary Protocol)
-//         const prep_res = try c.prepare(allocator, "SELECT CONCAT(?, ?) AS col1");
-//         defer prep_res.deinit(allocator);
-//         const prep_stmt = try prep_res.expect(.ok);
-//         const res = try c.execute(allocator, &prep_stmt, .{ "hello", "world" });
-//         defer res.deinit(allocator);
-//         const rows_iter = (try res.expect(.rows)).iter();
-//
-//         const Result = struct { col1: []const u8 };
-//         const expected: []const Result = &.{.{ .col1 = "helloworld" }};
-//         const structs = try rows_iter.collectStructs(Result, allocator);
-//         defer structs.deinit(allocator);
-//         try std.testing.expectEqualDeep(expected, structs.rows);
-//     }
-// }
+
+test "select concat with params" {
+    var c = try Conn.init(std.testing.allocator, &test_config);
+    defer c.deinit();
+
+    { // Select (Binary Protocol)
+        const prep_res = try c.prepare(allocator, "SELECT CONCAT(?, ?) AS col1");
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.stmt);
+        const res = try c.execute(allocator, &prep_stmt, .{ "hello", "world" });
+        defer res.deinit(allocator);
+        const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
+        const rows_iter = rows.iter();
+
+        const Result = struct { col1: []const u8 };
+        const expected: []const Result = &.{.{ .col1 = "helloworld" }};
+        const structs = try rows_iter.tableStructs(Result, allocator);
+        defer structs.deinit(allocator);
+        try std.testing.expectEqualDeep(expected, structs.struct_list.items);
+    }
+}
