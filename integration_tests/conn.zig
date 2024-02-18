@@ -578,17 +578,12 @@ test "binary data types - string" {
         const StringTypesExample = struct {
             varchar_col: ?[]const u8,
             not_null_varchar_col: []const u8,
-            not_null_enum_col: []const u8,
-            not_null_enum_col_2: MyEnum,
+            enum_col: ?MyEnum,
+            not_null_enum_col: MyEnum,
         };
 
         const prep_res = try c.prepare(allocator,
-            \\SELECT
-            \\    varchar_col,
-            \\    not_null_varchar_col,
-            \\    not_null_enum_col,
-            \\    not_null_enum_col
-            \\FROM test.string_types_example LIMIT 1
+            \\SELECT * FROM test.string_types_example
         );
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.stmt);
@@ -601,8 +596,26 @@ test "binary data types - string" {
             .{
                 .varchar_col = "hello",
                 .not_null_varchar_col = "world",
-                .not_null_enum_col = "b",
-                .not_null_enum_col_2 = .b,
+                .enum_col = .a,
+                .not_null_enum_col = .b,
+            },
+            .{
+                .varchar_col = null,
+                .not_null_varchar_col = "foo",
+                .enum_col = null,
+                .not_null_enum_col = .c,
+            },
+            .{
+                .varchar_col = null,
+                .not_null_varchar_col = "",
+                .enum_col = null,
+                .not_null_enum_col = .a,
+            },
+            .{
+                .varchar_col = "baz",
+                .not_null_varchar_col = "bar",
+                .enum_col = null,
+                .not_null_enum_col = .c,
             },
         };
 

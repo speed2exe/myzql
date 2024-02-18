@@ -214,7 +214,9 @@ pub const BinaryResultRow = struct {
     fn structFreeStr(comptime StructField: type, value: StructField, allocator: std.mem.Allocator) void {
         switch (@typeInfo(StructField)) {
             .Pointer => |p| switch (@typeInfo(p.child)) {
-                .Int => |int| if (int.bits == 8) allocator.free(value),
+                .Int => |int| if (int.bits == 8) {
+                    allocator.free(value);
+                },
                 else => {},
             },
             .Optional => |o| if (value) |some| structFreeStr(o.child, some, allocator),
@@ -448,7 +450,7 @@ pub fn TableStructs(comptime Struct: type) type {
             var struct_list = std.ArrayList(Struct).init(allocator);
             while (try iter.next()) |row| {
                 const new_struct_ptr = try struct_list.addOne();
-                try conversion.scanBinResultRow(new_struct_ptr, &row.packet, row.col_defs, null);
+                try conversion.scanBinResultRow(new_struct_ptr, &row.packet, row.col_defs, allocator);
             }
             return .{ .struct_list = struct_list };
         }
@@ -460,10 +462,10 @@ pub fn TableStructs(comptime Struct: type) type {
             t.struct_list.deinit();
         }
 
-        pub fn debugPrint(t: *const TableStructs(Struct)) void {
+        pub fn debugPrint(t: *const TableStructs(Struct)) !void {
             const w = std.io.getStdOut().writer();
             for (t.struct_list.items, 0..) |row, i| {
-                try w.print("row: {d} -> ", .{i});
+                try w.print("row: {any} -> ", .{i});
                 try w.print("{any}", .{row});
                 try w.print("\n", .{});
             }
