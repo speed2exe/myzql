@@ -318,29 +318,29 @@ fn comptimeIntToUInt(
 // otherwise the length is 11
 fn writeDateTime(dt: DateTime, writer: *PacketWriter) !void {
     if (dt.microsecond > 0) {
-        try writer.writeInt(u8, writer, 11);
-        try writer.writeInt(u16, writer, dt.year);
-        try writer.writeInt(u8, writer, dt.month);
-        try writer.writeInt(u8, writer, dt.day);
-        try writer.writeInt(u8, writer, dt.hour);
-        try writer.writeInt(u8, writer, dt.minute);
-        try writer.writeInt(u8, writer, dt.second);
-        try writer.writeInt(u32, writer, dt.microsecond);
+        try writer.writeInt(u8, 11);
+        try writer.writeInt(u16, dt.year);
+        try writer.writeInt(u8, dt.month);
+        try writer.writeInt(u8, dt.day);
+        try writer.writeInt(u8, dt.hour);
+        try writer.writeInt(u8, dt.minute);
+        try writer.writeInt(u8, dt.second);
+        try writer.writeInt(u32, dt.microsecond);
     } else if (dt.hour > 0 or dt.minute > 0 or dt.second > 0) {
-        try writer.writeInt(u8, writer, 7);
-        try writer.writeInt(u16, writer, dt.year);
-        try writer.writeInt(u8, writer, dt.month);
-        try writer.writeInt(u8, writer, dt.day);
-        try writer.writeInt(u8, writer, dt.hour);
-        try writer.writeInt(u8, writer, dt.minute);
-        try writer.writeInt(u8, writer, dt.second);
+        try writer.writeInt(u8, 7);
+        try writer.writeInt(u16, dt.year);
+        try writer.writeInt(u8, dt.month);
+        try writer.writeInt(u8, dt.day);
+        try writer.writeInt(u8, dt.hour);
+        try writer.writeInt(u8, dt.minute);
+        try writer.writeInt(u8, dt.second);
     } else if (dt.year > 0 or dt.month > 0 or dt.day > 0) {
-        try writer.writeInt(u8, writer, 4);
-        try writer.writeInt(u16, writer, dt.year);
-        try writer.writeInt(u8, writer, dt.month);
-        try writer.writeInt(u8, writer, dt.day);
+        try writer.writeInt(u8, 4);
+        try writer.writeInt(u16, dt.year);
+        try writer.writeInt(u8, dt.month);
+        try writer.writeInt(u8, dt.day);
     } else {
-        try writer.writeInt(u8, writer, 0);
+        try writer.writeInt(u8, 0);
     }
 }
 
@@ -350,22 +350,22 @@ fn writeDateTime(dt: DateTime, writer: *PacketWriter) !void {
 // otherwise the length is 12
 fn writeDuration(d: Duration, writer: *PacketWriter) !void {
     if (d.microseconds > 0) {
-        try writer.writeInt(u8, writer, 12);
-        try writer.writeInt(u8, writer, d.is_negative);
-        try writer.writeInt(u32, writer, d.days);
-        try writer.writeInt(u8, writer, d.hours);
-        try writer.writeInt(u8, writer, d.minutes);
-        try writer.writeInt(u8, writer, d.seconds);
-        try writer.writeInt(u32, writer, d.microseconds);
+        try writer.writeInt(u8, 12);
+        try writer.writeInt(u8, d.is_negative);
+        try writer.writeInt(u32, d.days);
+        try writer.writeInt(u8, d.hours);
+        try writer.writeInt(u8, d.minutes);
+        try writer.writeInt(u8, d.seconds);
+        try writer.writeInt(u32, d.microseconds);
     } else if (d.days > 0 or d.hours > 0 or d.minutes > 0 or d.seconds > 0) {
-        try writer.writeInt(u8, writer, 8);
-        try writer.writeInt(u8, writer, d.is_negative);
-        try writer.writeInt(u32, writer, d.days);
-        try writer.writeInt(u8, writer, d.hours);
-        try writer.writeInt(u8, writer, d.minutes);
-        try writer.writeInt(u8, writer, d.seconds);
+        try writer.writeInt(u8, 8);
+        try writer.writeInt(u8, d.is_negative);
+        try writer.writeInt(u32, d.days);
+        try writer.writeInt(u8, d.hours);
+        try writer.writeInt(u8, d.minutes);
+        try writer.writeInt(u8, d.seconds);
     } else {
-        try writer.writeInt(u8, writer, 0);
+        try writer.writeInt(u8, 0);
     }
 }
 

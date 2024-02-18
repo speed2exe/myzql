@@ -50,6 +50,13 @@ pub const PayloadReader = struct {
         return p.payload[p.pos];
     }
 
+    pub fn readByte(p: *PayloadReader) u8 {
+        std.debug.assert(p.pos <= p.payload.len);
+        const byte = p.payload[p.pos];
+        p.pos += 1;
+        return byte;
+    }
+
     pub fn readInt(p: *PayloadReader, Int: type) Int {
         const bytes = p.readRefComptime(@divExact(@typeInfo(Int).Int.bits, 8));
         return std.mem.readInt(Int, bytes, .little);

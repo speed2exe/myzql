@@ -624,116 +624,117 @@ test "binary data types - string" {
         try std.testing.expectEqualDeep(expected, structs.struct_list.items);
     }
 }
-//
-// test "binary data types - temporal" {
-//     var c = try Conn.init(std.testing.allocator, &test_config);
-//     defer c.deinit();
-//
-//     try queryExpectOk(&c, "CREATE DATABASE test");
-//     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
-//
-//     try queryExpectOk(&c,
-//         \\CREATE TABLE test.temporal_types_example (
-//         \\    event_time DATETIME(6) NOT NULL,
-//         \\    event_time2 DATETIME(2) NOT NULL,
-//         \\    event_time3 DATETIME NOT NULL,
-//         \\    duration TIME(6) NOT NULL,
-//         \\    duration2 TIME(4) NOT NULL,
-//         \\    duration3 TIME NOT NULL
-//         \\)
-//     );
-//     defer queryExpectOk(&c, "DROP TABLE test.temporal_types_example") catch {};
-//
-//     { // Exec Insert
-//         const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?, ?, ?, ?, ?, ?)");
-//         defer prep_res.deinit(allocator);
-//         const prep_stmt = try prep_res.expect(.ok);
-//
-//         const my_time: DateTime = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58, .microsecond = 123456 };
-//         const datetime_no_ms: DateTime = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58 };
-//         const only_day: DateTime = .{ .year = 2023, .month = 11, .day = 30 };
-//         const my_duration: Duration = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59, .microseconds = 123432 }; // should be 123456 but mariadb does not round, using this example just to pass the test
-//         const duration_no_ms: Duration = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59 };
-//         const duration_zero: Duration = .{};
-//
-//         const params = .{
-//             .{ my_time, my_time, my_time, my_duration, my_duration, my_duration },
-//             .{ datetime_no_ms, datetime_no_ms, datetime_no_ms, duration_no_ms, duration_no_ms, duration_no_ms },
-//             .{ only_day, only_day, only_day, duration_zero, duration_zero, duration_zero },
-//         };
-//
-//         inline for (params) |param| {
-//             const exe_res = try c.execute(allocator, &prep_stmt, param);
-//             defer exe_res.deinit(allocator);
-//             _ = try exe_res.expect(.ok);
-//         }
-//     }
-//
-//     { // Text Protocol
-//         const res = try c.query(allocator, "SELECT * FROM test.temporal_types_example");
-//         defer res.deinit(allocator);
-//         const rows_iter = (try res.expect(.rows)).iter();
-//
-//         const table_texts = try rows_iter.collectTexts(allocator);
-//         defer table_texts.deinit(allocator);
-//
-//         const expected: []const []const ?[]const u8 = &.{
-//             &.{ "2023-11-30 06:50:58.123456", "2023-11-30 06:50:58.12", "2023-11-30 06:50:58", "47:59:59.123432", "47:59:59.1234", "47:59:59" },
-//             &.{ "2023-11-30 06:50:58.000000", "2023-11-30 06:50:58.00", "2023-11-30 06:50:58", "47:59:59.000000", "47:59:59.0000", "47:59:59" },
-//             &.{ "2023-11-30 00:00:00.000000", "2023-11-30 00:00:00.00", "2023-11-30 00:00:00", "00:00:00.000000", "00:00:00.0000", "00:00:00" },
-//         };
-//
-//         try std.testing.expectEqualDeep(expected, table_texts.rows);
-//     }
-//
-//     { // Select (Binary Protocol)
-//         const TemporalTypesExample = struct {
-//             event_time: DateTime,
-//             event_time2: DateTime,
-//             event_time3: DateTime,
-//             duration: Duration,
-//             duration2: Duration,
-//             duration3: Duration,
-//         };
-//         const prep_res = try c.prepare(allocator, "SELECT * FROM test.temporal_types_example LIMIT 3");
-//         defer prep_res.deinit(allocator);
-//         const prep_stmt = try prep_res.expect(.ok);
-//         const res = try c.execute(allocator, &prep_stmt, .{});
-//         defer res.deinit(allocator);
-//         const rows_iter = (try res.expect(.rows)).iter();
-//
-//         const expected: []const TemporalTypesExample = &.{
-//             .{
-//                 .event_time = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58, .microsecond = 123456 },
-//                 .event_time2 = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58, .microsecond = 120000 },
-//                 .event_time3 = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58 },
-//                 .duration = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59, .microseconds = 123432 },
-//                 .duration2 = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59, .microseconds = 123400 },
-//                 .duration3 = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59 },
-//             },
-//             .{
-//                 .event_time = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58 },
-//                 .event_time2 = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58 },
-//                 .event_time3 = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58 },
-//                 .duration = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59 },
-//                 .duration2 = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59 },
-//                 .duration3 = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59 },
-//             },
-//             .{
-//                 .event_time = .{ .year = 2023, .month = 11, .day = 30 },
-//                 .event_time2 = .{ .year = 2023, .month = 11, .day = 30 },
-//                 .event_time3 = .{ .year = 2023, .month = 11, .day = 30 },
-//                 .duration = .{},
-//                 .duration2 = .{},
-//                 .duration3 = .{},
-//             },
-//         };
-//
-//         const structs = try rows_iter.collectStructs(TemporalTypesExample, allocator);
-//         defer structs.deinit(allocator);
-//         try std.testing.expectEqualDeep(expected, structs.rows);
-//     }
-// }
+
+test "binary data types - temporal" {
+    var c = try Conn.init(std.testing.allocator, &test_config);
+    defer c.deinit();
+
+    try queryExpectOk(&c, "CREATE DATABASE test");
+    defer queryExpectOk(&c, "DROP DATABASE test") catch {};
+
+    try queryExpectOk(&c,
+        \\CREATE TABLE test.temporal_types_example (
+        \\    event_time DATETIME(6) NOT NULL,
+        \\    event_time2 DATETIME(2) NOT NULL,
+        \\    event_time3 DATETIME NOT NULL,
+        \\    duration TIME(6) NOT NULL,
+        \\    duration2 TIME(4) NOT NULL,
+        \\    duration3 TIME NOT NULL
+        \\)
+    );
+    defer queryExpectOk(&c, "DROP TABLE test.temporal_types_example") catch {};
+
+    { // Exec Insert
+        const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?, ?, ?, ?, ?, ?)");
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.stmt);
+
+        const my_time: DateTime = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58, .microsecond = 123456 };
+        const datetime_no_ms: DateTime = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58 };
+        const only_day: DateTime = .{ .year = 2023, .month = 11, .day = 30 };
+        const my_duration: Duration = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59, .microseconds = 123432 }; // should be 123456 but mariadb does not round, using this example just to pass the test
+        const duration_no_ms: Duration = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59 };
+        const duration_zero: Duration = .{};
+
+        const params = .{
+            .{ my_time, my_time, my_time, my_duration, my_duration, my_duration },
+            .{ datetime_no_ms, datetime_no_ms, datetime_no_ms, duration_no_ms, duration_no_ms, duration_no_ms },
+            .{ only_day, only_day, only_day, duration_zero, duration_zero, duration_zero },
+        };
+
+        inline for (params) |param| {
+            const exe_res = try c.execute(allocator, &prep_stmt, param);
+            defer exe_res.deinit(allocator);
+            _ = try exe_res.expect(.ok);
+        }
+    }
+
+    { // Text Protocol
+        const res = try c.query(allocator, "SELECT * FROM test.temporal_types_example");
+        defer res.deinit(allocator);
+        const rows: ResultSet(TextResultRow) = try res.expect(.rows);
+
+        const table_texts = try rows.tableTexts(allocator);
+        defer table_texts.deinit(allocator);
+
+        const expected: []const []const ?[]const u8 = &.{
+            &.{ "2023-11-30 06:50:58.123456", "2023-11-30 06:50:58.12", "2023-11-30 06:50:58", "47:59:59.123432", "47:59:59.1234", "47:59:59" },
+            &.{ "2023-11-30 06:50:58.000000", "2023-11-30 06:50:58.00", "2023-11-30 06:50:58", "47:59:59.000000", "47:59:59.0000", "47:59:59" },
+            &.{ "2023-11-30 00:00:00.000000", "2023-11-30 00:00:00.00", "2023-11-30 00:00:00", "00:00:00.000000", "00:00:00.0000", "00:00:00" },
+        };
+
+        try std.testing.expectEqualDeep(expected, table_texts.table);
+    }
+
+    { // Select (Binary Protocol)
+        const TemporalTypesExample = struct {
+            event_time: DateTime,
+            event_time2: DateTime,
+            event_time3: DateTime,
+            duration: Duration,
+            duration2: Duration,
+            duration3: Duration,
+        };
+        const prep_res = try c.prepare(allocator, "SELECT * FROM test.temporal_types_example LIMIT 3");
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.stmt);
+        const res = try c.execute(allocator, &prep_stmt, .{});
+        defer res.deinit(allocator);
+        const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
+        const rows_iter = rows.iter();
+
+        const expected: []const TemporalTypesExample = &.{
+            .{
+                .event_time = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58, .microsecond = 123456 },
+                .event_time2 = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58, .microsecond = 120000 },
+                .event_time3 = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58 },
+                .duration = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59, .microseconds = 123432 },
+                .duration2 = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59, .microseconds = 123400 },
+                .duration3 = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59 },
+            },
+            .{
+                .event_time = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58 },
+                .event_time2 = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58 },
+                .event_time3 = .{ .year = 2023, .month = 11, .day = 30, .hour = 6, .minute = 50, .second = 58 },
+                .duration = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59 },
+                .duration2 = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59 },
+                .duration3 = .{ .days = 1, .hours = 23, .minutes = 59, .seconds = 59 },
+            },
+            .{
+                .event_time = .{ .year = 2023, .month = 11, .day = 30 },
+                .event_time2 = .{ .year = 2023, .month = 11, .day = 30 },
+                .event_time3 = .{ .year = 2023, .month = 11, .day = 30 },
+                .duration = .{},
+                .duration2 = .{},
+                .duration3 = .{},
+            },
+        };
+
+        const structs = try rows_iter.tableStructs(TemporalTypesExample, allocator);
+        defer structs.deinit(allocator);
+        try std.testing.expectEqualDeep(expected, structs.struct_list.items);
+    }
+}
 //
 // test "select concat with params" {
 //     var c = try Conn.init(std.testing.allocator, &test_config);

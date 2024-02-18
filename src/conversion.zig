@@ -53,26 +53,26 @@ fn decodeDateTime(reader: *PayloadReader) DateTime {
     const length = reader.readInt(u8);
     switch (length) {
         11 => return .{
-            .year = reader.readInt(16),
-            .month = reader.readInt(8),
-            .day = reader.readInt(8),
-            .hour = reader.readInt(8),
-            .minute = reader.readInt(8),
-            .second = reader.readInt(8),
-            .microsecond = reader.readInt(32),
+            .year = reader.readInt(u16),
+            .month = reader.readInt(u8),
+            .day = reader.readInt(u8),
+            .hour = reader.readInt(u8),
+            .minute = reader.readInt(u8),
+            .second = reader.readInt(u8),
+            .microsecond = reader.readInt(u32),
         },
         7 => return .{
-            .year = reader.readInt(16),
-            .month = reader.readInt(8),
-            .day = reader.readInt(8),
-            .hour = reader.readInt(8),
-            .minute = reader.readInt(8),
-            .second = reader.readInt(8),
+            .year = reader.readInt(u16),
+            .month = reader.readInt(u8),
+            .day = reader.readInt(u8),
+            .hour = reader.readInt(u8),
+            .minute = reader.readInt(u8),
+            .second = reader.readInt(u8),
         },
         4 => return .{
-            .year = reader.readInt(16),
-            .month = reader.readInt(8),
-            .day = reader.readInt(8),
+            .year = reader.readInt(u16),
+            .month = reader.readInt(u8),
+            .day = reader.readInt(u8),
         },
         0 => return .{},
         else => unreachable,
@@ -80,7 +80,7 @@ fn decodeDateTime(reader: *PayloadReader) DateTime {
 }
 
 fn decodeDuration(reader: *PayloadReader) Duration {
-    const length = reader.readByte();
+    const length = reader.readInt(u8);
     switch (length) {
         12 => return .{
             .is_negative = reader.readInt(u8),
