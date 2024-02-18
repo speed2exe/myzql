@@ -153,6 +153,7 @@ pub const Conn = struct {
         // TODO: if there is already a pub key, skip requesting it
         const response = HandshakeResponse41.init(.sha256_password, config, &[_]u8{auth.sha256_password_public_key_request});
         try c.writePacket(response);
+        try c.writer.flush();
 
         const pk_packet = try c.readPacket();
 
@@ -164,6 +165,7 @@ pub const Conn = struct {
         defer allocator.free(enc_pw);
 
         try c.writeBytesAsPacket(enc_pw);
+        try c.writer.flush();
 
         const resp_packet = try c.readPacket();
         return switch (resp_packet.payload[0]) {
@@ -194,6 +196,7 @@ pub const Conn = struct {
                             // try conn.sendBytesAsPacket(config.password);
 
                             try c.writeBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
+                            try c.writer.flush();
                             const pk_packet = try c.readPacket();
 
                             // Decode public key
@@ -205,6 +208,7 @@ pub const Conn = struct {
                             defer allocator.free(enc_pw);
 
                             try c.writeBytesAsPacket(enc_pw);
+                            try c.writer.flush();
                         },
                         else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
