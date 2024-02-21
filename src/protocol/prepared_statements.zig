@@ -38,21 +38,21 @@ pub const PrepareOk = struct {
         prepare_ok_packet.num_params = reader.readInt(u16);
 
         // Reserved 1 byte
-        const b = reader.readByte();
-        std.debug.assert(b == 0);
+        _ = reader.readByte();
 
-        if (reader.finished()) {
+        if (reader.payload.len >= 12) { // mysql says "> 12", but it seems to be ">= 12"
+            prepare_ok_packet.warning_count = reader.readInt(u16);
+            if (capabilities & constants.CLIENT_OPTIONAL_RESULTSET_METADATA > 0) {
+                prepare_ok_packet.metadata_follows = reader.readByte();
+            } else {
+                prepare_ok_packet.metadata_follows = null;
+            }
+        } else {
             prepare_ok_packet.warning_count = null;
             prepare_ok_packet.metadata_follows = null;
-            return prepare_ok_packet;
         }
 
-        prepare_ok_packet.warning_count = reader.readInt(u16);
-        if (capabilities & constants.CLIENT_OPTIONAL_RESULTSET_METADATA > 0) {
-            prepare_ok_packet.metadata_follows = reader.readByte();
-        } else {
-            prepare_ok_packet.metadata_follows = null;
-        }
+        std.debug.assert(reader.finished());
         return prepare_ok_packet;
     }
 };
