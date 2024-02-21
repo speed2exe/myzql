@@ -2,6 +2,7 @@ const std = @import("std");
 const myzql = @import("myzql");
 const Conn = myzql.conn.Conn;
 const test_config = @import("./config.zig").test_config;
+const test_config_with_db = @import("./config.zig").test_config_with_db;
 const allocator = std.testing.allocator;
 const ErrorPacket = myzql.protocol.generic_response.ErrorPacket;
 const minInt = std.math.minInt;
@@ -26,6 +27,12 @@ fn queryExpectOk(c: *Conn, query: []const u8) !void {
 
 test "ping" {
     var c = try Conn.init(std.testing.allocator, &test_config);
+    defer c.deinit();
+    try c.ping();
+}
+
+test "connect with database" {
+    var c = try Conn.init(std.testing.allocator, &test_config_with_db);
     defer c.deinit();
     try c.ping();
 }
