@@ -12,6 +12,9 @@
 - Data insertion
 - MySQL DateTime and Time support
 
+## Requirements
+- MySQL 5.7.5 and up
+
 ## TODOs
 - Config from URL
 - Connection Pooling
