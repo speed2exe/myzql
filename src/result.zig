@@ -22,8 +22,8 @@ pub fn QueryResult(comptime T: type) type {
         pub fn init(c: *Conn, allocator: std.mem.Allocator) !QueryResult(T) {
             const packet = try c.readPacket();
             return switch (packet.payload[0]) {
-                constants.OK => .{ .ok = OkPacket.init(&packet, c.client_capabilities) },
-                constants.ERR => .{ .err = ErrorPacket.init(&packet) },
+                constants.OK => .{ .ok = OkPacket.init(&packet, c.capabilities) },
+                constants.ERR => .{ .err = ErrorPacket.init(&packet, c.capabilities) },
                 constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
                 else => .{ .rows = try ResultSet(T).init(allocator, c, &packet) },
             };
@@ -234,8 +234,8 @@ pub fn ResultRow(comptime T: type) type {
         fn init(conn: *Conn, col_defs: []const ColumnDefinition41) !ResultRow(T) {
             const packet = try conn.readPacket();
             return switch (packet.payload[0]) {
-                constants.ERR => .{ .err = ErrorPacket.init(&packet) },
-                constants.EOF => .{ .ok = OkPacket.init(&packet, conn.client_capabilities) },
+                constants.ERR => .{ .err = ErrorPacket.init(&packet, conn.capabilities) },
+                constants.EOF => .{ .ok = OkPacket.init(&packet, conn.capabilities) },
                 else => .{ .row = .{ .packet = packet, .col_defs = col_defs } },
             };
         }
@@ -279,9 +279,9 @@ fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: std.mem.Allocator) !std.
     while (true) {
         const packet = try conn.readPacket();
         return switch (packet.payload[0]) {
-            constants.ERR => ErrorPacket.init(&packet).asError(),
+            constants.ERR => ErrorPacket.init(&packet, conn.capabilities).asError(),
             constants.EOF => {
-                _ = OkPacket.init(&packet, conn.client_capabilities);
+                _ = OkPacket.init(&packet, conn.capabilities);
                 return packet_list;
             },
             else => {
@@ -297,12 +297,12 @@ pub const PrepareResult = union(enum) {
     err: ErrorPacket,
     stmt: PreparedStatement,
 
-    pub fn init(conn: *Conn, allocator: std.mem.Allocator) !PrepareResult {
-        const response_packet = try conn.readPacket();
+    pub fn init(c: *Conn, allocator: std.mem.Allocator) !PrepareResult {
+        const response_packet = try c.readPacket();
         return switch (response_packet.payload[0]) {
-            constants.ERR => .{ .err = ErrorPacket.init(&response_packet) },
-            constants.OK => .{ .stmt = try PreparedStatement.init(&response_packet, conn, allocator) },
-            else => return response_packet.asError(),
+            constants.ERR => .{ .err = ErrorPacket.init(&response_packet, c.capabilities) },
+            constants.OK => .{ .stmt = try PreparedStatement.init(&response_packet, c, allocator) },
+            else => return response_packet.asError(c.capabilities),
         };
     }
 
@@ -340,7 +340,7 @@ pub const PreparedStatement = struct {
     res_cols: []const ColumnDefinition41, // columns that would be returned when executing the query
 
     pub fn init(ok_packet: *const Packet, conn: *Conn, allocator: std.mem.Allocator) !PreparedStatement {
-        const prep_ok = PrepareOk.init(ok_packet, conn.client_capabilities);
+        const prep_ok = PrepareOk.init(ok_packet, conn.capabilities);
 
         const col_count = prep_ok.num_params + prep_ok.num_columns;
 

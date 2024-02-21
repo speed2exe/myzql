@@ -10,24 +10,22 @@ pub const ErrorPacket = struct {
     sql_state: ?*const [5]u8,
     error_message: []const u8,
 
-    pub fn initFirst(packet: *const Packet) ErrorPacket {
+    pub fn init(packet: *const Packet, capabilities: u32) ErrorPacket {
         var reader = packet.reader();
-        return .{
-            .error_code = reader.readUInt16(),
-            .sql_state_marker = null,
-            .sql_state = null,
-            .error_message = reader.readRestOfPacketString(),
-        };
-    }
+        const header = reader.readByte();
+        std.debug.assert(header == constants.ERR);
 
-    pub fn init(packet: *const Packet) ErrorPacket {
-        var reader = packet.reader();
-        return .{
-            .error_code = reader.readInt(u16),
-            .sql_state_marker = reader.readByte(),
-            .sql_state = reader.readRefComptime(5),
-            .error_message = reader.readRefRemaining(),
-        };
+        var error_packet: ErrorPacket = undefined;
+        error_packet.error_code = reader.readInt(u16);
+        if (capabilities & constants.CLIENT_PROTOCOL_41 > 0) {
+            error_packet.sql_state_marker = reader.readByte();
+            error_packet.sql_state = reader.readRefComptime(5);
+        } else {
+            error_packet.sql_state_marker = null;
+            error_packet.sql_state = null;
+        }
+        error_packet.error_message = reader.readRefRemaining();
+        return error_packet;
     }
 
     pub fn asError(err: *const ErrorPacket) error{ErrorPacket} {

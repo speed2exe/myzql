@@ -37,8 +37,7 @@ pub const Conn = struct {
     stream: std.net.Stream,
     reader: PacketReader,
     writer: PacketWriter,
-    server_capabilities: u32,
-    client_capabilities: u32,
+    capabilities: u32,
     sequence_id: u8,
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
@@ -49,8 +48,7 @@ pub const Conn = struct {
                 .stream = stream,
                 .reader = try PacketReader.init(stream, allocator),
                 .writer = try PacketWriter.init(stream, allocator),
-                .client_capabilities = config.capability_flags(),
-                .server_capabilities = undefined, // not known until we get the first packet
+                .capabilities = undefined, // not known until we get the first packet
                 .sequence_id = undefined, // not known until we get the first packet
             };
         };
@@ -60,11 +58,12 @@ pub const Conn = struct {
             const packet = try conn.readPacket();
             const handshake_v10 = switch (packet.payload[0]) {
                 constants.HANDSHAKE_V10 => HandshakeV10.init(&packet),
-                else => return packet.asError(),
+                constants.ERR => return ErrorPacket.init(&packet, 0).asError(),
+                else => return packet.asError(conn.capabilities),
             };
-            conn.server_capabilities = handshake_v10.capability_flags() & config.capability_flags();
+            conn.capabilities = handshake_v10.capability_flags() & config.capability_flags();
 
-            if (conn.server_capabilities & constants.CLIENT_PROTOCOL_41 == 0) {
+            if (conn.capabilities & constants.CLIENT_PROTOCOL_41 == 0) {
                 std.log.err("protocol older than 4.1 is not supported\n", .{});
                 return error.UnsupportedProtocol;
             }
@@ -102,8 +101,8 @@ pub const Conn = struct {
         const packet = try c.readPacket();
 
         switch (packet.payload[0]) {
-            constants.OK => _ = OkPacket.init(&packet, c.client_capabilities),
-            else => return packet.asError(),
+            constants.OK => _ = OkPacket.init(&packet, c.capabilities),
+            else => return packet.asError(c.capabilities),
         }
     }
 
@@ -128,7 +127,7 @@ pub const Conn = struct {
     pub fn execute(c: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultData) {
         c.sequence_id = 0;
         const execute_request: ExecuteRequest = .{
-            .capabilities = c.client_capabilities,
+            .capabilities = c.capabilities,
             .prep_stmt = prep_stmt,
         };
         try c.writePacketWithParam(execute_request, params);
@@ -145,7 +144,7 @@ pub const Conn = struct {
         const packet = try c.readPacket();
         return switch (packet.payload[0]) {
             constants.OK => {},
-            else => packet.asError(),
+            else => packet.asError(c.capabilities),
         };
     }
 
@@ -170,7 +169,7 @@ pub const Conn = struct {
         const resp_packet = try c.readPacket();
         return switch (resp_packet.payload[0]) {
             constants.OK => {},
-            else => resp_packet.asError(),
+            else => resp_packet.asError(c.capabilities),
         };
     }
 
@@ -213,7 +212,7 @@ pub const Conn = struct {
                         else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
                 },
-                else => return packet.asError(),
+                else => return packet.asError(c.capabilities),
             }
         }
     }
