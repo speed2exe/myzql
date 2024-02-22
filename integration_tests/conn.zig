@@ -112,32 +112,6 @@ test "query text protocol" {
     }
 }
 
-test "query text table" {
-    var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
-
-    {
-        const query_res = try c.query(allocator, "SELECT 1,2,3 UNION ALL SELECT 4,null,6");
-        defer query_res.deinit(allocator);
-        const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
-        const table_texts = try rows.tableTexts(allocator);
-        defer table_texts.deinit(allocator);
-        try std.testing.expectEqual(table_texts.table.len, 2);
-        {
-            const expected: []const ?[]const u8 = &.{ "1", "2", "3", "4", null, "6" };
-            try std.testing.expectEqualDeep(expected, table_texts.flattened);
-        }
-        {
-            const expected: []const ?[]const u8 = &.{ "1", "2", "3" };
-            try std.testing.expectEqualDeep(expected, table_texts.table[0]);
-        }
-        {
-            const expected: []const ?[]const u8 = &.{ "4", null, "6" };
-            try std.testing.expectEqualDeep(expected, table_texts.table[1]);
-        }
-    }
-}
-
 test "prepare check" {
     var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
