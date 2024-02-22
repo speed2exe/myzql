@@ -2,17 +2,14 @@ const std = @import("std");
 const Config = @import("./config.zig").Config;
 const constants = @import("./constants.zig");
 const auth = @import("./auth.zig");
-const AuthPlugin = auth.AuthPlugin;
 const protocol = @import("./protocol.zig");
 const HandshakeV10 = protocol.handshake_v10.HandshakeV10;
 const ErrorPacket = protocol.generic_response.ErrorPacket;
 const OkPacket = protocol.generic_response.OkPacket;
 const HandshakeResponse41 = protocol.handshake_response.HandshakeResponse41;
-const AuthSwitchRequest = protocol.auth_switch_request.AuthSwitchRequest;
 const QueryRequest = protocol.text_command.QueryRequest;
 const prepared_statements = protocol.prepared_statements;
 const PrepareRequest = prepared_statements.PrepareRequest;
-const PrepareOk = prepared_statements.PrepareOk;
 const ExecuteRequest = prepared_statements.ExecuteRequest;
 const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
@@ -22,11 +19,8 @@ const result = @import("./result.zig");
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
 const PreparedStatement = result.PreparedStatement;
-const TextResultData = result.TextResultRow;
-const BinaryResultData = result.BinaryResultRow;
-const ResultSet = result.ResultSet;
-const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
-const EofPacket = protocol.generic_response.EofPacket;
+const TextResultRow = result.TextResultRow;
+const BinaryResultRow = result.BinaryResultRow;
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -107,12 +101,12 @@ pub const Conn = struct {
     }
 
     // TODO: add options
-    pub fn query(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult(TextResultData) {
+    pub fn query(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult(TextResultRow) {
         c.sequence_id = 0;
         const query_req: QueryRequest = .{ .query = query_string };
         try c.writePacket(query_req);
         try c.writer.flush();
-        return QueryResult(TextResultData).init(c, allocator);
+        return QueryResult(TextResultRow).init(c, allocator);
     }
 
     // TODO: add options
@@ -124,7 +118,7 @@ pub const Conn = struct {
         return PrepareResult.init(c, allocator);
     }
 
-    pub fn execute(c: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultData) {
+    pub fn execute(c: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
         c.sequence_id = 0;
         const execute_request: ExecuteRequest = .{
             .capabilities = c.capabilities,
@@ -132,7 +126,7 @@ pub const Conn = struct {
         };
         try c.writePacketWithParam(execute_request, params);
         try c.writer.flush();
-        return QueryResult(BinaryResultData).init(c, allocator);
+        return QueryResult(BinaryResultRow).init(c, allocator);
     }
 
     fn auth_mysql_native_password(c: *Conn, auth_data: *const [20]u8, config: *const Config) !void {
