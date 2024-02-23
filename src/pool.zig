@@ -4,16 +4,17 @@ const protocol = @import("./protocol.zig");
 const Conn = @import("./conn.zig").Conn;
 const result = @import("./result.zig");
 
-pub const Pool = struct {
-    config: Config,
-    conn: Conn,
-
-    pub fn init(config: Config) Pool {
-        return .{
-            .config = config,
-            .conn = .{},
-        };
-    }
-
-    // TODO:
-};
+// TODO: Pool
+// pub const Pool = struct {
+//     config: Config,
+//     conn: Conn,
+//
+//     pub fn init(config: Config) Pool {
+//         return .{
+//             .config = config,
+//             .conn = .{},
+//         };
+//     }
+//
+//     // TODO:
+// };

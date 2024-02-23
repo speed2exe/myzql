@@ -84,37 +84,3 @@ pub const OkPacket = struct {
         return ok_packet;
     }
 };
-
-// https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_eof_packet.html
-pub const EofPacket = struct {
-    status_flags: ?u16,
-    warnings: ?u16,
-
-    pub fn init(packet: *const Packet, capabilities: u32) EofPacket {
-        var eof_packet: EofPacket = undefined;
-
-        std.debug.assert(packet.payload.payload_length < 9);
-        var reader = PacketReader.initFromPacket(packet);
-        const header = reader.readByte();
-        std.debug.assert(header == constants.EOF);
-
-        eof_packet.status_flags = null;
-        eof_packet.warnings = null;
-        if (capabilities & constants.CLIENT_PROTOCOL_41 > 0) {
-            eof_packet.status_flags = reader.readUInt16();
-            eof_packet.warnings = reader.readUInt16();
-        }
-
-        std.debug.assert(reader.finished());
-        return eof_packet;
-    }
-
-    pub fn asError(p: *const EofPacket) error{EofPacket} {
-        // TODO: better way to do this?
-        std.log.warn(
-            "eof packet: (status_flags: {any}, warnings: {any})",
-            .{ p.status_flags, p.warnings },
-        );
-        return error.EofPacket;
-    }
-};

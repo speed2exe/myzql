@@ -393,7 +393,6 @@ fn writeNullBitmap(params: anytype, writer: *PacketWriter) !void {
 }
 
 fn writeNullBitmapWithAttrs(params: anytype, attributes: []const BinaryParam, writer: *PacketWriter) !void {
-    std.log.warn("\n", .{});
     const byte_count = (params.len + attributes.len + 7) / 8;
     for (0..byte_count) |i| {
         const start = i * 8;
@@ -411,8 +410,7 @@ fn writeNullBitmapWithAttrs(params: anytype, attributes: []const BinaryParam, wr
 
         // [1,1,1,1] [1,1,1]
         // start = 0, end = 8
-        std.log.warn("byte: {d}", .{byte});
-        try writer.writeInt(u8, writer, byte);
+        try writer.writeInt(u8, byte);
     }
 }
 
@@ -559,11 +557,19 @@ test "writeNullBitmap" {
     };
 
     inline for (tests) |t| {
-        var buffer: [4]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buffer);
-        _ = try writeNullBitmapWithAttrs(t.params, t.attributes, &fbs);
+        var buf: [1024]u8 = undefined;
 
-        const written = fbs.buffer[0..fbs.pos];
+        var fake_packet_writer: PacketWriter = .{
+            .buf = &buf,
+            .pos = 0,
+            .stream = undefined,
+            .allocator = std.testing.allocator,
+        };
+        fake_packet_writer =
+            fake_packet_writer;
+
+        _ = try writeNullBitmapWithAttrs(t.params, t.attributes, &fake_packet_writer);
+        const written = buf[0..fake_packet_writer.pos];
         try std.testing.expectEqualSlices(u8, t.expected, written);
     }
 }
