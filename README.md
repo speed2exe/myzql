@@ -13,7 +13,7 @@
 - MySQL DateTime and Time support
 
 ## Requirements
-- MySQL 5.7.5 and up
+- MySQL/MariaDB 5.7.5 and up
 
 ## TODOs
 - Config from URL
@@ -85,12 +85,7 @@ pub fn main() !void {
     // If you are able to have an upper bound of this operation, you can provide a more optimized allocator.
     // You may also do insertion query here, but it will not be optimal and will be more
     // vulnerable to SQL injection attacks.
-    const result = try c.query(allocator, "CREATE DATABASE testdb");
-    // If a query can return rows, you need to deinit.
-    // This is because when there are rows returned,
-    // rows metadata like column types will received and
-    // need to be preserved for result decoding
-    defer result.deinit(allocator);
+    const result = try c.query("CREATE DATABASE testdb");
 
     // Query results can have a few variant:
     // - ok:   OkPacket     => error occurred
@@ -135,8 +130,7 @@ const TableTexts = myzql.result.TableTexts;
 const TextElemIter = myzql.result.TextElemIter;
 
 pub fn main() !void {
-    const result = try c.query(allocator, "SELECT * FROM customers.purchases");
-    defer result.deinit(allocator);
+    const result = try c.queryRows("SELECT * FROM customers.purchases");
 
     // This is a query that returns rows, you have to collect the result.
     // you can use `expect(.rows)` to try interpret query result as ResultSet(TextResultRow)
@@ -201,8 +195,7 @@ pub fn main() void {
         .{ "Sam", 24 },
     };
     inline for (params) |param| {
-        const exe_res = try c.execute(allocator, &prep_stmt, param);
-        defer exe_res.deinit(allocator);
+        const exe_res = try c.execute(&prep_stmt, param);
         const ok: OkPacket = try exe_res.expect(.ok); // expecting ok here because there's no rows returned
         const last_insert_id: u64 = ok.last_insert_id;
         std.debug.print("last_insert_id: {any}\n", .{last_insert_id});
@@ -232,17 +225,13 @@ fn main() !void {
         age: u8,
     };
 
-
-
     // Execute query and get an iterator from results
-    const res: QueryResult(BinaryResultRow) = try c.execute(allocator, &prep_stmt, .{});
-    defer res.deinit(allocator);
+    const res: QueryResult(BinaryResultRow) = try c.executeRows(&prep_stmt, .{});
     const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
     const iter: ResultSetIter(BinaryResultRow) = rows.iter();
 
     { // Iterating over rows, scanning into struct or creating struct
-        const query_res = try c.execute(allocator, &prep_stmt, .{}); // no parameters because there's no ? in the query
-        defer query_res.deinit(allocator);
+        const query_res = try c.executeRows(&prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         while (try rows_iter.next()) |row| {
@@ -268,8 +257,7 @@ fn main() !void {
     }
 
     { // collect all rows into a table ([]const Person)
-        const query_res = try c.execute(allocator, &prep_stmt, .{}); // no parameters because there's no ? in the query
-        defer query_res.deinit(allocator);
+        const query_res = try c.executeRows(&prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         const person_structs = try rows_iter.tableStructs(Person, allocator);
@@ -296,17 +284,6 @@ const DateTime = myzql.temporal.DateTime;
 const Duration = myzql.temporal.Duration;
 
 fn main() !void {
-    try queryExpectOk(allocator, c, "CREATE DATABASE test");
-    defer queryExpectOk(allocator, c, "DROP DATABASE test") catch {};
-
-    try queryExpectOk(allocator, c,
-        \\CREATE TABLE test.temporal_types_example (
-        \\    event_time DATETIME(6) NOT NULL,
-        \\    duration TIME(6) NOT NULL
-        \\)
-    );
-    defer queryExpectOk(allocator, c, "DROP TABLE test.temporal_types_example") catch {};
-
     { // Insert
         const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?, ?)");
         defer prep_res.deinit(allocator);
@@ -330,8 +307,7 @@ fn main() !void {
         };
         const params = .{.{ my_time, my_duration }};
         inline for (params) |param| {
-            const exe_res = try c.execute(allocator, &prep_stmt, param);
-            defer exe_res.deinit(allocator);
+            const exe_res = try c.execute(&prep_stmt, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -344,8 +320,7 @@ fn main() !void {
         const prep_res = try c.prepare(allocator, "SELECT * FROM test.temporal_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try c.execute(allocator, &prep_stmt, .{});
-        defer res.deinit(allocator);
+        const res = try c.executeRows(&prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -364,10 +339,7 @@ fn main() !void {
 - Start up mysql/mariadb in docker:
   - `docker run --name some-mysql --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql`
   - `docker run --name some-mariadb --env MARIADB_ROOT_PASSWORD=password -p 3306:3306 -d mariadb`
-- Run all the test: In root directory of project: `zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test`
-
-### Tips
-- test filter flag: `--test-filter <test name ish>`
+- Run all the test: In root directory of project: `zig test integration_test -Dtest-filer='...'`
 
 ## Philosophy
 ### Correctness
