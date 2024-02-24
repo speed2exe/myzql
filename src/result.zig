@@ -56,7 +56,7 @@ pub fn QueryResultRows(comptime T: type) type {
         rows: ResultSet(T),
 
         // allocation happens when a result set is returned
-        pub fn init(c: *Conn, allocator: std.mem.Allocator) !QueryResultRows(T) {
+        pub fn init(c: *Conn) !QueryResultRows(T) {
             const packet = try c.readPacket();
             return switch (packet.payload[0]) {
                 constants.OK => {
@@ -68,15 +68,8 @@ pub fn QueryResultRows(comptime T: type) type {
                 },
                 constants.ERR => .{ .err = ErrorPacket.init(&packet, c.capabilities) },
                 constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-                else => .{ .rows = try ResultSet(T).init(allocator, c, &packet) },
+                else => .{ .rows = try ResultSet(T).init(c, &packet) },
             };
-        }
-
-        pub fn deinit(q: *const QueryResultRows(T), allocator: std.mem.Allocator) void {
-            switch (q.*) {
-                .rows => |rows| rows.deinit(allocator),
-                else => {},
-            }
         }
 
         pub fn expect(
@@ -102,30 +95,18 @@ pub fn QueryResultRows(comptime T: type) type {
 pub fn ResultSet(comptime T: type) type {
     return struct {
         conn: *Conn,
-        col_packets: []const Packet,
         col_defs: []const ColumnDefinition41,
 
-        pub fn init(allocator: std.mem.Allocator, conn: *Conn, packet: *const Packet) !ResultSet(T) {
+        pub fn init(conn: *Conn, packet: *const Packet) !ResultSet(T) {
             var reader = packet.reader();
             const n_columns = reader.readLengthEncodedInteger();
             std.debug.assert(reader.finished());
 
-            const col_packets = try allocator.alloc(Packet, n_columns);
-            errdefer allocator.free(col_packets);
-
-            const col_defs = try allocator.alloc(ColumnDefinition41, n_columns);
-            errdefer allocator.free(col_defs);
-
-            for (col_packets, col_defs) |*pac, *def| {
-                const col_def_packet = try conn.readPacket();
-                pac.* = try col_def_packet.cloneAlloc(allocator);
-                def.* = ColumnDefinition41.init(&col_def_packet);
-            }
+            try conn.readPutResultColumns(n_columns);
 
             return .{
                 .conn = conn,
-                .col_packets = col_packets,
-                .col_defs = col_defs,
+                .col_defs = conn.result_meta.col_defs.items,
             };
         }
 

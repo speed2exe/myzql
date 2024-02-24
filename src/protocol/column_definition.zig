@@ -19,25 +19,28 @@ pub const ColumnDefinition41 = struct {
 
     pub fn init(packet: *const Packet) ColumnDefinition41 {
         var column_definition_41: ColumnDefinition41 = undefined;
+        column_definition_41.init2(packet);
+        return column_definition_41;
+    }
+
+    pub fn init2(c: *ColumnDefinition41, packet: *const Packet) void {
         var reader = packet.reader();
 
-        column_definition_41.catalog = reader.readLengthEncodedString();
-        column_definition_41.schema = reader.readLengthEncodedString();
-        column_definition_41.table = reader.readLengthEncodedString();
-        column_definition_41.org_table = reader.readLengthEncodedString();
-        column_definition_41.name = reader.readLengthEncodedString();
-        column_definition_41.org_name = reader.readLengthEncodedString();
-        column_definition_41.fixed_length_fields_length = reader.readLengthEncodedInteger();
-        column_definition_41.character_set = reader.readInt(u16);
-        column_definition_41.column_length = reader.readInt(u32);
-        column_definition_41.column_type = reader.readByte();
-        column_definition_41.flags = reader.readInt(u16);
-        column_definition_41.decimals = reader.readByte();
+        c.catalog = reader.readLengthEncodedString();
+        c.schema = reader.readLengthEncodedString();
+        c.table = reader.readLengthEncodedString();
+        c.org_table = reader.readLengthEncodedString();
+        c.name = reader.readLengthEncodedString();
+        c.org_name = reader.readLengthEncodedString();
+        c.fixed_length_fields_length = reader.readLengthEncodedInteger();
+        c.character_set = reader.readInt(u16);
+        c.column_length = reader.readInt(u32);
+        c.column_type = reader.readByte();
+        c.flags = reader.readInt(u16);
+        c.decimals = reader.readByte();
 
         // https://mariadb.com/kb/en/result-set-packets/#column-definition-packet
         // According to mariadb, there seem to be extra 2 bytes at the end that is not being used
         std.debug.assert(reader.remained() == 2);
-
-        return column_definition_41;
     }
 };
