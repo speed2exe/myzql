@@ -16,6 +16,7 @@ const Packet = protocol.packet.Packet;
 const PacketReader = protocol.packet_reader.PacketReader;
 const PacketWriter = protocol.packet_writer.PacketWriter;
 const result = @import("./result.zig");
+const QueryResultRows = result.QueryResultRows;
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
 const PreparedStatement = result.PreparedStatement;
@@ -100,16 +101,25 @@ pub const Conn = struct {
         }
     }
 
-    // TODO: add options
-    pub fn query(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult(TextResultRow) {
+    // query that doesn't return any rows
+    pub fn query(c: *Conn, query_string: []const u8) !QueryResult {
         c.sequence_id = 0;
         const query_req: QueryRequest = .{ .query = query_string };
         try c.writePacket(query_req);
         try c.writer.flush();
-        return QueryResult(TextResultRow).init(c, allocator);
+        const packet = try c.readPacket();
+        return QueryResult.init(&packet, c.capabilities);
     }
 
-    // TODO: add options
+    // query that expect rows, even if it returns 0 rows
+    pub fn queryRows(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResultRows(TextResultRow) {
+        c.sequence_id = 0;
+        const query_req: QueryRequest = .{ .query = query_string };
+        try c.writePacket(query_req);
+        try c.writer.flush();
+        return QueryResultRows(TextResultRow).init(c, allocator);
+    }
+
     pub fn prepare(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
         c.sequence_id = 0;
         const prepare_request: PrepareRequest = .{ .query = query_string };
@@ -118,7 +128,9 @@ pub const Conn = struct {
         return PrepareResult.init(c, allocator);
     }
 
-    pub fn execute(c: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
+    // execute a prepared statement that doesn't return any rows
+    pub fn execute(c: *Conn, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult {
+        std.debug.assert(prep_stmt.res_cols.len == 0); // execute expects no rows
         c.sequence_id = 0;
         const execute_request: ExecuteRequest = .{
             .capabilities = c.capabilities,
@@ -126,7 +138,21 @@ pub const Conn = struct {
         };
         try c.writePacketWithParam(execute_request, params);
         try c.writer.flush();
-        return QueryResult(BinaryResultRow).init(c, allocator);
+        const packet = try c.readPacket();
+        return QueryResult.init(&packet, c.capabilities);
+    }
+
+    // execute a prepared statement that expect rows, even if it returns 0 rows
+    pub fn executeRows(c: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
+        std.debug.assert(prep_stmt.res_cols.len > 0); // executeRows expects rows
+        c.sequence_id = 0;
+        const execute_request: ExecuteRequest = .{
+            .capabilities = c.capabilities,
+            .prep_stmt = prep_stmt,
+        };
+        try c.writePacketWithParam(execute_request, params);
+        try c.writer.flush();
+        return QueryResultRows(BinaryResultRow).init(c, allocator);
     }
 
     fn auth_mysql_native_password(c: *Conn, auth_data: *const [20]u8, config: *const Config) !void {
