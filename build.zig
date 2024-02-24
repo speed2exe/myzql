@@ -16,18 +16,12 @@ pub fn build(b: *std.Build) void {
     // zig build [install]
     b.installArtifact(unit_tests);
 
-    // zig build run_unit_test
+    // zig build run_unit_test -Dtest-filter="..."
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const unit_test_step = b.step("unit_test", "Run unit tests");
     unit_test_step.dependOn(&run_unit_tests.step);
 
-    // zig build integration_test
-    // integration_test
-    // └─ run test failure
-    // error: unable to spawn /<some-path>/myzql/zig-cache/o/82ac61612eaa882f2401e0d249b59437/test: BrokenPipe
-    //
-    // Use this command for now:
-    // zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test
+    // zig build integration_test -Dtest-filter="..."
     const integration_tests = b.addTest(.{
         .root_source_file = .{ .path = "./integration_tests/main.zig" },
     });

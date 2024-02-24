@@ -20,7 +20,7 @@ jobs:
 
       - name: install zig
         run: |
-          ZIG_VERSION=0.12.0-dev.2700+d12c8db64
+          ZIG_VERSION=0.12.0-dev.2858+7230b68b3
           wget https://ziglang.org/builds/zig-linux-x86_64-$ZIG_VERSION.tar.xz
           tar xf zig-linux-x86_64-$ZIG_VERSION.tar.xz
           mv zig-linux-x86_64-$ZIG_VERSION $HOME/zig-build
@@ -29,7 +29,7 @@ jobs:
         run: |
           $HOME/zig-build/zig build
           while ! wget -qO- localhost:3306; do sleep 1; docker ps -a; done
-          $HOME/zig-build/zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test
+          $HOME/zig-build/zig build integration_test
 
       - name: Auth Test
         run: |
@@ -38,18 +38,18 @@ jobs:
           docker run --name mysql_server --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql \
             --default-authentication-plugin=mysql_native_password
           while ! wget -qO- localhost:3306; do sleep 1; docker ps -a ; done
-          $HOME/zig-build/zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test --test-filter 'ping'
+          $HOME/zig-build/zig build integration_test -Dtest-filter="ping"
 
           # sha2_password
           docker rm -f mysql_server
           docker run --name mysql_server --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql \
             --default-authentication-plugin=sha256_password
           while ! wget -qO- localhost:3306; do sleep 1; docker ps -a; done
-          $HOME/zig-build/zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test --test-filter 'ping'
+          $HOME/zig-build/zig build integration_test -Dtest-filter="ping"
 
       - name: Run Integration Tests - MariaDB
         run: |
           docker rm -f mysql_server
           docker run --name some-mariadb --env MARIADB_ROOT_PASSWORD=password -p 3306:3306 -d mariadb
           while ! wget -qO- localhost:3306; do sleep 1; docker ps -a ; done
-          $HOME/zig-build/zig test --dep myzql --mod root ./integration_tests/main.zig --mod myzql ./src/myzql.zig --name test
+          $HOME/zig-build/zig build integration_test
