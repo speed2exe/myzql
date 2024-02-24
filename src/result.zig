@@ -9,46 +9,78 @@ const OkPacket = protocol.generic_response.OkPacket;
 const ErrorPacket = protocol.generic_response.ErrorPacket;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 const Conn = @import("./conn.zig").Conn;
-const EofPacket = protocol.generic_response.EofPacket;
 const conversion = @import("./conversion.zig");
 
-pub fn QueryResult(comptime T: type) type {
+pub const QueryResult = union(enum) {
+    ok: OkPacket,
+    err: ErrorPacket,
+
+    pub fn init(packet: *const Packet, capabilities: u32) !QueryResult {
+        return switch (packet.payload[0]) {
+            constants.OK => .{ .ok = OkPacket.init(packet, capabilities) },
+            constants.ERR => .{ .err = ErrorPacket.init(packet, capabilities) },
+            constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
+            else => {
+                std.log.warn(
+                    \\Unexpected packet: {any}\n,
+                    \\Are you expecting a result set? If so, use QueryResultRows instead.
+                    \\This is unrecoverable error.
+                , .{packet});
+                return error.UnrecoverableError;
+            },
+        };
+    }
+
+    pub fn expect(
+        q: QueryResult,
+        comptime value_variant: std.meta.FieldEnum(QueryResult),
+    ) !std.meta.FieldType(QueryResult, value_variant) {
+        return switch (q) {
+            value_variant => @field(q, @tagName(value_variant)),
+            else => {
+                return switch (q) {
+                    .err => |err| return err.asError(),
+                    .ok => |ok| {
+                        std.log.err("Unexpected OkPacket: {any}\n", .{ok});
+                        return error.UnexpectedOk;
+                    },
+                };
+            },
+        };
+    }
+};
+
+pub fn QueryResultRows(comptime T: type) type {
     return union(enum) {
-        ok: OkPacket,
         err: ErrorPacket,
         rows: ResultSet(T),
 
         // allocation happens when a result set is returned
-        pub fn init(c: *Conn, allocator: std.mem.Allocator) !QueryResult(T) {
+        pub fn init(c: *Conn) !QueryResultRows(T) {
             const packet = try c.readPacket();
             return switch (packet.payload[0]) {
-                constants.OK => .{ .ok = OkPacket.init(&packet, c.capabilities) },
+                constants.OK => {
+                    std.log.warn(
+                        \\Unexpected OkPacket: {any}\n,
+                        \\If your query is not expecting a result set, use QueryResult instead.
+                    , .{OkPacket.init(&packet, c.capabilities)});
+                    return packet.asError(c.capabilities);
+                },
                 constants.ERR => .{ .err = ErrorPacket.init(&packet, c.capabilities) },
                 constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-                else => .{ .rows = try ResultSet(T).init(allocator, c, &packet) },
+                else => .{ .rows = try ResultSet(T).init(c, &packet) },
             };
         }
 
-        pub fn deinit(q: *const QueryResult(T), allocator: std.mem.Allocator) void {
-            switch (q.*) {
-                .rows => |rows| rows.deinit(allocator),
-                else => {},
-            }
-        }
-
         pub fn expect(
-            q: QueryResult(T),
-            comptime value_variant: std.meta.FieldEnum(QueryResult(T)),
-        ) !std.meta.FieldType(QueryResult(T), value_variant) {
+            q: QueryResultRows(T),
+            comptime value_variant: std.meta.FieldEnum(QueryResultRows(T)),
+        ) !std.meta.FieldType(QueryResultRows(T), value_variant) {
             return switch (q) {
                 value_variant => @field(q, @tagName(value_variant)),
                 else => {
                     return switch (q) {
                         .err => |err| return err.asError(),
-                        .ok => |ok| {
-                            std.log.err("Unexpected OkPacket: {any}\n", .{ok});
-                            return error.UnexpectedOk;
-                        },
                         .rows => |rows| {
                             std.log.err("Unexpected ResultSet: {any}\n", .{rows});
                             return error.UnexpectedResultSet;
@@ -63,30 +95,18 @@ pub fn QueryResult(comptime T: type) type {
 pub fn ResultSet(comptime T: type) type {
     return struct {
         conn: *Conn,
-        col_packets: []const Packet,
         col_defs: []const ColumnDefinition41,
 
-        pub fn init(allocator: std.mem.Allocator, conn: *Conn, packet: *const Packet) !ResultSet(T) {
+        pub fn init(conn: *Conn, packet: *const Packet) !ResultSet(T) {
             var reader = packet.reader();
             const n_columns = reader.readLengthEncodedInteger();
             std.debug.assert(reader.finished());
 
-            const col_packets = try allocator.alloc(Packet, n_columns);
-            errdefer allocator.free(col_packets);
-
-            const col_defs = try allocator.alloc(ColumnDefinition41, n_columns);
-            errdefer allocator.free(col_defs);
-
-            for (col_packets, col_defs) |*pac, *def| {
-                const col_def_packet = try conn.readPacket();
-                pac.* = try col_def_packet.cloneAlloc(allocator);
-                def.* = ColumnDefinition41.init(&col_def_packet);
-            }
+            try conn.readPutResultColumns(n_columns);
 
             return .{
                 .conn = conn,
-                .col_packets = col_packets,
-                .col_defs = col_defs,
+                .col_defs = conn.result_meta.col_defs.items,
             };
         }
 

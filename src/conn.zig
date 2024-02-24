@@ -16,11 +16,13 @@ const Packet = protocol.packet.Packet;
 const PacketReader = protocol.packet_reader.PacketReader;
 const PacketWriter = protocol.packet_writer.PacketWriter;
 const result = @import("./result.zig");
+const QueryResultRows = result.QueryResultRows;
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
 const PreparedStatement = result.PreparedStatement;
 const TextResultRow = result.TextResultRow;
 const BinaryResultRow = result.BinaryResultRow;
+const ResultMeta = @import("./result_meta.zig").ResultMeta;
 
 const max_packet_size = 1 << 24 - 1;
 
@@ -28,22 +30,28 @@ const max_packet_size = 1 << 24 - 1;
 const buffer_size: usize = 4096;
 
 pub const Conn = struct {
+    connected: bool,
     stream: std.net.Stream,
     reader: PacketReader,
     writer: PacketWriter,
     capabilities: u32,
     sequence_id: u8,
 
+    result_meta: ResultMeta,
+
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn init(allocator: std.mem.Allocator, config: *const Config) !Conn {
         var conn: Conn = blk: {
             const stream = try std.net.tcpConnectToAddress(config.address);
             break :blk .{
+                .connected = true,
                 .stream = stream,
                 .reader = try PacketReader.init(stream, allocator),
                 .writer = try PacketWriter.init(stream, allocator),
                 .capabilities = undefined, // not known until we get the first packet
                 .sequence_id = undefined, // not known until we get the first packet
+
+                .result_meta = ResultMeta.init(allocator),
             };
         };
         errdefer conn.deinit();
@@ -86,10 +94,11 @@ pub const Conn = struct {
         c.stream.close();
         c.reader.deinit();
         c.writer.deinit();
+        c.result_meta.deinit();
     }
 
     pub fn ping(c: *Conn) !void {
-        c.sequence_id = 0;
+        c.ready();
         try c.writeBytesAsPacket(&[_]u8{constants.COM_PING});
         try c.writer.flush();
         const packet = try c.readPacket();
@@ -100,25 +109,37 @@ pub const Conn = struct {
         }
     }
 
-    // TODO: add options
-    pub fn query(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResult(TextResultRow) {
-        c.sequence_id = 0;
+    // query that doesn't return any rows
+    pub fn query(c: *Conn, query_string: []const u8) !QueryResult {
+        c.ready();
         const query_req: QueryRequest = .{ .query = query_string };
         try c.writePacket(query_req);
         try c.writer.flush();
-        return QueryResult(TextResultRow).init(c, allocator);
+        const packet = try c.readPacket();
+        return c.queryResult(&packet);
     }
 
-    // TODO: add options
+    // query that expect rows, even if it returns 0 rows
+    pub fn queryRows(c: *Conn, query_string: []const u8) !QueryResultRows(TextResultRow) {
+        c.ready();
+        const query_req: QueryRequest = .{ .query = query_string };
+        try c.writePacket(query_req);
+        try c.writer.flush();
+        return QueryResultRows(TextResultRow).init(c);
+    }
+
     pub fn prepare(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
-        c.sequence_id = 0;
+        c.ready();
         const prepare_request: PrepareRequest = .{ .query = query_string };
         try c.writePacket(prepare_request);
         try c.writer.flush();
         return PrepareResult.init(c, allocator);
     }
 
-    pub fn execute(c: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
+    // execute a prepared statement that doesn't return any rows
+    pub fn execute(c: *Conn, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult {
+        c.ready();
+        std.debug.assert(prep_stmt.res_cols.len == 0); // execute expects no rows
         c.sequence_id = 0;
         const execute_request: ExecuteRequest = .{
             .capabilities = c.capabilities,
@@ -126,7 +147,22 @@ pub const Conn = struct {
         };
         try c.writePacketWithParam(execute_request, params);
         try c.writer.flush();
-        return QueryResult(BinaryResultRow).init(c, allocator);
+        const packet = try c.readPacket();
+        return c.queryResult(&packet);
+    }
+
+    // execute a prepared statement that expect rows, even if it returns 0 rows
+    pub fn executeRows(c: *Conn, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
+        c.ready();
+        std.debug.assert(prep_stmt.res_cols.len > 0); // executeRows expects rows
+        c.sequence_id = 0;
+        const execute_request: ExecuteRequest = .{
+            .capabilities = c.capabilities,
+            .prep_stmt = prep_stmt,
+        };
+        try c.writePacketWithParam(execute_request, params);
+        try c.writer.flush();
+        return QueryResultRows(BinaryResultRow).init(c);
     }
 
     fn auth_mysql_native_password(c: *Conn, auth_data: *const [20]u8, config: *const Config) !void {
@@ -217,6 +253,10 @@ pub const Conn = struct {
         return packet;
     }
 
+    pub inline fn readPutResultColumns(c: *Conn, n: usize) !void {
+        try c.result_meta.readPutResultColumns(c, n);
+    }
+
     inline fn writePacket(c: *Conn, packet: anytype) !void {
         try c.writer.writePacket(c.generateSequenceId(), packet);
     }
@@ -233,5 +273,26 @@ pub const Conn = struct {
         const sequence_id = c.sequence_id;
         c.sequence_id += 1;
         return sequence_id;
+    }
+
+    inline fn queryResult(c: *Conn, packet: *const Packet) !QueryResult {
+        const res = QueryResult.init(packet, c.capabilities) catch |err| {
+            switch (err) {
+                error.UnrecoverableError => {
+                    c.stream.close();
+                    c.connected = false;
+                    return err;
+                },
+                else => return err,
+            }
+        };
+        return res;
+    }
+
+    inline fn ready(c: *Conn) void {
+        std.debug.assert(c.connected);
+        std.debug.assert(c.writer.pos == 0);
+        std.debug.assert(c.reader.pos == c.reader.len);
+        c.sequence_id = 0;
     }
 };
