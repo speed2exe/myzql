@@ -29,6 +29,7 @@ const max_packet_size = 1 << 24 - 1;
 const buffer_size: usize = 4096;
 
 pub const Conn = struct {
+    connected: bool,
     stream: std.net.Stream,
     reader: PacketReader,
     writer: PacketWriter,
@@ -40,6 +41,7 @@ pub const Conn = struct {
         var conn: Conn = blk: {
             const stream = try std.net.tcpConnectToAddress(config.address);
             break :blk .{
+                .connected = true,
                 .stream = stream,
                 .reader = try PacketReader.init(stream, allocator),
                 .writer = try PacketWriter.init(stream, allocator),
@@ -90,7 +92,7 @@ pub const Conn = struct {
     }
 
     pub fn ping(c: *Conn) !void {
-        c.sequence_id = 0;
+        c.ready();
         try c.writeBytesAsPacket(&[_]u8{constants.COM_PING});
         try c.writer.flush();
         const packet = try c.readPacket();
@@ -103,17 +105,17 @@ pub const Conn = struct {
 
     // query that doesn't return any rows
     pub fn query(c: *Conn, query_string: []const u8) !QueryResult {
-        c.sequence_id = 0;
+        c.ready();
         const query_req: QueryRequest = .{ .query = query_string };
         try c.writePacket(query_req);
         try c.writer.flush();
         const packet = try c.readPacket();
-        return QueryResult.init(&packet, c.capabilities);
+        return c.queryResult(&packet);
     }
 
     // query that expect rows, even if it returns 0 rows
     pub fn queryRows(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResultRows(TextResultRow) {
-        c.sequence_id = 0;
+        c.ready();
         const query_req: QueryRequest = .{ .query = query_string };
         try c.writePacket(query_req);
         try c.writer.flush();
@@ -121,7 +123,7 @@ pub const Conn = struct {
     }
 
     pub fn prepare(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
-        c.sequence_id = 0;
+        c.ready();
         const prepare_request: PrepareRequest = .{ .query = query_string };
         try c.writePacket(prepare_request);
         try c.writer.flush();
@@ -130,6 +132,7 @@ pub const Conn = struct {
 
     // execute a prepared statement that doesn't return any rows
     pub fn execute(c: *Conn, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult {
+        c.ready();
         std.debug.assert(prep_stmt.res_cols.len == 0); // execute expects no rows
         c.sequence_id = 0;
         const execute_request: ExecuteRequest = .{
@@ -139,11 +142,12 @@ pub const Conn = struct {
         try c.writePacketWithParam(execute_request, params);
         try c.writer.flush();
         const packet = try c.readPacket();
-        return QueryResult.init(&packet, c.capabilities);
+        return c.queryResult(&packet);
     }
 
     // execute a prepared statement that expect rows, even if it returns 0 rows
     pub fn executeRows(c: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
+        c.ready();
         std.debug.assert(prep_stmt.res_cols.len > 0); // executeRows expects rows
         c.sequence_id = 0;
         const execute_request: ExecuteRequest = .{
@@ -259,5 +263,26 @@ pub const Conn = struct {
         const sequence_id = c.sequence_id;
         c.sequence_id += 1;
         return sequence_id;
+    }
+
+    inline fn queryResult(c: *Conn, packet: *const Packet) !QueryResult {
+        const res = QueryResult.init(packet, c.capabilities) catch |err| {
+            switch (err) {
+                error.UnrecoverableError => {
+                    c.stream.close();
+                    c.connected = false;
+                    return err;
+                },
+                else => return err,
+            }
+        };
+        return res;
+    }
+
+    inline fn ready(c: *Conn) void {
+        std.debug.assert(c.connected);
+        std.debug.assert(c.writer.pos == 0);
+        std.debug.assert(c.reader.pos == c.reader.len);
+        c.sequence_id = 0;
     }
 };

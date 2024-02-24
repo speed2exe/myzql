@@ -24,8 +24,9 @@ pub const QueryResult = union(enum) {
                 std.log.warn(
                     \\Unexpected packet: {any}\n,
                     \\Are you expecting a result set? If so, use QueryResultRows instead.
+                    \\This is unrecoverable error.
                 , .{packet});
-                return packet.asError(capabilities);
+                return error.UnrecoverableError;
             },
         };
     }
