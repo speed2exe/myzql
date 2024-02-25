@@ -34,10 +34,11 @@
 ```zon
     // ...
     .dependencies = .{
-        .myzql = .{
-	    .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.0.5.tar.gz", // do check tags for newer versions
-        .hash = "122021c467d780838f6225f90d5a5f42019afdc54d83ef0bceb5c8fd4e5e4df4a965",
-	}
+      .myzql = .{
+        .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.0.8.tar.gz",
+        .hash = "1220582ea45580eec6b16aa93d2a9404467db8bc1d911806d367513aa40f3817f84c",
+      }
+    },
     // ...
 ```
 
