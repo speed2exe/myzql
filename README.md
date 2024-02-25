@@ -51,17 +51,21 @@ const Conn = myzql.conn.Conn;
 
 pub fn main() !void {
     // Setting up client
-    var client = Conn.init(.{
-        .username = "some-user",   // default: "root"
-        .password = "password123", // default: ""
-        .database = "customers",   // default: ""
+    var client = try Conn.init(
+        allocator,
+        &.{
+            .username = "some-user",   // default: "root"
+            .password = "password123", // default: ""
+            .database = "customers",   // default: ""
 
-        // Current default value.
-        // Use std.net.getAddressList if you need to look up ip based on hostname
-        .address =  std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306),
+            // Current default value.
+            // Use std.net.getAddressList if you need to look up ip based on hostname
+            .address =  std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306),
+            // ...
+        },
+    );
+    defer client.deinit();
 
-        // ...
-    });
     // Connection and Authentication
     try client.ping();
 }
