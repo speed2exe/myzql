@@ -85,11 +85,6 @@ const OkPacket = protocol.generic_response.OkPacket;
 pub fn main() !void {
     // ...
     // You can do a text query (text protocol) by using `query` method on `Conn`
-    // Allocator is required in an event that there are rows returned from the server,
-    // If there are no rows returned, it is safe to not call `deinit`
-    // If you are able to have an upper bound of this operation, you can provide a more optimized allocator.
-    // You may also do insertion query here, but it will not be optimal and will be more
-    // vulnerable to SQL injection attacks.
     const result = try c.query("CREATE DATABASE testdb");
 
     // Query results can have a few variant:
