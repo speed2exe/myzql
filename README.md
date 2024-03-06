@@ -93,12 +93,10 @@ pub fn main() !void {
     const result = try c.query("CREATE DATABASE testdb");
 
     // Query results can have a few variant:
-    // - ok:   OkPacket     => error occurred
-    // - err:  ErrorPacket  => query is fine
-    // - rows: ResultSet(TextResultData) => rows returned from server
-    // In this example, the query is not returning any result, so it will either be `ok` or `err`.
+    // - ok:   OkPacket     => query is ok
+    // - err:  ErrorPacket  => error occurred
+    // In this example, res will either be `ok` or `err`.
     // We are using the convenient method `expect` for simplified error handling.
-    // You can also do `expect(.err)` or `expect(.rows)`.
     // If the result variant does not match the kind of result you have specified,
     // a message will be printed and you will get an error instead.
     const ok: OkPacket = try result.expect(.ok);
@@ -109,14 +107,8 @@ pub fn main() !void {
         .ok => |ok| {},
 
         // `asError` is also another convenient method to print message and return as zig error.
-        // You may also choose to inspect individual elements for more control.
+        // You may also choose to inspect individual fields for more control.
         .err => |err| return err.asError(),
-
-        // query results that returns data
-        .rows => |rows| {
-            _ = rows;
-            @panic("should not expect rows");
-        },
     }
 }
 ```
