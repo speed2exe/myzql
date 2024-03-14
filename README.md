@@ -329,9 +329,17 @@ fn main() !void {
 
 ## Integration Tests
 - Start up mysql/mariadb in docker:
-  - `docker run --name some-mysql --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql`
-  - `docker run --name some-mariadb --env MARIADB_ROOT_PASSWORD=password -p 3306:3306 -d mariadb`
-- Run all the test: In root directory of project: `zig test integration_test -Dtest-filer='...'`
+```bash
+# MySQL
+docker run --name some-mysql --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql
+```bash
+# MariaDB
+docker run --name some-mariadb --env MARIADB_ROOT_PASSWORD=password -p 3306:3306 -d mariadb
+```
+- Run all the test: In root directory of project:
+```bash
+zig build integration_test -Dtest-filer='...'
+```
 
 ## Philosophy
 ### Correctness

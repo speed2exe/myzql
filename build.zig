@@ -5,13 +5,14 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "./src/myzql.zig" },
     });
 
-    const test_filter = b.option([]const u8, "test-filter", "Filter for tests to run"); // -Dtest-filter="..."
+    // -Dtest-filter="..."
+    const test_filter = b.option([]const u8, "test-filter", "Filter for tests to run");
 
     // zig build unit_test
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "./src/myzql.zig" },
     });
-    unit_tests.filter = test_filter;
+    if (test_filter) |t| unit_tests.filters = &.{t};
 
     // zig build [install]
     b.installArtifact(unit_tests);
@@ -26,12 +27,12 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "./integration_tests/main.zig" },
     });
     integration_tests.root_module.addImport("myzql", myzql);
-    integration_tests.filter = test_filter;
+    if (test_filter) |t| unit_tests.filters = &.{t};
 
     // zig build [install]
     b.installArtifact(integration_tests);
 
-    // zig build run_integration_test
+    // zig build integration_test
     const run_integration_tests = b.addRunArtifact(integration_tests);
     const integration_test_step = b.step("integration_test", "Run integration tests");
     integration_test_step.dependOn(&run_integration_tests.step);
