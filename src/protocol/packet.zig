@@ -12,9 +12,9 @@ pub const Packet = struct {
         return .{ .sequence_id = sequence_id, .payload = payload };
     }
 
-    pub fn asError(packet: *const Packet, capabilities: u32) error{ UnexpectedPacket, ErrorPacket } {
+    pub fn asError(packet: *const Packet) error{ UnexpectedPacket, ErrorPacket } {
         if (packet.payload[0] == constants.ERR) {
-            return ErrorPacket.init(packet, capabilities).asError();
+            return ErrorPacket.init(packet).asError();
         }
         std.log.warn("unexpected packet: {any}", .{packet});
         return error.UnexpectedPacket;

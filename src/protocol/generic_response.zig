@@ -6,24 +6,33 @@ const PacketReader = @import("./packet_reader.zig").PacketReader;
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_err_packet.html
 pub const ErrorPacket = struct {
     error_code: u16,
-    sql_state_marker: ?u8,
-    sql_state: ?*const [5]u8,
+    sql_state_marker: u8,
+    sql_state: *const [5]u8,
     error_message: []const u8,
 
-    pub fn init(packet: *const Packet, capabilities: u32) ErrorPacket {
+    pub fn initFirst(packet: *const Packet) ErrorPacket {
         var reader = packet.reader();
         const header = reader.readByte();
         std.debug.assert(header == constants.ERR);
 
         var error_packet: ErrorPacket = undefined;
         error_packet.error_code = reader.readInt(u16);
-        if (capabilities & constants.CLIENT_PROTOCOL_41 > 0) {
-            error_packet.sql_state_marker = reader.readByte();
-            error_packet.sql_state = reader.readRefComptime(5);
-        } else {
-            error_packet.sql_state_marker = null;
-            error_packet.sql_state = null;
-        }
+        error_packet.error_message = reader.readRefRemaining();
+        return error_packet;
+    }
+
+    pub fn init(packet: *const Packet) ErrorPacket {
+        var reader = packet.reader();
+        const header = reader.readByte();
+        std.debug.assert(header == constants.ERR);
+
+        var error_packet: ErrorPacket = undefined;
+        error_packet.error_code = reader.readInt(u16);
+
+        // CLIENT_PROTOCOL_41
+        error_packet.sql_state_marker = reader.readByte();
+        error_packet.sql_state = reader.readRefComptime(5);
+
         error_packet.error_message = reader.readRefRemaining();
         return error_packet;
     }
@@ -57,16 +66,9 @@ pub const OkPacket = struct {
         ok_packet.affected_rows = reader.readLengthEncodedInteger();
         ok_packet.last_insert_id = reader.readLengthEncodedInteger();
 
-        if (capabilities & constants.CLIENT_PROTOCOL_41 > 0) {
-            ok_packet.status_flags = reader.readInt(u16);
-            ok_packet.warnings = reader.readInt(u16);
-        } else if (capabilities & constants.CLIENT_TRANSACTIONS > 0) {
-            ok_packet.status_flags = reader.readInt(u16);
-            ok_packet.warnings = null;
-        } else {
-            ok_packet.status_flags = null;
-            ok_packet.warnings = null;
-        }
+        // CLIENT_PROTOCOL_41
+        ok_packet.status_flags = reader.readInt(u16);
+        ok_packet.warnings = reader.readInt(u16);
 
         ok_packet.session_state_info = null;
         if (capabilities & constants.CLIENT_SESSION_TRACK > 0) {
