@@ -37,6 +37,7 @@ pub const Conn = struct {
     capabilities: u32,
     sequence_id: u8,
 
+    // Buffer to store metadata of the result set
     result_meta: ResultMeta,
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
@@ -60,8 +61,8 @@ pub const Conn = struct {
             const packet = try conn.readPacket();
             const handshake_v10 = switch (packet.payload[0]) {
                 constants.HANDSHAKE_V10 => HandshakeV10.init(&packet),
-                constants.ERR => return ErrorPacket.init(&packet, 0).asError(),
-                else => return packet.asError(conn.capabilities),
+                constants.ERR => return ErrorPacket.initFirst(&packet).asError(),
+                else => return packet.asError(),
             };
             conn.capabilities = handshake_v10.capability_flags() & config.capability_flags();
 
@@ -105,7 +106,7 @@ pub const Conn = struct {
 
         switch (packet.payload[0]) {
             constants.OK => _ = OkPacket.init(&packet, c.capabilities),
-            else => return packet.asError(c.capabilities),
+            else => return packet.asError(),
         }
     }
 
@@ -174,7 +175,7 @@ pub const Conn = struct {
         const packet = try c.readPacket();
         return switch (packet.payload[0]) {
             constants.OK => {},
-            else => packet.asError(c.capabilities),
+            else => packet.asError(),
         };
     }
 
@@ -199,7 +200,7 @@ pub const Conn = struct {
         const resp_packet = try c.readPacket();
         return switch (resp_packet.payload[0]) {
             constants.OK => {},
-            else => resp_packet.asError(c.capabilities),
+            else => resp_packet.asError(),
         };
     }
 
@@ -242,7 +243,7 @@ pub const Conn = struct {
                         else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
                 },
-                else => return packet.asError(c.capabilities),
+                else => return packet.asError(),
             }
         }
     }

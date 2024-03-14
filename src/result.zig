@@ -18,7 +18,7 @@ pub const QueryResult = union(enum) {
     pub fn init(packet: *const Packet, capabilities: u32) !QueryResult {
         return switch (packet.payload[0]) {
             constants.OK => .{ .ok = OkPacket.init(packet, capabilities) },
-            constants.ERR => .{ .err = ErrorPacket.init(packet, capabilities) },
+            constants.ERR => .{ .err = ErrorPacket.init(packet) },
             constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
             else => {
                 std.log.warn(
@@ -64,9 +64,9 @@ pub fn QueryResultRows(comptime T: type) type {
                         \\Unexpected OkPacket: {any}\n,
                         \\If your query is not expecting a result set, use QueryResult instead.
                     , .{OkPacket.init(&packet, c.capabilities)});
-                    return packet.asError(c.capabilities);
+                    return packet.asError();
                 },
-                constants.ERR => .{ .err = ErrorPacket.init(&packet, c.capabilities) },
+                constants.ERR => .{ .err = ErrorPacket.init(&packet) },
                 constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
                 else => .{ .rows = try ResultSet(T).init(c, &packet) },
             };
@@ -254,7 +254,7 @@ pub fn ResultRow(comptime T: type) type {
         fn init(conn: *Conn, col_defs: []const ColumnDefinition41) !ResultRow(T) {
             const packet = try conn.readPacket();
             return switch (packet.payload[0]) {
-                constants.ERR => .{ .err = ErrorPacket.init(&packet, conn.capabilities) },
+                constants.ERR => .{ .err = ErrorPacket.init(&packet) },
                 constants.EOF => .{ .ok = OkPacket.init(&packet, conn.capabilities) },
                 else => .{ .row = .{ .packet = packet, .col_defs = col_defs } },
             };
@@ -299,7 +299,7 @@ fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: std.mem.Allocator) !std.
     while (true) {
         const packet = try conn.readPacket();
         return switch (packet.payload[0]) {
-            constants.ERR => ErrorPacket.init(&packet, conn.capabilities).asError(),
+            constants.ERR => ErrorPacket.init(&packet).asError(),
             constants.EOF => {
                 _ = OkPacket.init(&packet, conn.capabilities);
                 return packet_list;
@@ -320,9 +320,9 @@ pub const PrepareResult = union(enum) {
     pub fn init(c: *Conn, allocator: std.mem.Allocator) !PrepareResult {
         const response_packet = try c.readPacket();
         return switch (response_packet.payload[0]) {
-            constants.ERR => .{ .err = ErrorPacket.init(&response_packet, c.capabilities) },
+            constants.ERR => .{ .err = ErrorPacket.init(&response_packet) },
             constants.OK => .{ .stmt = try PreparedStatement.init(&response_packet, c, allocator) },
-            else => return response_packet.asError(c.capabilities),
+            else => return response_packet.asError(),
         };
     }
 

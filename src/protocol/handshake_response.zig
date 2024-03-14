@@ -9,7 +9,7 @@ const PacketWriter = @import("./packet_writer.zig").PacketWriter;
 
 pub const HandshakeResponse41 = struct {
     client_flag: u32, // capabilities
-    max_packet_size: u32 = 0,
+    max_packet_size: u32 = 0, // TODO: support configurable max packet size
     character_set: u8,
     username: [:0]const u8,
     auth_response: []const u8,
