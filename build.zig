@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "./integration_tests/main.zig" },
     });
     integration_tests.root_module.addImport("myzql", myzql);
-    if (test_filter) |t| unit_tests.filters = &.{t};
+    if (test_filter) |t| integration_tests.filters = &.{t};
 
     // zig build [install]
     b.installArtifact(integration_tests);
