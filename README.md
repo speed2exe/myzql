@@ -4,6 +4,12 @@
 ## Status
 - Beta
 
+## Version Compatibility
+| MyZQL     | Zig       |
+|-----------|-----------|
+| 0.0.9     | 0.12.0    |
+- `main` branch of this repository will follow the `master` branch of Zig.
+
 ## Features
 - Native Zig code, no external dependencies
 - TCP protocol
