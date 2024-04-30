@@ -77,11 +77,6 @@ pub fn main() !void {
     try client.ping();
 }
 ```
-Note:
-- Allocation and network are lazy by default and will only be invoked when needed (e.g. query or ping).
-- Allocator is not stored in `Conn`, and will NOT do implicit allocation for user. Every function or method
-that requires allocation will require an allocator to be passed in as parameter.
-This is done so that allocation strategy can be optimized.
 
 ## Querying
 ```zig
