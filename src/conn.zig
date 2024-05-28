@@ -91,7 +91,10 @@ pub const Conn = struct {
         return conn;
     }
 
-    pub fn deinit(c: *const Conn) void {
+    pub fn deinit(c: *Conn) void {
+        c.quit() catch |err| {
+            std.log.err("Failed to quit: {any}\n", .{err});
+        };
         c.stream.close();
         c.reader.deinit();
         c.writer.deinit();
@@ -164,6 +167,20 @@ pub const Conn = struct {
         try c.writePacketWithParam(execute_request, params);
         try c.writer.flush();
         return QueryResultRows(BinaryResultRow).init(c);
+    }
+
+    fn quit(c: *Conn) !void {
+        c.ready();
+        try c.writeBytesAsPacket(&[_]u8{constants.COM_QUIT});
+        try c.writer.flush();
+        const packet = c.readPacket() catch |err| switch (err) {
+            error.UnexpectedEndOfStream => {
+                c.connected = false;
+                return;
+            },
+            else => return err,
+        };
+        return packet.asError();
     }
 
     fn auth_mysql_native_password(c: *Conn, auth_data: *const [20]u8, config: *const Config) !void {
