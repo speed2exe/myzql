@@ -339,20 +339,15 @@ docker run --name some-mariadb --env MARIADB_ROOT_PASSWORD=password -p 3306:3306
 ```
 - Run all the test: In root directory of project:
 ```bash
-zig build integration_test -Dtest-filer='...'
+zig build -Dtest-filer='...' integration_test
 ```
 
 ## Philosophy
 ### Correctness
 Focused on correct representation of server client protocol.
 ### Low-level and High-level APIs
-Low-level apis should contain all information you need.
+Low-level apis should contain all functionality you need.
 High-level apis are built on top of low-level ones for convenience and developer ergonomics.
-### Explicit memory allocation
-Requires user to provide allocator whenever there is allocation involved(querying, data fetching, etc).
-This is done so that allocation strategy can be optimized.
-E.g. Supposed you can guarantee that the data returned from query result have reasonable upper bound(eg. `SELECT COUNT(*) FROM my_table`),
-you can use a fixed buffer allocation strategy.
 
 ### Binary Column Types support
 - MySQL Colums Types to Zig Values

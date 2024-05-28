@@ -17,12 +17,12 @@ pub fn build(b: *std.Build) void {
     // zig build [install]
     b.installArtifact(unit_tests);
 
-    // zig build run_unit_test -Dtest-filter="..."
+    // zig build -Dtest-filter="..." run_unit_test
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const unit_test_step = b.step("unit_test", "Run unit tests");
     unit_test_step.dependOn(&run_unit_tests.step);
 
-    // zig build integration_test -Dtest-filter="..."
+    // zig build -Dtest-filter="..." integration_test
     const integration_tests = b.addTest(.{
         .root_source_file = .{ .path = "./integration_tests/main.zig" },
     });
