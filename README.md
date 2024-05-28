@@ -5,9 +5,9 @@
 - Beta
 
 ## Version Compatibility
-| MyZQL     | Zig       |
-|-----------|-----------|
-| 0.0.9     | 0.12.0    |
+| MyZQL       | Zig       |
+|-------------|-----------|
+| 0.0.9.1     | 0.12.0    |
 - `main` branch of this repository will follow the `master` branch of Zig.
 
 ## Features
