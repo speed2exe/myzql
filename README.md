@@ -8,6 +8,7 @@
 | MyZQL       | Zig       |
 |-------------|-----------|
 | 0.0.9.1     | 0.12.0    |
+| 0.13.0      | 0.13.0    |
 - `main` branch of this repository will follow the `master` branch of Zig.
 
 ## Features
