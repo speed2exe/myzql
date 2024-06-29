@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const myzql = b.addModule("myzql", .{
-        .root_source_file = .{ .path = "./src/myzql.zig" },
+        .root_source_file = b.path("./src/myzql.zig"),
     });
 
     // -Dtest-filter="..."
@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) void {
 
     // zig build unit_test
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "./src/myzql.zig" },
+        .root_source_file = b.path("./src/myzql.zig"),
     });
     if (test_filter) |t| unit_tests.filters = t;
 
@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) void {
 
     // zig build -Dtest-filter="..." integration_test
     const integration_tests = b.addTest(.{
-        .root_source_file = .{ .path = "./integration_tests/main.zig" },
+        .root_source_file = b.path("./integration_tests/main.zig"),
     });
     integration_tests.root_module.addImport("myzql", myzql);
     if (test_filter) |t| integration_tests.filters = t;
