@@ -79,10 +79,16 @@ pub const ExecuteRequest = struct {
         try writer.writeInt(u8, e.flags);
         try writer.writeInt(u32, e.iteration_count);
 
+        const col_defs = e.prep_stmt.params;
+        if (params.len != col_defs.len) {
+            std.log.err("expected column count: {d}, but got {d}", .{ col_defs.len, params.len });
+            return error.ParamsCountNotMatch;
+        }
+
         // const has_attributes_to_write = (e.capabilities & constants.CLIENT_QUERY_ATTRIBUTES > 0) and e.attributes.len > 0;
 
-        const param_count = e.prep_stmt.prep_ok.num_params;
-        if (param_count > 0
+        // const param_count = params.len;
+        if (params.len > 0
         //or has_attributes_to_write
         ) {
             // if (has_attributes_to_write) {
@@ -98,12 +104,6 @@ pub const ExecuteRequest = struct {
 
             try writeNullBitmap(params, writer);
 
-            const col_defs = e.prep_stmt.params;
-            if (params.len != col_defs.len) {
-                std.log.err("expected column count: {d}, but got {d}", .{ col_defs.len, params.len });
-                return error.ParamsCountNotMatch;
-            }
-
             // If a statement is re-executed without changing the params types,
             // the types do not need to be sent to the server again.
             // send type to server (0 / 1)
@@ -111,20 +111,14 @@ pub const ExecuteRequest = struct {
             //if (e.new_params_bind_flag > 0) {
             comptime var enum_field_types: [params.len]constants.EnumFieldType = undefined;
             inline for (params, &enum_field_types) |param, *enum_field_type| {
-                enum_field_type.* = comptime enumFieldTypeFromParam(param);
+                enum_field_type.* = comptime enumFieldTypeFromParam(@TypeOf(param));
             }
 
-            inline for (enum_field_types, params) |enum_field_type, param| {
+            inline for (params, enum_field_types) |param, enum_field_type| {
                 try writer.writeInt(u8, @intFromEnum(enum_field_type));
-                const sign_flag = comptime switch (@typeInfo(@TypeOf(param))) {
-                    .ComptimeInt => switch (enum_field_type) {
-                        .MYSQL_TYPE_TINY => if (param > maxInt(i8)) 0x80 else 0,
-                        .MYSQL_TYPE_SHORT => if (param > maxInt(i16)) 0x80 else 0,
-                        .MYSQL_TYPE_LONG => if (param > maxInt(i32)) 0x80 else 0,
-                        .MYSQL_TYPE_LONGLONG => if (param > maxInt(i64)) 0x80 else 0,
-                        else => 0,
-                    },
-                    .Int => |int| if (int.signedness == .unsigned) 0x80 else 0,
+                const sign_flag = switch (@typeInfo(@TypeOf(param))) {
+                    .comptime_int => if (param > maxInt(i64)) 0x80 else 0,
+                    .int => |int| if (int.signedness == .unsigned) 0x80 else 0,
                     else => 0,
                 };
                 try writer.writeInt(u8, sign_flag);
@@ -146,10 +140,11 @@ pub const ExecuteRequest = struct {
             // TODO: Write params and attr as binary values
             // Write params as binary values
             inline for (params, enum_field_types) |param, enum_field_type| {
-                // if (enum_field_type == constants.EnumFieldType.MYSQL_TYPE_NULL) {
-                //     continue;
-                // }
-                try writeParamAsFieldType(writer, enum_field_type, param);
+                if (isNull(param)) {
+                    try writeParamAsFieldType(writer, constants.EnumFieldType.MYSQL_TYPE_NULL, param);
+                } else {
+                    try writeParamAsFieldType(writer, enum_field_type, param);
+                }
             }
 
             // if (has_attributes_to_write) {
@@ -161,22 +156,15 @@ pub const ExecuteRequest = struct {
     }
 };
 
-fn enumFieldTypeFromParam(param: anytype) constants.EnumFieldType {
-    const Param = @TypeOf(param);
+fn enumFieldTypeFromParam(Param: type) constants.EnumFieldType {
     const param_type_info = @typeInfo(Param);
     return switch (Param) {
         DateTime => constants.EnumFieldType.MYSQL_TYPE_DATETIME,
         Duration => constants.EnumFieldType.MYSQL_TYPE_TIME,
         else => switch (param_type_info) {
-            .Null => return constants.EnumFieldType.MYSQL_TYPE_NULL,
-            .Optional => {
-                if (param) |p| {
-                    return enumFieldTypeFromParam(p);
-                } else {
-                    return constants.EnumFieldType.MYSQL_TYPE_NULL;
-                }
-            },
-            .Int => |int| {
+            .null => return constants.EnumFieldType.MYSQL_TYPE_NULL,
+            .optional => |o| return enumFieldTypeFromParam(o.child),
+            .int => |int| {
                 if (int.bits <= 8) {
                     return constants.EnumFieldType.MYSQL_TYPE_TINY;
                 } else if (int.bits <= 16) {
@@ -187,30 +175,18 @@ fn enumFieldTypeFromParam(param: anytype) constants.EnumFieldType {
                     return constants.EnumFieldType.MYSQL_TYPE_LONGLONG;
                 }
             },
-            .ComptimeInt => {
-                if (std.math.minInt(i8) <= param and param <= std.math.maxInt(u8)) {
-                    return constants.EnumFieldType.MYSQL_TYPE_TINY;
-                } else if (std.math.minInt(i16) <= param and param <= std.math.maxInt(u16)) {
-                    return constants.EnumFieldType.MYSQL_TYPE_SHORT;
-                } else if (std.math.minInt(i32) <= param and param <= std.math.maxInt(u32)) {
-                    return constants.EnumFieldType.MYSQL_TYPE_LONG;
-                } else if (std.math.minInt(i64) <= param and param <= std.math.maxInt(u64)) {
-                    return constants.EnumFieldType.MYSQL_TYPE_LONGLONG;
-                } else {
-                    @compileLog("hello");
-                }
-            },
-            .Float => |float| {
+            .comptime_int => return constants.EnumFieldType.MYSQL_TYPE_LONGLONG,
+            .float => |float| {
                 if (float.bits <= 32) {
                     return constants.EnumFieldType.MYSQL_TYPE_FLOAT;
                 } else if (float.bits <= 64) {
                     return constants.EnumFieldType.MYSQL_TYPE_DOUBLE;
                 }
             },
-            .ComptimeFloat => return constants.EnumFieldType.MYSQL_TYPE_DOUBLE, // Safer to assume double
-            .Array => |array| {
+            .comptime_float => return constants.EnumFieldType.MYSQL_TYPE_DOUBLE, // Safer to assume double
+            .array => |array| {
                 switch (@typeInfo(array.child)) {
-                    .Int => |int| {
+                    .int => |int| {
                         if (int.bits == 8) {
                             return constants.EnumFieldType.MYSQL_TYPE_STRING;
                         }
@@ -218,14 +194,14 @@ fn enumFieldTypeFromParam(param: anytype) constants.EnumFieldType {
                     else => {},
                 }
             },
-            .Enum => return constants.EnumFieldType.MYSQL_TYPE_STRING,
-            .Pointer => |pointer| {
+            .@"enum" => return constants.EnumFieldType.MYSQL_TYPE_STRING,
+            .pointer => |pointer| {
                 switch (pointer.size) {
-                    .One => return enumFieldTypeFromParam(param.*),
+                    .One => return enumFieldTypeFromParam(pointer.child),
                     else => {},
                 }
                 switch (@typeInfo(pointer.child)) {
-                    .Int => |int| {
+                    .int => |int| {
                         if (int.bits == 8) {
                             switch (pointer.size) {
                                 .Slice, .C, .Many => return constants.EnumFieldType.MYSQL_TYPE_STRING,
@@ -237,7 +213,7 @@ fn enumFieldTypeFromParam(param: anytype) constants.EnumFieldType {
                 }
             },
             else => {
-                @compileLog(param);
+                @compileLog(Param);
                 @compileError("unsupported type");
             },
         },
@@ -252,7 +228,7 @@ fn writeParamAsFieldType(
     param: anytype,
 ) !void {
     return switch (@typeInfo(@TypeOf(param))) {
-        .Optional => if (param) |p| {
+        .optional => if (param) |p| {
             return try writeParamAsFieldType(writer, enum_field_type, p);
         } else {
             return;
@@ -279,13 +255,13 @@ fn writeParamAsFieldType(
 
 fn stringCast(param: anytype) []const u8 {
     switch (@typeInfo(@TypeOf(param))) {
-        .Pointer => |pointer| {
+        .pointer => |pointer| {
             switch (pointer.size) {
                 .C, .Many => return std.mem.span(param),
                 else => {},
             }
         },
-        .Enum => return @tagName(param),
+        .@"enum" => return @tagName(param),
         else => {},
     }
 
@@ -471,9 +447,9 @@ pub fn nullBitsParamsAttrs(params: anytype, start: usize, attrs: []const BinaryP
 }
 
 inline fn isNull(param: anytype) bool {
-    return switch (@typeInfo(@TypeOf(param))) {
-        inline .Optional => if (param) |p| isNull(p) else true,
-        inline .Null => true,
+    return comptime switch (@typeInfo(@TypeOf(param))) {
+        inline .optional => if (param) |p| isNull(p) else true,
+        inline .null => true,
         inline else => false,
     };
 }

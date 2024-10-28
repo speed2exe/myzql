@@ -17,8 +17,8 @@ pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const 
     const null_bitmap_len = (col_defs.len + 7 + 2) / 8;
     const null_bitmap = reader.readRefRuntime(null_bitmap_len);
 
-    const child_type = @typeInfo(@TypeOf(dest)).Pointer.child;
-    const struct_fields = @typeInfo(child_type).Struct.fields;
+    const child_type = @typeInfo(@TypeOf(dest)).pointer.child;
+    const struct_fields = @typeInfo(child_type).@"struct".fields;
 
     if (struct_fields.len != col_defs.len) {
         std.log.err("received {d} columns from mysql, but given {d} fields for struct", .{ struct_fields.len, col_defs.len });
@@ -30,11 +30,11 @@ pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const 
         const isNull = binResIsNull(null_bitmap, i);
 
         switch (field_info) {
-            .Optional => {
+            .optional => {
                 if (isNull) {
                     @field(dest, field.name) = null;
                 } else {
-                    @field(dest, field.name) = try binElemToValue(field_info.Optional.child, field.name, &col_def, &reader, allocator);
+                    @field(dest, field.name) = try binElemToValue(field_info.optional.child, field.name, &col_def, &reader, allocator);
                 }
             },
             else => {
@@ -146,9 +146,9 @@ inline fn binElemToValue(
     }
 
     switch (field_info) {
-        .Pointer => |pointer| {
+        .pointer => |pointer| {
             switch (@typeInfo(pointer.child)) {
-                .Int => |int| {
+                .int => |int| {
                     if (int.bits == 8) {
                         switch (col_type) {
                             .MYSQL_TYPE_STRING,
@@ -181,7 +181,7 @@ inline fn binElemToValue(
                 else => {},
             }
         },
-        .Enum => |e| {
+        .@"enum" => |e| {
             switch (col_type) {
                 .MYSQL_TYPE_STRING,
                 .MYSQL_TYPE_VARCHAR,
@@ -211,7 +211,7 @@ inline fn binElemToValue(
                 else => {},
             }
         },
-        .Int => |int| {
+        .int => |int| {
             switch (int.signedness) {
                 .unsigned => {
                     switch (col_type) {
@@ -249,7 +249,7 @@ inline fn binElemToValue(
                 },
             }
         },
-        .Float => |float| {
+        .float => |float| {
             if (float.bits >= 64) {
                 switch (col_type) {
                     .MYSQL_TYPE_DOUBLE => return @as(f64, @bitCast(reader.readInt(u64))),

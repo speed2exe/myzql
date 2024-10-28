@@ -101,7 +101,7 @@ pub const PacketWriter = struct {
     }
 
     pub fn writeInt(p: *PacketWriter, comptime Int: type, int: Int) !void {
-        const bytes = try p.advanceComptime(@divExact(@typeInfo(Int).Int.bits, 8));
+        const bytes = try p.advanceComptime(@divExact(@typeInfo(Int).int.bits, 8));
         std.mem.writeInt(Int, bytes, int, .little);
     }
 
