@@ -73,34 +73,34 @@ test "query text protocol" {
             }
         }
     }
-    // { // Iterating over rows, collecting elements into []const ?[]const u8
-    //     const query_res = try c.queryRows("SELECT 3, 4, null, 6, 7");
-    //     const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
-    //     const rows_iter: ResultRowIter(TextResultRow) = rows.iter();
-    //     while (try rows_iter.next()) |row| {
-    //         const elems: TextElems = try row.textElems(allocator);
-    //         defer elems.deinit(allocator);
+    { // Iterating over rows, collecting elements into []const ?[]const u8
+        const query_res = try c.queryRows("SELECT 3, 4, null, 6, 7");
+        const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
+        const rows_iter: ResultRowIter(TextResultRow) = rows.iter();
+        while (try rows_iter.next()) |row| {
+            const elems: TextElems = try row.textElems(allocator);
+            defer elems.deinit(allocator);
 
-    //         try std.testing.expectEqualDeep(
-    //             @as([]const ?[]const u8, &.{ "3", "4", null, "6", "7" }),
-    //             elems.elems,
-    //         );
-    //     }
-    // }
-    // { // Iterating over rows, collecting elements into []const []const ?[]const u8
-    //     const query_res = try c.queryRows("SELECT 8,9 UNION ALL SELECT 10,11");
-    //     const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
-    //     const table = try rows.tableTexts(allocator);
-    //     defer table.deinit(allocator);
+            try std.testing.expectEqualDeep(
+                @as([]const ?[]const u8, &.{ "3", "4", null, "6", "7" }),
+                elems.elems,
+            );
+        }
+    }
+    { // Iterating over rows, collecting elements into []const []const ?[]const u8
+        const query_res = try c.queryRows("SELECT 8,9 UNION ALL SELECT 10,11");
+        const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
+        const table = try rows.tableTexts(allocator);
+        defer table.deinit(allocator);
 
-    //     try std.testing.expectEqualDeep(
-    //         @as([]const []const ?[]const u8, &.{
-    //             &.{ "8", "9" },
-    //             &.{ "10", "11" },
-    //         }),
-    //         table.table,
-    //     );
-    // }
+        try std.testing.expectEqualDeep(
+            @as([]const []const ?[]const u8, &.{
+                &.{ "8", "9" },
+                &.{ "10", "11" },
+            }),
+            table.table,
+        );
+    }
 }
 
 test "prepare check" {
@@ -696,7 +696,7 @@ test "select concat with params" {
         const prep_res = try c.prepare(allocator, "SELECT CONCAT(?, ?) AS col1");
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try c.executeRows(&prep_stmt, .{ "hello", "world" });
+        const res = try c.executeRows(&prep_stmt, .{ runtimeValue("hello"), runtimeValue("world") });
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -706,4 +706,8 @@ test "select concat with params" {
         defer structs.deinit(allocator);
         try std.testing.expectEqualDeep(expected, structs.struct_list.items);
     }
+}
+
+fn runtimeValue(a: anytype) @TypeOf(a) {
+    return a;
 }

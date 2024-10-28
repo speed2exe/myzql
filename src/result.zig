@@ -225,7 +225,7 @@ pub const BinaryResultRow = struct {
     }
 
     fn structFreeDynamic(s: anytype, allocator: std.mem.Allocator) void {
-        const s_ti = @typeInfo(@TypeOf(s)).Struct;
+        const s_ti = @typeInfo(@TypeOf(s)).@"struct";
         inline for (s_ti.fields) |field| {
             structFreeStr(field.type, @field(s, field.name), allocator);
         }
@@ -233,13 +233,13 @@ pub const BinaryResultRow = struct {
 
     fn structFreeStr(comptime StructField: type, value: StructField, allocator: std.mem.Allocator) void {
         switch (@typeInfo(StructField)) {
-            .Pointer => |p| switch (@typeInfo(p.child)) {
-                .Int => |int| if (int.bits == 8) {
+            .pointer => |p| switch (@typeInfo(p.child)) {
+                .int => |int| if (int.bits == 8) {
                     allocator.free(value);
                 },
                 else => {},
             },
-            .Optional => |o| if (value) |some| structFreeStr(o.child, some, allocator),
+            .optional => |o| if (value) |some| structFreeStr(o.child, some, allocator),
             else => {},
         }
     }

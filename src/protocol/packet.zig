@@ -58,7 +58,7 @@ pub const PayloadReader = struct {
     }
 
     pub fn readInt(p: *PayloadReader, Int: type) Int {
-        const bytes = p.readRefComptime(@divExact(@typeInfo(Int).Int.bits, 8));
+        const bytes = p.readRefComptime(@divExact(@typeInfo(Int).int.bits, 8));
         return std.mem.readInt(Int, bytes, .little);
     }
 
