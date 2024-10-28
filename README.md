@@ -5,11 +5,11 @@
 - Beta
 
 ## Version Compatibility
-| MyZQL       | Zig       |
-|-------------|-----------|
-| 0.0.9.1     | 0.12.0    |
-| 0.13.1      | 0.13.0    |
-- `main` branch of this repository will follow the `master` branch of Zig.
+| MyZQL       | Zig                       |
+|-------------|---------------------------|
+| 0.0.9.1     | 0.12.0                    |
+| 0.13.2      | 0.13.0                    |
+| main        | 0.14.0-dev.1820+ea527f7a8 |
 
 ## Features
 - Native Zig code, no external dependencies
@@ -42,7 +42,8 @@
     // ...
     .dependencies = .{
       .myzql = .{
-        .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.0.8.tar.gz",
+        // choose a tag according to "Version Compatibility" table
+        .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.13.2.tar.gz",
         .hash = "1220582ea45580eec6b16aa93d2a9404467db8bc1d911806d367513aa40f3817f84c",
       }
     },
