@@ -50,6 +50,9 @@ pub const QueryResult = union(enum) {
     }
 };
 
+/// T is either:
+/// - TextResultRow (queryRows)
+/// - BinaryResultRow (executeRows)
 pub fn QueryResultRows(comptime T: type) type {
     return union(enum) {
         err: ErrorPacket,
@@ -72,6 +75,11 @@ pub fn QueryResultRows(comptime T: type) type {
             };
         }
 
+        /// Example (TextResultRow):
+        /// ...
+        /// const result: QueryResultRows(TextResultRow) = try conn.queryRows("SELECT * FROM table");
+        /// const rows: ResultSet(TextResultRow) = try result.expect(.rows);
+        /// ...
         pub fn expect(
             q: QueryResultRows(T),
             comptime value_variant: std.meta.FieldEnum(QueryResultRows(T)),
@@ -92,6 +100,9 @@ pub fn QueryResultRows(comptime T: type) type {
     };
 }
 
+/// T is either:
+/// - TextResultRow (queryRows)
+/// - BinaryResultRow (executeRows)
 pub fn ResultSet(comptime T: type) type {
     return struct {
         conn: *Conn,
