@@ -285,7 +285,8 @@ inline fn binElemToValue(
                             => {
                                 const str = reader.readLengthEncodedString();
                                 var ret: [array.len]u8 = undefined;
-                                @memcpy(ret[0..@min(str.len, array.len)], str);
+                                const min = @min(str.len, array.len);
+                                @memcpy(ret[0..min], str[0..min]);
                                 return ret;
                             },
                             else => {},
