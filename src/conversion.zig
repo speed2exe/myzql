@@ -167,7 +167,7 @@ inline fn binElemToValue(
                             => {
                                 const str = reader.readLengthEncodedString();
                                 if (allocator) |a| {
-                                    if (pointer.sentinel) |_| {
+                                    if (pointer.sentinel()) |_| {
                                         return try a.dupeZ(u8, str);
                                     }
                                     return try a.dupe(u8, str);

@@ -9,7 +9,7 @@
 |-------------|---------------------------|
 | 0.0.9.1     | 0.12.0                    |
 | 0.13.2      | 0.13.0                    |
-| main        | 0.14.0-dev.1820+ea527f7a8 |
+| main        | 0.14.0-dev.2851+b074fb7dd |
 
 ## Features
 - Native Zig code, no external dependencies
