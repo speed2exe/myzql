@@ -43,7 +43,11 @@ pub const Conn = struct {
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn init(allocator: std.mem.Allocator, config: *const Config) !Conn {
         var conn: Conn = blk: {
-            const stream = try std.net.tcpConnectToAddress(config.address);
+            const stream = switch (config.address.any.family) {
+                std.posix.AF.INET, std.posix.AF.INET6 => try std.net.tcpConnectToAddress(config.address),
+                std.posix.AF.UNIX => try std.net.connectUnixSocket(std.mem.span(@as([*:0]const u8, @ptrCast(&config.address.un.path)))),
+                else => unreachable,
+            };
             break :blk .{
                 .connected = true,
                 .stream = stream,
