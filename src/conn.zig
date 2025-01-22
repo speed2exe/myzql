@@ -185,7 +185,7 @@ pub const Conn = struct {
 
     fn auth_mysql_native_password(c: *Conn, auth_data: *const [20]u8, config: *const Config) !void {
         const auth_resp = auth.scramblePassword(auth_data, config.password);
-        const response = HandshakeResponse41.init(.mysql_native_password, config, &auth_resp);
+        const response = HandshakeResponse41.init(.mysql_native_password, config, if (config.password.len > 0) &auth_resp else &[_]u8{});
         try c.writePacket(response);
         try c.writer.flush();
 
