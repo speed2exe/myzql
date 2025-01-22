@@ -197,14 +197,14 @@ fn enumFieldTypeFromParam(Param: type) constants.EnumFieldType {
             .@"enum" => return constants.EnumFieldType.MYSQL_TYPE_STRING,
             .pointer => |pointer| {
                 switch (pointer.size) {
-                    .One => return enumFieldTypeFromParam(pointer.child),
+                    .one => return enumFieldTypeFromParam(pointer.child),
                     else => {},
                 }
                 switch (@typeInfo(pointer.child)) {
                     .int => |int| {
                         if (int.bits == 8) {
                             switch (pointer.size) {
-                                .Slice, .C, .Many => return constants.EnumFieldType.MYSQL_TYPE_STRING,
+                                .slice, .c, .many => return constants.EnumFieldType.MYSQL_TYPE_STRING,
                                 else => {},
                             }
                         }
@@ -257,7 +257,7 @@ fn stringCast(param: anytype) []const u8 {
     switch (@typeInfo(@TypeOf(param))) {
         .pointer => |pointer| {
             switch (pointer.size) {
-                .C, .Many => return std.mem.span(param),
+                .c, .many => return std.mem.span(param),
                 else => {},
             }
         },
