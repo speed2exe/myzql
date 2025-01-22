@@ -106,8 +106,6 @@ test "decode public key" {
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_authentication_methods_native_password_authentication.html
 // SHA1(password) XOR SHA1(scramble ++ SHA1(SHA1(password)))
 pub fn scramblePassword(scramble: []const u8, password: []const u8) [20]u8 {
-    std.debug.assert(password.len > 0);
-
     var message1 = blk: { // SHA1(password)
         var sha1 = Sha1.init(.{});
         sha1.update(password);
