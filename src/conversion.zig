@@ -264,6 +264,37 @@ inline fn binElemToValue(
                 }
             }
         },
+        .array => |array| {
+            switch (@typeInfo(array.child)) {
+                .int => |int| {
+                    if (int.bits == 8) {
+                        switch (col_type) {
+                            .MYSQL_TYPE_STRING,
+                            .MYSQL_TYPE_VARCHAR,
+                            .MYSQL_TYPE_VAR_STRING,
+                            .MYSQL_TYPE_ENUM,
+                            .MYSQL_TYPE_SET,
+                            .MYSQL_TYPE_LONG_BLOB,
+                            .MYSQL_TYPE_MEDIUM_BLOB,
+                            .MYSQL_TYPE_BLOB,
+                            .MYSQL_TYPE_TINY_BLOB,
+                            .MYSQL_TYPE_GEOMETRY,
+                            .MYSQL_TYPE_BIT,
+                            .MYSQL_TYPE_DECIMAL,
+                            .MYSQL_TYPE_NEWDECIMAL,
+                            => {
+                                const str = reader.readLengthEncodedString();
+                                var ret: [array.len]u8 = undefined;
+                                @memcpy(ret[0..@min(str.len, array.len)], str);
+                                return ret;
+                            },
+                            else => {},
+                        }
+                    }
+                },
+                else => {},
+            }
+        },
         else => {},
     }
 
