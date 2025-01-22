@@ -284,10 +284,17 @@ inline fn binElemToValue(
                             .MYSQL_TYPE_NEWDECIMAL,
                             => {
                                 const str = reader.readLengthEncodedString();
-                                var ret: [array.len]u8 = undefined;
-                                const min = @min(str.len, array.len);
-                                @memcpy(ret[0..min], str[0..min]);
-                                return ret;
+                                if (array.sentinel()) |sentinel| {
+                                    var ret: [array.len:sentinel]u8 = [_:sentinel]u8{sentinel} ** array.len;
+                                    const min = @min(str.len, array.len);
+                                    @memcpy(ret[0..min], str[0..min]);
+                                    return ret;
+                                } else {
+                                    var ret: [array.len]u8 = [_]u8{0} ** array.len;
+                                    const min = @min(str.len, array.len);
+                                    @memcpy(ret[0..min], str[0..min]);
+                                    return ret;
+                                }
                             },
                             else => {},
                         }

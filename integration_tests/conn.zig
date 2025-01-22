@@ -653,6 +653,11 @@ test "binary data types - array" {
             not_null_binary_col: [3]u8,
         };
 
+        const Sentinel = struct {
+            binary_col: ?[4:1]u8,
+            not_null_binary_col: [4:1]u8,
+        };
+
         const prep_res = try c.prepare(allocator,
             \\SELECT * FROM test.array_types_example
         );
@@ -715,12 +720,51 @@ test "binary data types - array" {
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
+            const expected_sentinels: []const Sentinel = &.{
+                .{
+                    .binary_col = null,
+                    .not_null_binary_col = @as(*const [4:1]u8, @ptrCast("1234\x01")).*,
+                },
+                .{
+                    .binary_col = @as(*const [4:1]u8, @ptrCast("0246\x01")).*,
+                    .not_null_binary_col = @as(*const [4:1]u8, @ptrCast("1234\x01")).*,
+                },
+                .{ .binary_col = null, .not_null_binary_col = @as(*const [4:1]u8, @ptrCast("123\x00\x01")).* },
+                .{
+                    .binary_col = @as(*const [4:1]u8, @ptrCast("024\x00\x01")).*,
+                    .not_null_binary_col = @as(*const [4:1]u8, @ptrCast("123\x00\x01")).*,
+                },
+            };
+
+            const sentinels = try rows_iter.tableStructs(Sentinel, allocator);
+            defer sentinels.deinit(allocator);
+            try std.testing.expectEqualDeep(expected_sentinels, sentinels.struct_list.items);
+        }
+
+        {
+            const res = try c.executeRows(&prep_stmt, .{});
+            const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
+            const rows_iter = rows.iter();
+
+            const expected_longs: []const Long = &.{
+                .{
+                    .binary_col = null,
+                    .not_null_binary_col = "1234\x00".*,
+                },
+                .{
+                    .binary_col = "0246\x00".*,
+                    .not_null_binary_col = "1234\x00".*,
+                },
+                .{ .binary_col = null, .not_null_binary_col = "123\x00\x00".* },
+                .{
+                    .binary_col = "024\x00\x00".*,
+                    .not_null_binary_col = "123\x00\x00".*,
+                },
+            };
+
             const longs = try rows_iter.tableStructs(Long, allocator);
             defer longs.deinit(allocator);
-            try std.testing.expectEqual(longs.struct_list.items[0].binary_col, null);
-            try std.testing.expectStringStartsWith(&longs.struct_list.items[0].not_null_binary_col, "1234");
-            try std.testing.expectStringStartsWith(&longs.struct_list.items[1].binary_col.?, "024");
-            try std.testing.expectStringStartsWith(&longs.struct_list.items[1].not_null_binary_col, "123");
+            try std.testing.expectEqualDeep(expected_longs, longs.struct_list.items);
         }
     }
 }
