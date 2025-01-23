@@ -373,7 +373,7 @@ fn main() !void {
 }
 ```
 - Arrays will be initialized by their sentinel value. In this example, the value of the `name` field corresponding to `John`'s row will be `[16:1]u8 { 'J', 'o', 'h', 'n', 1, 1, 1, ... }`
-- If the array doesn't have a sentinel value, it will be zero-initalized.
+- If the array doesn't have a sentinel value, it will be zero-initialized.
 - Insufficiently sized arrays will silently truncate excess data
 
 ### `BoundedArray` Support
