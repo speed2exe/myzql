@@ -139,6 +139,19 @@ pub fn ResultSet(comptime T: type) type {
             return try TableTexts.init(all_rows, allocator, r.col_defs.len);
         }
 
+        pub fn first(r: *const ResultSet(T)) !?T {
+            const row_res = try r.readRow();
+            return switch (row_res) {
+                .ok => null,
+                .err => |err| err.asError(),
+                .row => |row| blk: {
+                    const i = r.iter();
+                    while (try i.next()) |_| {}
+                    break :blk row;
+                },
+            };
+        }
+
         pub fn iter(r: *const ResultSet(T)) ResultRowIter(T) {
             return .{ .result_set = r };
         }

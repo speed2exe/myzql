@@ -249,6 +249,54 @@ test "prepare execute with result" {
     }
 }
 
+test "prepare execute - first" {
+    var c = try Conn.init(std.testing.allocator, &test_config);
+    defer c.deinit();
+
+    {
+        const query =
+            \\SELECT 1
+            \\UNION ALL
+            \\SELECT 2
+        ;
+
+        const prep_res = try c.prepare(allocator, query);
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.stmt);
+        const query_res = try c.executeRows(&prep_stmt, .{});
+        const rows = try query_res.expect(.rows);
+
+        const MyType = struct { a: u8 };
+
+        const expected = MyType{ .a = 1 };
+
+        const first = try rows.first();
+        try std.testing.expect(first != null);
+
+        var value: MyType = undefined;
+        try first.?.scan(&value);
+        try std.testing.expectEqualDeep(expected, value);
+        try c.ping();
+    }
+
+    {
+        const query =
+            \\SELECT NULL
+            \\WHERE FALSE
+        ;
+
+        const prep_res = try c.prepare(allocator, query);
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.stmt);
+        const query_res = try c.executeRows(&prep_stmt, .{});
+        const rows = try query_res.expect(.rows);
+
+        const first = try rows.first();
+        try std.testing.expectEqual(null, first);
+        try c.ping();
+    }
+}
+
 test "binary data types - int" {
     var c = try Conn.init(std.testing.allocator, &test_config);
     defer c.deinit();
