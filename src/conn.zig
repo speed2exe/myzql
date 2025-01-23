@@ -43,7 +43,11 @@ pub const Conn = struct {
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn init(allocator: std.mem.Allocator, config: *const Config) !Conn {
         var conn: Conn = blk: {
-            const stream = try std.net.tcpConnectToAddress(config.address);
+            const stream = switch (config.address.any.family) {
+                std.posix.AF.INET, std.posix.AF.INET6 => try std.net.tcpConnectToAddress(config.address),
+                std.posix.AF.UNIX => try std.net.connectUnixSocket(std.mem.span(@as([*:0]const u8, @ptrCast(&config.address.un.path)))),
+                else => unreachable,
+            };
             break :blk .{
                 .connected = true,
                 .stream = stream,
@@ -185,7 +189,7 @@ pub const Conn = struct {
 
     fn auth_mysql_native_password(c: *Conn, auth_data: *const [20]u8, config: *const Config) !void {
         const auth_resp = auth.scramblePassword(auth_data, config.password);
-        const response = HandshakeResponse41.init(.mysql_native_password, config, &auth_resp);
+        const response = HandshakeResponse41.init(.mysql_native_password, config, if (config.password.len > 0) &auth_resp else &[_]u8{});
         try c.writePacket(response);
         try c.writer.flush();
 

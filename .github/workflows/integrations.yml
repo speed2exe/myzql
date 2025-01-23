@@ -20,7 +20,7 @@ jobs:
 
       - name: install zig
         run: |
-          ZIG_VERSION=0.14.0-dev.1820+ea527f7a8
+          ZIG_VERSION=0.14.0-dev.2851+b074fb7dd
           wget https://ziglang.org/builds/zig-linux-x86_64-$ZIG_VERSION.tar.xz
           tar xf zig-linux-x86_64-$ZIG_VERSION.tar.xz
           mv zig-linux-x86_64-$ZIG_VERSION $HOME/zig-build
