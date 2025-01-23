@@ -141,17 +141,15 @@ pub fn ResultSet(comptime T: type) type {
 
         pub fn first(r: *const ResultSet(T)) !?T {
             const row_res = try r.readRow();
-            const ret = switch (row_res) {
+            return switch (row_res) {
                 .ok => null,
-                .err => |err| return err.asError(),
-                .row => |row| row,
+                .err => |err| err.asError(),
+                .row => |row| blk: {
+                    const i = r.iter();
+                    while (try i.next()) |_| {}
+                    break :blk row;
+                },
             };
-
-            if (ret) |_| {
-                const i = r.iter();
-                while (try i.next()) |_| {}
-            }
-            return ret;
         }
 
         pub fn iter(r: *const ResultSet(T)) ResultRowIter(T) {
