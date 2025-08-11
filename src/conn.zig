@@ -40,6 +40,55 @@ pub const Conn = struct {
     // Buffer to store metadata of the result set
     result_meta: ResultMeta,
 
+    pub fn initFromConnectionString(allocator: std.mem.Allocator, conn_str: []const u8) !Conn {
+        var config = Config{};
+        const uri = try std.Uri.parse(conn_str);
+
+        if (!(std.mem.eql(u8, uri.scheme, "mysql") or std.mem.eql(u8, uri.scheme, "mariadb"))) {
+            return error.InvalidProtocol;
+        }
+
+        if (uri.user) |user| {
+            config.username = try allocator.dupeZ(u8, user.raw);
+        }
+
+        if (uri.password) |pass| {
+            config.password = try allocator.dupe(u8, pass.raw);
+        }
+
+        if (uri.host) |host| {
+            const port = uri.port orelse 3306;
+
+            const address = try std.net.Address.resolveIp(host.raw, port);
+            config.address = address;
+        } else {
+            return error.MissingHost;
+        }
+
+        if (uri.path.raw.len > 1) {
+            config.database = try allocator.dupeZ(u8, uri.path.raw[1..]);
+        }
+
+        // Note: This might need more work
+        if (uri.query) |qry| {
+            const q = qry.raw;
+            var param_iter = std.mem.splitAny(u8, q, "&");
+            while (param_iter.next()) |param| {
+                var kv_iter = std.mem.splitAny(u8, param, "=");
+                const key = kv_iter.next() orelse continue;
+                const value = kv_iter.next() orelse continue;
+
+                if (std.mem.eql(u8, key, "charset")) {
+                    if (std.mem.eql(u8, value, "utf8mb4")) {
+                        config.collation = constants.utf8mb4_general_ci;
+                    }
+                }
+            }
+        }
+
+        return init(allocator, &config);
+    }
+
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn init(allocator: std.mem.Allocator, config: *const Config) !Conn {
         var conn: Conn = blk: {

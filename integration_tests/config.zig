@@ -9,3 +9,5 @@ pub const test_config_with_db: Config = .{
     .password = "password",
     .database = "mysql",
 };
+
+pub const test_connection_string: []const u8 = "mysql://root:password@127.0.0.1:3306/mysql";
