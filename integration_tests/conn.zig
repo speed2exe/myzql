@@ -44,7 +44,7 @@ test "connect with database" {
 }
 
 test "connect with database through connection string" {
-    var c = try Conn.initFromConnectionString(std.testing.allocator, test_connection_string);
+    var c = try Conn.fromConnStr(allocator, test_connection_string);
     defer c.deinit();
     try c.ping();
 }

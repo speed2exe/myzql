@@ -40,24 +40,30 @@ pub const Conn = struct {
     // Buffer to store metadata of the result set
     result_meta: ResultMeta,
 
-    pub fn initFromConnectionString(allocator: std.mem.Allocator, conn_str: []const u8) !Conn {
+    /// Tries to connect to a database using a connection string
+    ///
+    /// `conn_str` needs to be valid as long as `Conn` is valid
+    ///
+    /// Supprted connection strings:
+    /// - {mariadb|mysql}://{username}:{password}@{host}:{port}/{dbname}
+    pub fn fromConnStr(allocator: std.mem.Allocator, conn_str: []const u8) !Conn {
         var config = Config{};
         const uri = try std.Uri.parse(conn_str);
 
         if (!(std.mem.eql(u8, uri.scheme, "mysql") or std.mem.eql(u8, uri.scheme, "mariadb"))) {
-            return error.InvalidProtocol;
+            return error.InvalidDBProtocol;
         }
 
         if (uri.user) |user| {
-            config.username = try allocator.dupeZ(u8, user.raw);
+            config.username = @ptrCast(user.raw);
         }
 
         if (uri.password) |pass| {
-            config.password = try allocator.dupe(u8, pass.raw);
+            config.password = pass.raw;
         }
 
         if (uri.host) |host| {
-            const port = uri.port orelse 3306;
+            const port = uri.port orelse 3306; // Don't think 3306 is necessary here as well but
 
             const address = try std.net.Address.resolveIp(host.raw, port);
             config.address = address;
@@ -66,7 +72,7 @@ pub const Conn = struct {
         }
 
         if (uri.path.raw.len > 1) {
-            config.database = try allocator.dupeZ(u8, uri.path.raw[1..]);
+            config.database = @ptrCast(uri.path.raw[1..]);
         }
 
         // Note: This might need more work
