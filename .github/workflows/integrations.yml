@@ -16,20 +16,17 @@ jobs:
         run: |
           docker run --name mysql_server --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql
 
-      - uses: actions/checkout@v3
-
-      - name: install zig
-        run: |
-          ZIG_VERSION=0.14.0
-          wget https://ziglang.org/builds/zig-linux-x86_64-$ZIG_VERSION.tar.xz
-          tar xf zig-linux-x86_64-$ZIG_VERSION.tar.xz
-          mv zig-linux-x86_64-$ZIG_VERSION $HOME/zig-build
+      - uses: actions/checkout@v4
+      - name: Install zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.0
 
       - name: Run Integration Tests - MySQL
         run: |
-          $HOME/zig-build/zig build
+          zig build
           while ! wget -qO- localhost:3306; do sleep 1; docker ps -a; done
-          $HOME/zig-build/zig build integration_test --summary all
+          zig build integration_test --summary all
           rm -rf zig-cache/ zig-out/
 
       # - name: Auth Test
@@ -55,5 +52,5 @@ jobs:
           docker rm -f mysql_server
           docker run --name some-mariadb --env MARIADB_ROOT_PASSWORD=password -p 3306:3306 -d mariadb
           while ! wget -qO- localhost:3306; do sleep 1; docker ps -a ; done
-          $HOME/zig-build/zig build integration_test --summary all
+          zig build integration_test --summary all
           rm -rf zig-cache/ zig-out/

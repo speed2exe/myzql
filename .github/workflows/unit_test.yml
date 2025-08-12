@@ -12,14 +12,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: install zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.0
+      - name: run unit tests
         run: |
-          ZIG_VERSION=0.14.0
-          wget https://ziglang.org/builds/zig-linux-x86_64-$ZIG_VERSION.tar.xz
-          tar xf zig-linux-x86_64-$ZIG_VERSION.tar.xz
-          mv zig-linux-x86_64-$ZIG_VERSION $HOME/zig-build
-
-      - name: Run unit tests
-        run: |
-          $HOME/zig-build/zig build unit_test
+          zig build unit_test
