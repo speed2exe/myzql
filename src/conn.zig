@@ -51,33 +51,39 @@ pub const Conn = struct {
         const uri = try std.Uri.parse(conn_str);
 
         if (!(std.mem.eql(u8, uri.scheme, "mysql") or std.mem.eql(u8, uri.scheme, "mariadb"))) {
+            std.log.err("Invalid scheme. Only `mysql` and `mariadb` is allowed");
             return error.InvalidDBProtocol;
         }
 
         if (uri.user) |user| {
-            config.username = @ptrCast(user.raw);
+            const username: [:0]const u8 = user.percent_encoded;
+            config.username = username;
         }
 
         if (uri.password) |pass| {
-            config.password = pass.raw;
+            config.password = pass.percent_encoded;
         }
 
         if (uri.host) |host| {
-            const port = uri.port orelse 3306; // Don't think 3306 is necessary here as well but
+            const port = uri.port orelse 3306;
 
-            const address = try std.net.Address.resolveIp(host.raw, port);
+            const address = std.net.Address.resolveIp(host.percent_encoded, port) catch {
+                std.log.err("Could not resolve IP for host={s} and port={d}\n", .{ host.percent_encoded, port });
+                return error.IPResolveError;
+            };
             config.address = address;
         } else {
             return error.MissingHost;
         }
 
         if (uri.path.raw.len > 1) {
-            config.database = @ptrCast(uri.path.raw[1..]);
+            const database: [:0]const u8 = uri.path.percent_encoded[1..];
+            config.database = database;
         }
 
         // Note: This might need more work
         if (uri.query) |qry| {
-            const q = qry.raw;
+            const q = qry.percent_encoded;
             var param_iter = std.mem.splitAny(u8, q, "&");
             while (param_iter.next()) |param| {
                 var kv_iter = std.mem.splitAny(u8, param, "=");
