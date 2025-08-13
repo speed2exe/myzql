@@ -56,7 +56,8 @@ pub const Conn = struct {
         }
 
         if (uri.user) |user| {
-            const written = try std.fmt.bufPrint(&config.username_buf, "{s}", .{user.percent_encoded});
+            // We need to remove the / in front of the database name here
+            const written = try std.fmt.bufPrint(&config.username_buf, "{s}", .{user.percent_encoded[1..]});
             config.username_buf[written.len] = 0; // sentinel
             config.username = config.username_buf[0..written.len :0];
         }
