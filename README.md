@@ -89,7 +89,7 @@ const Conn = myzql.conn.Conn;
 
 pub fn main() !void {
     // Setting up client
-    var client = try Conn.initFromConnectionString(
+    var client: Conn = try .fromConnStr(
         allocator,
         "mysql://some-user:password123@127.0.0.1:3306/customers",
     );
