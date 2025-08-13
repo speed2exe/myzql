@@ -6,11 +6,12 @@ const constants = @import("../constants.zig");
 const Config = @import("../config.zig").Config;
 const AuthPlugin = @import("../auth.zig").AuthPlugin;
 const PacketWriter = @import("./packet_writer.zig").PacketWriter;
+const Collation = @import("../collation.zig").Collation;
 
 pub const HandshakeResponse41 = struct {
     client_flag: u32, // capabilities
     max_packet_size: u32 = 0, // TODO: support configurable max packet size
-    character_set: u8,
+    character_set: Collation,
     username: [:0]const u8,
     auth_response: []const u8,
     database: [:0]const u8,
@@ -33,7 +34,7 @@ pub const HandshakeResponse41 = struct {
         try writer.writeInt(u32, h.client_flag);
 
         try writer.writeInt(u32, h.max_packet_size);
-        try writer.writeInt(u8, h.character_set);
+        try writer.writeInt(u8, h.character_set.value());
         try writer.write(&([_]u8{0} ** 23)); // filler
         try writer.writeNullTerminatedString(h.username);
 
