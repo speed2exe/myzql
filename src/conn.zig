@@ -51,13 +51,14 @@ pub const Conn = struct {
         const uri = try std.Uri.parse(conn_str);
 
         if (!(std.mem.eql(u8, uri.scheme, "mysql") or std.mem.eql(u8, uri.scheme, "mariadb"))) {
-            std.log.err("Invalid scheme. Only `mysql` and `mariadb` is allowed");
+            std.log.err("Invalid scheme. Only `mysql` and `mariadb` is allowed\n", .{});
             return error.InvalidDBProtocol;
         }
 
         if (uri.user) |user| {
-            const username: [:0]const u8 = user.percent_encoded;
-            config.username = username;
+            const written = try std.fmt.bufPrint(&config.username_buf, "{s}", .{user.percent_encoded});
+            config.username_buf[written.len] = 0; // sentinel
+            config.username = config.username_buf[0..written.len :0];
         }
 
         if (uri.password) |pass| {
@@ -77,8 +78,9 @@ pub const Conn = struct {
         }
 
         if (uri.path.raw.len > 1) {
-            const database: [:0]const u8 = uri.path.percent_encoded[1..];
-            config.database = database;
+            const written = try std.fmt.bufPrint(&config.path_buf, "{s}", .{uri.path.percent_encoded});
+            config.path_buf[written.len] = 0; // sentinel
+            config.database = config.path_buf[0..written.len :0];
         }
 
         // Note: This might need more work
