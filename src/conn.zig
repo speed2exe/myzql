@@ -77,7 +77,7 @@ pub const Conn = struct {
             return error.MissingHost;
         }
 
-        if (uri.path.raw.len > 1) {
+        if (uri.path.percent_encoded.len > 1) {
             const written = try std.fmt.bufPrint(&config.path_buf, "{s}", .{uri.path.percent_encoded});
             config.path_buf[written.len] = 0; // sentinel
             config.database = config.path_buf[0..written.len :0];
