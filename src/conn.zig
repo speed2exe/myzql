@@ -40,6 +40,70 @@ pub const Conn = struct {
     // Buffer to store metadata of the result set
     result_meta: ResultMeta,
 
+    /// Tries to connect to a database using a connection string
+    ///
+    /// `conn_str` needs to be valid as long as `Conn` is valid
+    ///
+    /// Supprted connection strings:
+    /// - {mariadb|mysql}://{username}:{password}@{host}:{port}/{dbname}
+    pub fn fromConnStr(allocator: std.mem.Allocator, conn_str: []const u8) !Conn {
+        var config = Config{};
+        const uri = try std.Uri.parse(conn_str);
+
+        if (!(std.mem.eql(u8, uri.scheme, "mysql") or std.mem.eql(u8, uri.scheme, "mariadb"))) {
+            std.log.err("Invalid scheme. Only `mysql` and `mariadb` is allowed\n", .{});
+            return error.InvalidDBProtocol;
+        }
+
+        if (uri.user) |user| {
+            // We need to remove the / in front of the database name here
+            const written = try std.fmt.bufPrint(&config.username_buf, "{s}", .{user.percent_encoded[1..]});
+            config.username_buf[written.len] = 0; // sentinel
+            config.username = config.username_buf[0..written.len :0];
+        }
+
+        if (uri.password) |pass| {
+            config.password = pass.percent_encoded;
+        }
+
+        if (uri.host) |host| {
+            const port = uri.port orelse 3306;
+
+            const address = std.net.Address.resolveIp(host.percent_encoded, port) catch {
+                std.log.err("Could not resolve IP for host={s} and port={d}\n", .{ host.percent_encoded, port });
+                return error.IPResolveError;
+            };
+            config.address = address;
+        } else {
+            return error.MissingHost;
+        }
+
+        if (uri.path.percent_encoded.len > 1) {
+            const written = try std.fmt.bufPrint(&config.path_buf, "{s}", .{uri.path.percent_encoded});
+            config.path_buf[written.len] = 0; // sentinel
+            config.database = config.path_buf[0..written.len :0];
+        }
+
+        // Note: This might need more work
+        if (uri.query) |qry| {
+            const q = qry.percent_encoded;
+            var param_iter = std.mem.splitAny(u8, q, "&");
+            while (param_iter.next()) |param| {
+                var kv_iter = std.mem.splitAny(u8, param, "=");
+                const key = kv_iter.next() orelse continue;
+                const value = kv_iter.next() orelse continue;
+
+                if (std.mem.eql(u8, key, "charset")) {
+                    if (std.mem.eql(u8, value, "utf8mb4")) {
+                        config.collation = constants.utf8mb4_general_ci;
+                    }
+                }
+            }
+        }
+
+        return init(allocator, &config);
+    }
+
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     pub fn init(allocator: std.mem.Allocator, config: *const Config) !Conn {
         var conn: Conn = blk: {

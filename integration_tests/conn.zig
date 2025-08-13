@@ -3,6 +3,7 @@ const myzql = @import("myzql");
 const Conn = myzql.conn.Conn;
 const test_config = @import("./config.zig").test_config;
 const test_config_with_db = @import("./config.zig").test_config_with_db;
+const test_connection_string = @import("./config.zig").test_connection_string;
 const allocator = std.testing.allocator;
 const ErrorPacket = myzql.protocol.generic_response.ErrorPacket;
 const minInt = std.math.minInt;
@@ -38,6 +39,12 @@ test "ping" {
 
 test "connect with database" {
     var c = try Conn.init(std.testing.allocator, &test_config_with_db);
+    defer c.deinit();
+    try c.ping();
+}
+
+test "connect with database through connection string" {
+    var c = try Conn.fromConnStr(allocator, test_connection_string);
     defer c.deinit();
     try c.ping();
 }

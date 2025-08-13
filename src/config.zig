@@ -2,9 +2,11 @@ const std = @import("std");
 const constants = @import("./constants.zig");
 
 pub const Config = struct {
+    username_buf: [256]u8 = undefined,
     username: [:0]const u8 = "root",
     address: std.net.Address = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306),
     password: []const u8 = "",
+    path_buf: [256]u8 = undefined,
     database: [:0]const u8 = "",
     collation: u8 = constants.utf8mb4_general_ci,
 
