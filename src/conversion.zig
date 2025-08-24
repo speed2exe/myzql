@@ -181,44 +181,6 @@ inline fn binElemToValue(
                 else => {},
             }
         },
-        .@"struct" => |s| {
-            inline for (s.fields) |field| {
-                if (std.mem.eql(u8, field.name, "buffer")) {
-                    const info = @typeInfo(field.type);
-                    switch (info) {
-                        .array => |array| {
-                            if (FieldType == std.BoundedArray(u8, array.len)) {
-                                switch (col_type) {
-                                    .MYSQL_TYPE_STRING,
-                                    .MYSQL_TYPE_VARCHAR,
-                                    .MYSQL_TYPE_VAR_STRING,
-                                    .MYSQL_TYPE_ENUM,
-                                    .MYSQL_TYPE_SET,
-                                    .MYSQL_TYPE_LONG_BLOB,
-                                    .MYSQL_TYPE_MEDIUM_BLOB,
-                                    .MYSQL_TYPE_BLOB,
-                                    .MYSQL_TYPE_TINY_BLOB,
-                                    .MYSQL_TYPE_GEOMETRY,
-                                    .MYSQL_TYPE_BIT,
-                                    .MYSQL_TYPE_DECIMAL,
-                                    .MYSQL_TYPE_NEWDECIMAL,
-                                    => {
-                                        const str = reader.readLengthEncodedString();
-                                        var ret = try std.BoundedArray(u8, array.len).init(0);
-                                        try ret.appendSlice(str[0..@min(str.len, array.len)]);
-                                        return ret;
-                                    },
-                                    else => {},
-                                }
-                            }
-                        },
-                        else => {},
-                    }
-                }
-                break;
-            }
-        },
-
         .@"enum" => |e| {
             switch (col_type) {
                 .MYSQL_TYPE_STRING,

@@ -34,7 +34,7 @@ pub const QueryResult = union(enum) {
     pub fn expect(
         q: QueryResult,
         comptime value_variant: std.meta.FieldEnum(QueryResult),
-    ) !std.meta.FieldType(QueryResult, value_variant) {
+    ) !@FieldType(QueryResult, @tagName(value_variant)) {
         return switch (q) {
             value_variant => @field(q, @tagName(value_variant)),
             else => {
@@ -83,7 +83,7 @@ pub fn QueryResultRows(comptime T: type) type {
         pub fn expect(
             q: QueryResultRows(T),
             comptime value_variant: std.meta.FieldEnum(QueryResultRows(T)),
-        ) !std.meta.FieldType(QueryResultRows(T), value_variant) {
+        ) !@FieldType(QueryResultRows(T), @tagName(value_variant)) {
             return switch (q) {
                 value_variant => @field(q, @tagName(value_variant)),
                 else => {
@@ -113,7 +113,7 @@ pub fn ResultSet(comptime T: type) type {
             const n_columns = reader.readLengthEncodedInteger();
             std.debug.assert(reader.finished());
 
-            try conn.readPutResultColumns(n_columns);
+            try conn.readPutResultColumns(std.testing.allocator, n_columns);
 
             return .{
                 .conn = conn,
@@ -133,9 +133,9 @@ pub fn ResultSet(comptime T: type) type {
             return ResultRow(T).init(r.conn, r.col_defs);
         }
 
-        pub fn tableTexts(r: *const ResultSet(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
-            const all_rows = try collectAllRowsPacketUntilEof(r.conn, allocator);
-            errdefer deinitOwnedPacketList(all_rows);
+        pub fn tableTexts(r: *ResultSet(TextResultRow), allocator: std.mem.Allocator) !TableTexts {
+            var all_rows = try collectAllRowsPacketUntilEof(r.conn, allocator);
+            errdefer deinitOwnedPacketList(allocator, &all_rows);
             return try TableTexts.init(all_rows, allocator, r.col_defs.len);
         }
 
@@ -308,16 +308,16 @@ pub fn ResultRow(comptime T: type) type {
     };
 }
 
-fn deinitOwnedPacketList(packet_list: std.ArrayList(Packet)) void {
+fn deinitOwnedPacketList(allocator: std.mem.Allocator, packet_list: *std.ArrayList(Packet)) void {
     for (packet_list.items) |packet| {
-        packet.deinit(packet_list.allocator);
+        packet.deinit(allocator);
     }
-    packet_list.deinit();
+    packet_list.deinit(allocator);
 }
 
 fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: std.mem.Allocator) !std.ArrayList(Packet) {
-    var packet_list = std.ArrayList(Packet).init(allocator);
-    errdefer deinitOwnedPacketList(packet_list);
+    var packet_list: std.ArrayList(Packet) = .empty;
+    errdefer deinitOwnedPacketList(allocator, &packet_list);
 
     // Accumulate all packets until EOF
     while (true) {
@@ -330,7 +330,7 @@ fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: std.mem.Allocator) !std.
             },
             else => {
                 const owned_packet = try packet.cloneAlloc(allocator);
-                try packet_list.append(owned_packet);
+                try packet_list.append(allocator, owned_packet);
                 continue;
             },
         };
@@ -360,7 +360,7 @@ pub const PrepareResult = union(enum) {
     pub fn expect(
         p: PrepareResult,
         comptime value_variant: std.meta.FieldEnum(PrepareResult),
-    ) !std.meta.FieldType(PrepareResult, value_variant) {
+    ) !@FieldType(PrepareResult, @tagName(value_variant)) {
         return switch (p) {
             value_variant => @field(p, @tagName(value_variant)),
             else => {
@@ -466,14 +466,15 @@ pub const TableTexts = struct {
         };
     }
 
-    pub fn deinit(t: *const TableTexts, allocator: std.mem.Allocator) void {
-        deinitOwnedPacketList(t.packet_list);
+    pub fn deinit(t: *TableTexts, allocator: std.mem.Allocator) void {
+        deinitOwnedPacketList(allocator, &t.packet_list);
         allocator.free(t.table);
         allocator.free(t.flattened);
     }
 
     pub fn debugPrint(t: *const TableTexts) !void {
-        const w = std.io.getStdOut().writer();
+        var buffer: [1024]u8 = undefined;
+        var w = std.fs.File.stdout().writer(&buffer).interface;
         for (t.table, 0..) |row, i| {
             try w.print("row: {d} -> ", .{i});
             try w.print("|", .{});
@@ -483,6 +484,7 @@ pub const TableTexts = struct {
             }
             try w.print("\n", .{});
         }
+        try w.flush();
     }
 };
 
@@ -491,19 +493,19 @@ pub fn TableStructs(comptime Struct: type) type {
         struct_list: std.ArrayList(Struct),
 
         pub fn init(iter: *const ResultRowIter(BinaryResultRow), allocator: std.mem.Allocator) !TableStructs(Struct) {
-            var struct_list = std.ArrayList(Struct).init(allocator);
+            var struct_list: std.ArrayList(Struct) = .empty;
             while (try iter.next()) |row| {
-                const new_struct_ptr = try struct_list.addOne();
+                const new_struct_ptr = try struct_list.addOne(allocator);
                 try conversion.scanBinResultRow(new_struct_ptr, &row.packet, row.col_defs, allocator);
             }
             return .{ .struct_list = struct_list };
         }
 
-        pub fn deinit(t: *const TableStructs(Struct), allocator: std.mem.Allocator) void {
+        pub fn deinit(t: *TableStructs(Struct), allocator: std.mem.Allocator) void {
             for (t.struct_list.items) |s| {
                 BinaryResultRow.structFreeDynamic(s, allocator);
             }
-            t.struct_list.deinit();
+            t.struct_list.deinit(allocator);
         }
 
         pub fn debugPrint(t: *const TableStructs(Struct)) !void {

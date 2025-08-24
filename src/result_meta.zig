@@ -7,26 +7,26 @@ pub const ResultMeta = struct {
     raw: std.ArrayList(u8),
     col_defs: std.ArrayList(ColumnDefinition41),
 
-    pub fn init(allocator: std.mem.Allocator) ResultMeta {
+    pub fn init() ResultMeta {
         return ResultMeta{
-            .raw = std.ArrayList(u8).init(allocator),
-            .col_defs = std.ArrayList(ColumnDefinition41).init(allocator),
+            .raw = std.ArrayList(u8).empty,
+            .col_defs = std.ArrayList(ColumnDefinition41).empty,
         };
     }
 
-    pub fn deinit(r: *const ResultMeta) void {
-        r.raw.deinit();
-        r.col_defs.deinit();
+    pub fn deinit(r: *ResultMeta, allocator: std.mem.Allocator) void {
+        r.raw.deinit(allocator);
+        r.col_defs.deinit(allocator);
     }
 
-    pub inline fn readPutResultColumns(r: *ResultMeta, c: *Conn, n: usize) !void {
+    pub inline fn readPutResultColumns(r: *ResultMeta, allocator: std.mem.Allocator, c: *Conn, n: usize) !void {
         r.raw.clearRetainingCapacity();
         r.col_defs.clearRetainingCapacity();
 
-        const col_defs = try r.col_defs.addManyAsSlice(n);
+        const col_defs = try r.col_defs.addManyAsSlice(allocator, n);
         for (col_defs) |*col_def| {
             var packet = try c.readPacket();
-            const payload_owned = try r.raw.addManyAsSlice(packet.payload.len);
+            const payload_owned = try r.raw.addManyAsSlice(allocator, packet.payload.len);
             @memcpy(payload_owned, packet.payload);
             packet.payload = payload_owned;
             col_def.init2(&packet);
