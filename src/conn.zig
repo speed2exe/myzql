@@ -271,7 +271,12 @@ pub const Conn = struct {
 
     pub inline fn readPacket(c: *Conn) !Packet {
         const packet = try c.reader.readPacket();
-        c.sequence_id = packet.sequence_id + 1;
+        // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
+        //
+        // Sequence ID
+        // The sequence-id is incremented with each packet and may wrap around.
+        // It starts at 0 and is reset to 0 when a new command begins in the Command Phase.
+        c.sequence_id = packet.sequence_id +% 1;
         return packet;
     }
 
@@ -293,7 +298,7 @@ pub const Conn = struct {
 
     inline fn generateSequenceId(c: *Conn) u8 {
         const sequence_id = c.sequence_id;
-        c.sequence_id += 1;
+        c.sequence_id +%= 1;
         return sequence_id;
     }
 

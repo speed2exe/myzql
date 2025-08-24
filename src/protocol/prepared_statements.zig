@@ -89,7 +89,7 @@ pub const ExecuteRequest = struct {
 
         // const param_count = params.len;
         if (params.len > 0
-        //or has_attributes_to_write
+            //or has_attributes_to_write
         ) {
             // if (has_attributes_to_write) {
             //     try packet_writer.writeLengthEncodedInteger(writer, e.attributes.len + param_count);
