@@ -1,0 +1,6 @@
+.{
+    .name = .myzql,
+    .fingerprint = 0x9af123b5005a4e5d,
+    .version = "0.0.0",
+    .paths = .{""},
+}
