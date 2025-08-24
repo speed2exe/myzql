@@ -945,6 +945,87 @@ test "select concat with params" {
     }
 }
 
+// https://github.com/speed2exe/myzql/issues/27
+test "stress" {
+    var c = try Conn.init(std.testing.allocator, &test_config);
+    defer c.deinit(std.testing.allocator);
+
+    { // Select (Binary Protocol)
+        const prep_res = try c.prepare(allocator,
+            \\WITH generator_4 AS
+            \\(
+            \\SELECT 0 a, 0 b, 0 c, 0 d, 0 e, 0 f
+            \\UNION ALL
+            \\SELECT 1, 1, 1, 1, 1, 1
+            \\UNION ALL
+            \\SELECT 2, 2, 2, 2, 2, 2
+            \\UNION ALL
+            \\SELECT 3, 3, 3, 3, 3, 3
+            \\),
+            \\generator_16 as
+            \\(
+            \\    SELECT
+            \\    ( ( hi.a * 4 ) + lo.a ) AS a,
+            \\    ( ( hi.b * 4 ) + lo.b ) AS b,
+            \\    ( ( hi.c * 4 ) + lo.c ) AS c,
+            \\    ( ( hi.d * 4 ) + lo.d ) AS d,
+            \\    ( ( hi.e * 4 ) + lo.e ) AS e,
+            \\    ( ( hi.f * 4 ) + lo.f ) AS f
+            \\    FROM generator_4 lo, generator_4 hi
+            \\),
+            \\generator_256 as
+            \\(
+            \\    SELECT
+            \\    ( ( hi.a * 16 ) + lo.a ) AS a,
+            \\    ( ( hi.b * 16 ) + lo.b ) AS b,
+            \\    ( ( hi.c * 16 ) + lo.c ) AS c,
+            \\    ( ( hi.d * 16 ) + lo.d ) AS d,
+            \\    ( ( hi.e * 16 ) + lo.e ) AS e,
+            \\    ( ( hi.f * 16 ) + lo.f ) AS f
+            \\    FROM generator_16 lo, generator_16 hi
+            \\),
+            \\generator_64k as
+            \\(
+            \\    SELECT
+            \\    ( ( hi.a * 256 ) + lo.a ) AS a,
+            \\    ( ( hi.b * 256 ) + lo.b ) AS b,
+            \\    ( ( hi.c * 256 ) + lo.c ) AS c,
+            \\    ( ( hi.d * 256 ) + lo.d ) AS d,
+            \\    ( ( hi.e * 256 ) + lo.e ) AS e,
+            \\    ( ( hi.f * 256 ) + lo.f ) AS f
+            \\    FROM generator_256 lo, generator_256 hi
+            \\),
+            \\generator_16m as
+            \\(
+            \\    SELECT
+            \\    ( ( hi.a * 256 ) + lo.a ) AS a,
+            \\    ( ( hi.b * 256 ) + lo.b ) AS b,
+            \\    ( ( hi.c * 256 ) + lo.c ) AS c,
+            \\    ( ( hi.d * 256 ) + lo.d ) AS d,
+            \\    ( ( hi.e * 256 ) + lo.e ) AS e,
+            \\    ( ( hi.f * 256 ) + lo.f ) AS f
+            \\    FROM generator_256 lo, generator_64k hi
+            \\)
+            \\SELECT *
+            \\from generator_16m
+        ); // https://stackoverflow.com/a/10432083
+        defer prep_res.deinit(allocator);
+        const prep_stmt = try prep_res.expect(.stmt);
+        const res = try c.executeRows(&prep_stmt, .{});
+        const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
+        const rows_iter = rows.iter();
+
+        const Result = struct { a: u64, b: u64, c: u64, d: u64, e: u64, f: u64 };
+        var i: u64 = 0;
+        while (try rows_iter.next()) |row| {
+            var dest: Result = undefined;
+            try row.scan(&dest);
+            i += dest.a;
+        }
+        try std.testing.expectEqual(i, 140_737_479_966_720); // 0 + 1 + ... + 16_777_215
+    }
+}
+
 fn runtimeValue(a: anytype) @TypeOf(a) {
     return a;
 }
