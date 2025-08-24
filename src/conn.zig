@@ -128,12 +128,12 @@ pub const Conn = struct {
     }
 
     // query that expect rows, even if it returns 0 rows
-    pub fn queryRows(c: *Conn, query_string: []const u8) !QueryResultRows(TextResultRow) {
+    pub fn queryRows(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !QueryResultRows(TextResultRow) {
         c.ready();
         const query_req: QueryRequest = .{ .query = query_string };
         try c.writePacket(query_req);
         try c.writer.flush();
-        return QueryResultRows(TextResultRow).init(c);
+        return QueryResultRows(TextResultRow).init(c, allocator);
     }
 
     pub fn prepare(c: *Conn, allocator: std.mem.Allocator, query_string: []const u8) !PrepareResult {
@@ -160,7 +160,7 @@ pub const Conn = struct {
     }
 
     // execute a prepared statement that expect rows, even if it returns 0 rows
-    pub fn executeRows(c: *Conn, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
+    pub fn executeRows(c: *Conn, allocator: std.mem.Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
         c.ready();
         std.debug.assert(prep_stmt.res_cols.len > 0); // executeRows expects rows
         c.sequence_id = 0;
@@ -170,7 +170,7 @@ pub const Conn = struct {
         };
         try c.writePacketWithParam(execute_request, params);
         try c.writer.flush();
-        return QueryResultRows(BinaryResultRow).init(c);
+        return QueryResultRows(BinaryResultRow).init(c, allocator);
     }
 
     fn quit(c: *Conn) !void {

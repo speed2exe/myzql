@@ -59,7 +59,7 @@ pub fn QueryResultRows(comptime T: type) type {
         rows: ResultSet(T),
 
         // allocation happens when a result set is returned
-        pub fn init(c: *Conn) !QueryResultRows(T) {
+        pub fn init(c: *Conn, allocator: std.mem.Allocator) !QueryResultRows(T) {
             const packet = try c.readPacket();
             return switch (packet.payload[0]) {
                 constants.OK => {
@@ -71,7 +71,7 @@ pub fn QueryResultRows(comptime T: type) type {
                 },
                 constants.ERR => .{ .err = ErrorPacket.init(&packet) },
                 constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-                else => .{ .rows = try ResultSet(T).init(c, &packet) },
+                else => .{ .rows = try ResultSet(T).init(c, allocator, &packet) },
             };
         }
 
@@ -108,12 +108,12 @@ pub fn ResultSet(comptime T: type) type {
         conn: *Conn,
         col_defs: []const ColumnDefinition41,
 
-        pub fn init(conn: *Conn, packet: *const Packet) !ResultSet(T) {
+        pub fn init(conn: *Conn, allocator: std.mem.Allocator, packet: *const Packet) !ResultSet(T) {
             var reader = packet.reader();
             const n_columns = reader.readLengthEncodedInteger();
             std.debug.assert(reader.finished());
 
-            try conn.readPutResultColumns(std.testing.allocator, n_columns);
+            try conn.readPutResultColumns(allocator, n_columns);
 
             return .{
                 .conn = conn,
