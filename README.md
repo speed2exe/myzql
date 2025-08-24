@@ -30,15 +30,11 @@
 - TLS support
 
 ## Add as dependency to your Zig project
-- `build.zig`
-```zig
-    //...
-    const myzql_dep = b.dependency("myzql", .{});
-    const myzql = myzql_dep.module("myzql");
-    exe.addModule("myzql", myzql);
-    //...
+### Fetch dependency
+```bash
+zig fetch --save git+https://github.com/speed2exe/myzql#0.15.1
 ```
-
+or
 - `build.zig.zon`
 ```zon
     // ...
@@ -50,6 +46,16 @@
       }
     },
     // ...
+```
+
+### Import in your project
+- `build.zig`
+```zig
+    //...
+    const myzql_dep = b.dependency("myzql", .{});
+    const myzql = myzql_dep.module("myzql");
+    exe.addModule("myzql", myzql);
+    //...
 ```
 
 ## Usage
