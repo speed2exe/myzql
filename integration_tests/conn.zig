@@ -32,26 +32,26 @@ fn queryExpectOkLogError(c: *Conn, query: []const u8) void {
 
 test "ping" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
     try c.ping();
 }
 
 test "connect with database" {
     var c = try Conn.init(std.testing.allocator, &test_config_with_db);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
     try c.ping();
 }
 
 test "query database create and drop" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
     try queryExpectOk(&c, "CREATE DATABASE testdb");
     try queryExpectOk(&c, "DROP DATABASE testdb");
 }
 
 test "query syntax error" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
 
     const qr = try c.query("garbage query");
     _ = try qr.expect(.err);
@@ -59,7 +59,7 @@ test "query syntax error" {
 
 test "query text protocol" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
 
     { // Iterating over rows and elements
         const query_res = try c.queryRows("SELECT 1");
@@ -89,8 +89,8 @@ test "query text protocol" {
     }
     { // Iterating over rows, collecting elements into []const []const ?[]const u8
         const query_res = try c.queryRows("SELECT 8,9 UNION ALL SELECT 10,11");
-        const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
-        const table = try rows.tableTexts(allocator);
+        var rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
+        var table = try rows.tableTexts(allocator);
         defer table.deinit(allocator);
 
         try std.testing.expectEqualDeep(
@@ -105,7 +105,7 @@ test "query text protocol" {
 
 test "prepare check" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
     { // prepare no execute
         const prep_res = try c.prepare(allocator, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
         defer prep_res.deinit(allocator);
@@ -128,7 +128,7 @@ test "prepare check" {
 
 test "prepare execute - 1" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
     {
         const prep_res = try c.prepare(allocator, "CREATE DATABASE testdb");
         defer prep_res.deinit(allocator);
@@ -147,7 +147,7 @@ test "prepare execute - 1" {
 
 test "prepare execute - 2" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
 
     const prep_res_1 = try c.prepare(allocator, "CREATE DATABASE testdb");
     defer prep_res_1.deinit(allocator);
@@ -169,7 +169,7 @@ test "prepare execute - 2" {
 
 test "prepare execute with result" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
 
     {
         const query =
@@ -243,7 +243,7 @@ test "prepare execute with result" {
             .{ .a = 4, .b = 5, .c = 6 },
         };
 
-        const structs = try rows_iter.tableStructs(MyType, allocator);
+        var structs = try rows_iter.tableStructs(MyType, allocator);
         defer structs.deinit(allocator);
         try std.testing.expectEqualDeep(expected, structs.struct_list.items);
     }
@@ -251,7 +251,7 @@ test "prepare execute with result" {
 
 test "prepare execute - first" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
 
     {
         const query =
@@ -299,7 +299,7 @@ test "prepare execute - first" {
 
 test "binary data types - int" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
 
     try queryExpectOk(&c, "CREATE DATABASE test");
     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
@@ -346,9 +346,9 @@ test "binary data types - int" {
 
     { // Select (Text Protocol)
         const res = try c.queryRows("SELECT * FROM test.int_types_example");
-        const rows: ResultSet(TextResultRow) = try res.expect(.rows);
+        var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
-        const table_texts = try rows.tableTexts(allocator);
+        var table_texts = try rows.tableTexts(allocator);
         defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
@@ -435,7 +435,7 @@ test "binary data types - int" {
             },
         };
 
-        const structs = try rows.iter().tableStructs(IntTypesExample, allocator);
+        var structs = try rows.iter().tableStructs(IntTypesExample, allocator);
         defer structs.deinit(allocator);
         try std.testing.expectEqualDeep(expected, structs.struct_list.items);
     }
@@ -443,7 +443,7 @@ test "binary data types - int" {
 
 test "binary data types - float" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
 
     try queryExpectOk(&c, "CREATE DATABASE test");
     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
@@ -479,8 +479,8 @@ test "binary data types - float" {
 
     { // Text Protocol
         const res = try c.queryRows("SELECT * FROM test.float_types_example");
-        const rows: ResultSet(TextResultRow) = try res.expect(.rows);
-        const table_texts = try rows.tableTexts(allocator);
+        var rows: ResultSet(TextResultRow) = try res.expect(.rows);
+        var table_texts = try rows.tableTexts(allocator);
         defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
@@ -515,7 +515,7 @@ test "binary data types - float" {
             .{ .float_col = 1.23, .double_col = 1.23 },
         };
 
-        const structs = try row_iter.tableStructs(FloatTypesExample, allocator);
+        var structs = try row_iter.tableStructs(FloatTypesExample, allocator);
         defer structs.deinit(allocator);
         try std.testing.expectEqualDeep(expected, structs.struct_list.items);
     }
@@ -523,7 +523,7 @@ test "binary data types - float" {
 
 test "binary data types - string" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
 
     try queryExpectOk(&c, "CREATE DATABASE test");
     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
@@ -564,9 +564,9 @@ test "binary data types - string" {
 
     { // Text Protocol
         const res = try c.queryRows("SELECT * FROM test.string_types_example");
-        const rows: ResultSet(TextResultRow) = try res.expect(.rows);
+        var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
-        const table_texts = try rows.tableTexts(allocator);
+        var table_texts = try rows.tableTexts(allocator);
         defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
@@ -622,7 +622,7 @@ test "binary data types - string" {
             },
         };
 
-        const structs = try rows_iter.tableStructs(StringTypesExample, allocator);
+        var structs = try rows_iter.tableStructs(StringTypesExample, allocator);
         defer structs.deinit(allocator);
         try std.testing.expectEqualDeep(expected, structs.struct_list.items);
     }
@@ -630,7 +630,7 @@ test "binary data types - string" {
 
 test "binary data types - array" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
 
     try queryExpectOk(&c, "CREATE DATABASE test");
     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
@@ -671,9 +671,9 @@ test "binary data types - array" {
 
     { // Text Protocol
         const res = try c.queryRows("SELECT * FROM test.array_types_example");
-        const rows: ResultSet(TextResultRow) = try res.expect(.rows);
+        var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
-        const table_texts = try rows.tableTexts(allocator);
+        var table_texts = try rows.tableTexts(allocator);
         defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
@@ -732,7 +732,7 @@ test "binary data types - array" {
                 },
             };
 
-            const structs = try rows_iter.tableStructs(ArrayTypesExample, allocator);
+            var structs = try rows_iter.tableStructs(ArrayTypesExample, allocator);
             defer structs.deinit(allocator);
             try std.testing.expectEqualDeep(expected, structs.struct_list.items);
         }
@@ -758,7 +758,7 @@ test "binary data types - array" {
                 },
             };
 
-            const shorts = try rows_iter.tableStructs(Short, allocator);
+            var shorts = try rows_iter.tableStructs(Short, allocator);
             defer shorts.deinit(allocator);
             try std.testing.expectEqualDeep(expected_shorts, shorts.struct_list.items);
         }
@@ -784,7 +784,7 @@ test "binary data types - array" {
                 },
             };
 
-            const sentinels = try rows_iter.tableStructs(Sentinel, allocator);
+            var sentinels = try rows_iter.tableStructs(Sentinel, allocator);
             defer sentinels.deinit(allocator);
             try std.testing.expectEqualDeep(expected_sentinels, sentinels.struct_list.items);
         }
@@ -810,180 +810,16 @@ test "binary data types - array" {
                 },
             };
 
-            const longs = try rows_iter.tableStructs(Long, allocator);
+            var longs = try rows_iter.tableStructs(Long, allocator);
             defer longs.deinit(allocator);
             try std.testing.expectEqualDeep(expected_longs, longs.struct_list.items);
         }
     }
 }
 
-test "binary data types - BoundedArray" {
-    var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
-
-    try queryExpectOk(&c, "CREATE DATABASE test");
-    defer queryExpectOk(&c, "DROP DATABASE test") catch {};
-
-    try queryExpectOk(&c,
-        \\CREATE TABLE test.bounded_array_types_example (
-        \\    varchar_col VARCHAR(255),
-        \\    not_null_varchar_col VARCHAR(255) NOT NULL
-        \\)
-    );
-    defer queryExpectOk(&c, "DROP TABLE test.bounded_array_types_example") catch {};
-
-    { // Exec Insert
-        const prep_res = try c.prepare(allocator, "INSERT INTO test.bounded_array_types_example VALUES (?, ?)");
-        defer prep_res.deinit(allocator);
-        const prep_stmt = try prep_res.expect(.stmt);
-
-        const params = .{
-            .{ "hello", "world" },
-            .{ null, "foo" },
-            .{ null, "" },
-            .{
-                @as(?*const [3]u8, "baz"),
-                @as([*:0]const u8, "bar"),
-            },
-        };
-        inline for (params) |param| {
-            const exe_res = try c.execute(&prep_stmt, param);
-            _ = try exe_res.expect(.ok);
-        }
-    }
-
-    { // Select (Binary Protocol)
-        const BoundedArray = std.BoundedArray(u8, 255);
-
-        const BoundedArrayTypesExample = struct {
-            varchar_col: ?BoundedArray,
-            not_null_varchar_col: BoundedArray,
-        };
-
-        const prep_res = try c.prepare(allocator,
-            \\SELECT * FROM test.bounded_array_types_example
-        );
-        defer prep_res.deinit(allocator);
-        const prep_stmt = try prep_res.expect(.stmt);
-        const res = try c.executeRows(&prep_stmt, .{});
-        const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
-        const rows_iter = rows.iter();
-
-        const expected: []const BoundedArrayTypesExample = &.{
-            .{
-                .varchar_col = blk: {
-                    var arr = try BoundedArray.init(0);
-                    try arr.appendSlice("hello");
-                    break :blk arr;
-                },
-                .not_null_varchar_col = blk: {
-                    var arr = try BoundedArray.init(0);
-                    try arr.appendSlice("world");
-                    break :blk arr;
-                },
-            },
-            .{
-                .varchar_col = null,
-                .not_null_varchar_col = blk: {
-                    var arr = try BoundedArray.init(0);
-                    try arr.appendSlice("foo");
-                    break :blk arr;
-                },
-            },
-            .{
-                .varchar_col = null,
-                .not_null_varchar_col = blk: {
-                    const arr = try BoundedArray.init(0);
-                    break :blk arr;
-                },
-            },
-            .{
-                .varchar_col = blk: {
-                    var arr = try BoundedArray.init(0);
-                    try arr.appendSlice("baz");
-                    break :blk arr;
-                },
-                .not_null_varchar_col = blk: {
-                    var arr = try BoundedArray.init(0);
-                    try arr.appendSlice("bar");
-                    break :blk arr;
-                },
-            },
-        };
-
-        const structs = try rows_iter.tableStructs(BoundedArrayTypesExample, allocator);
-        defer structs.deinit(allocator);
-        try std.testing.expectEqualDeep(expected, structs.struct_list.items);
-    }
-
-    { // Select (Binary Protocol) -- Small array
-        const BoundedArray = std.BoundedArray(u8, 3);
-
-        const BoundedArrayTypesExample = struct {
-            varchar_col: ?BoundedArray,
-            not_null_varchar_col: BoundedArray,
-        };
-
-        const prep_res = try c.prepare(allocator,
-            \\SELECT * FROM test.bounded_array_types_example
-        );
-        defer prep_res.deinit(allocator);
-        const prep_stmt = try prep_res.expect(.stmt);
-        const res = try c.executeRows(&prep_stmt, .{});
-        const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
-        const rows_iter = rows.iter();
-
-        const expected: []const BoundedArrayTypesExample = &.{
-            .{
-                .varchar_col = blk: {
-                    var arr = try BoundedArray.init(0);
-                    try arr.appendSlice("hel");
-                    break :blk arr;
-                },
-                .not_null_varchar_col = blk: {
-                    var arr = try BoundedArray.init(0);
-                    try arr.appendSlice("wor");
-                    break :blk arr;
-                },
-            },
-            .{
-                .varchar_col = null,
-                .not_null_varchar_col = blk: {
-                    var arr = try BoundedArray.init(0);
-                    try arr.appendSlice("foo");
-                    break :blk arr;
-                },
-            },
-            .{
-                .varchar_col = null,
-                .not_null_varchar_col = blk: {
-                    const arr = try BoundedArray.init(0);
-                    break :blk arr;
-                },
-            },
-            .{
-                .varchar_col = blk: {
-                    var arr = try BoundedArray.init(0);
-                    try arr.appendSlice("baz");
-                    break :blk arr;
-                },
-                .not_null_varchar_col = blk: {
-                    var arr = try BoundedArray.init(0);
-                    try arr.appendSlice("bar");
-                    break :blk arr;
-                },
-            },
-        };
-
-        const structs = try rows_iter.tableStructs(BoundedArrayTypesExample, allocator);
-        defer structs.deinit(allocator);
-        try std.testing.expectEqualDeep(expected, structs.struct_list.items);
-    }
-}
-
 test "binary data types - temporal" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
 
     try queryExpectOk(&c, "CREATE DATABASE test");
     defer queryExpectOk(&c, "DROP DATABASE test") catch {};
@@ -1026,9 +862,9 @@ test "binary data types - temporal" {
 
     { // Text Protocol
         const res = try c.queryRows("SELECT * FROM test.temporal_types_example");
-        const rows: ResultSet(TextResultRow) = try res.expect(.rows);
+        var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
-        const table_texts = try rows.tableTexts(allocator);
+        var table_texts = try rows.tableTexts(allocator);
         defer table_texts.deinit(allocator);
 
         const expected: []const []const ?[]const u8 = &.{
@@ -1083,7 +919,7 @@ test "binary data types - temporal" {
             },
         };
 
-        const structs = try rows_iter.tableStructs(TemporalTypesExample, allocator);
+        var structs = try rows_iter.tableStructs(TemporalTypesExample, allocator);
         defer structs.deinit(allocator);
         try std.testing.expectEqualDeep(expected, structs.struct_list.items);
     }
@@ -1091,7 +927,7 @@ test "binary data types - temporal" {
 
 test "select concat with params" {
     var c = try Conn.init(std.testing.allocator, &test_config);
-    defer c.deinit();
+    defer c.deinit(std.testing.allocator);
 
     { // Select (Binary Protocol)
         const prep_res = try c.prepare(allocator, "SELECT CONCAT(?, ?) AS col1");
@@ -1103,7 +939,7 @@ test "select concat with params" {
 
         const Result = struct { col1: []const u8 };
         const expected: []const Result = &.{.{ .col1 = "helloworld" }};
-        const structs = try rows_iter.tableStructs(Result, allocator);
+        var structs = try rows_iter.tableStructs(Result, allocator);
         defer structs.deinit(allocator);
         try std.testing.expectEqualDeep(expected, structs.struct_list.items);
     }

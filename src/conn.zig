@@ -56,10 +56,10 @@ pub const Conn = struct {
                 .capabilities = undefined, // not known until we get the first packet
                 .sequence_id = undefined, // not known until we get the first packet
 
-                .result_meta = ResultMeta.init(allocator),
+                .result_meta = ResultMeta.init(),
             };
         };
-        errdefer conn.deinit();
+        errdefer conn.deinit(allocator);
 
         const auth_plugin, const auth_data = blk: {
             const packet = try conn.readPacket();
@@ -95,14 +95,14 @@ pub const Conn = struct {
         return conn;
     }
 
-    pub fn deinit(c: *Conn) void {
+    pub fn deinit(c: *Conn, allocator: std.mem.Allocator) void {
         c.quit() catch |err| {
             std.log.err("Failed to quit: {any}\n", .{err});
         };
         c.stream.close();
         c.reader.deinit();
         c.writer.deinit();
-        c.result_meta.deinit();
+        c.result_meta.deinit(allocator);
     }
 
     pub fn ping(c: *Conn) !void {
@@ -275,8 +275,8 @@ pub const Conn = struct {
         return packet;
     }
 
-    pub inline fn readPutResultColumns(c: *Conn, n: usize) !void {
-        try c.result_meta.readPutResultColumns(c, n);
+    pub inline fn readPutResultColumns(c: *Conn, allocator: std.mem.Allocator, n: usize) !void {
+        try c.result_meta.readPutResultColumns(allocator, c, n);
     }
 
     inline fn writePacket(c: *Conn, packet: anytype) !void {
