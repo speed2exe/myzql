@@ -10,7 +10,8 @@
 | 0.0.9.1     | 0.12.0                    |
 | 0.13.2      | 0.13.0                    |
 | 0.14.0      | 0.14.0                    |
-| main        | 0.14.0                    |
+| 0.15.1      | 0.15.1                    |
+| main        | 0.15.1                    |
 
 ## Features
 - Native Zig code, no external dependencies
