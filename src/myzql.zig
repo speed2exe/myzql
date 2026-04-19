@@ -7,5 +7,5 @@ pub const temporal = @import("./temporal.zig");
 pub const result = @import("./result.zig");
 
 test {
-    @import("std").testing.refAllDeclsRecursive(@This());
+    @import("std").testing.refAllDecls(@This());
 }

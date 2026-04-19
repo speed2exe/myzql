@@ -5,8 +5,8 @@ const constants = @import("./constants.zig");
 pub const Config = struct {
     /// MySQL username. Default: "root"
     username: [:0]const u8 = "root",
-    /// Server address. Default: 127.0.0.1:3306
-    address: std.net.Address = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306),
+    /// Server address. Default: 127.0.0.1:3306 (IPv4)
+    address: Address = .{ .ip = std.Io.net.IpAddress.parseLiteral("127.0.0.1:3306") catch unreachable },
     /// MySQL password. Default: ""
     password: []const u8 = "",
     /// Default database to use. Default: ""
@@ -43,4 +43,9 @@ pub const Config = struct {
         }
         return flags;
     }
+};
+
+pub const Address = union(enum) {
+    ip: std.Io.net.IpAddress,
+    unix: std.Io.net.UnixAddress,
 };

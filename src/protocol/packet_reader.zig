@@ -3,26 +3,20 @@ const utils = @import("./utils.zig");
 const Packet = @import("./packet.zig");
 
 pub const PacketReader = struct {
-    stream: std.net.Stream,
+    socket: std.Io.net.Socket,
     allocator: std.mem.Allocator,
 
-    // valid buffer read from network but yet to consume to create packet:
-    // buf[pos..len]
-    buf: []u8,
-    pos: usize,
-    len: usize,
+    buf: []u8, // internal buffer
+    pos: usize, // unread data starts from pos
+    len: usize, // unread data ends at len, so unread data is in buf[pos..len]
 
-    // if in one read, the buffer is filled, we should double the buffer size
-    should_double_buf: bool,
-
-    pub fn init(stream: std.net.Stream, allocator: std.mem.Allocator) !PacketReader {
+    pub fn init(allocator: std.mem.Allocator, socket: std.Io.net.Socket) !PacketReader {
         return .{
             .buf = &.{},
-            .stream = stream,
+            .socket = socket,
             .allocator = allocator,
             .pos = 0,
             .len = 0,
-            .should_double_buf = false,
         };
     }
 
@@ -31,13 +25,13 @@ pub const PacketReader = struct {
     }
 
     // invalidates the last packet returned
-    pub fn readPacket(p: *PacketReader) !Packet.Packet {
+    pub fn readPacket(p: *PacketReader, io: std.Io) !Packet.Packet {
         if (p.pos == p.len) {
             p.pos = 0;
             p.len = 0;
-            try p.readToBufferAtLeast(4);
+            try p.readToBufferAtLeast(io, 4);
         } else if (p.len - p.pos < 4) {
-            try p.readToBufferAtLeast(4);
+            try p.readToBufferAtLeast(io, 4);
         }
 
         // Packet header
@@ -48,7 +42,7 @@ pub const PacketReader = struct {
         { // read more bytes from network if required
             const n_valid_unread = p.len - p.pos;
             if (n_valid_unread < payload_length) {
-                try p.readToBufferAtLeast(payload_length - n_valid_unread);
+                try p.readToBufferAtLeast(io, payload_length - n_valid_unread);
             }
         }
 
@@ -62,17 +56,34 @@ pub const PacketReader = struct {
         };
     }
 
-    fn readToBufferAtLeast(p: *PacketReader, at_least: usize) !void {
+    // read at least `at_least` bytes from network into the internal buffer
+    fn readToBufferAtLeast(p: *PacketReader, io: std.Io, at_least: usize) !void {
         try p.expandBufIfNeeded(at_least);
-        const n = try p.stream.readAtLeast(p.buf[p.len..], at_least);
+        const n = try p.readAtLeast(io, at_least);
         if (n == 0) {
             return error.UnexpectedEndOfStream;
+        }
+        if (n < at_least) {
+            return error.ShortRead;
         }
 
         p.len += n;
         if (n >= p.buf.len / 2) {
-            p.should_double_buf = true;
+            // TODO: should doubles the buffer
         }
+    }
+
+    fn readAtLeast(p: *PacketReader, io: std.Io, at_least: usize) !usize {
+        var total_read: usize = 0;
+        while (total_read < at_least) {
+            const msg = try p.socket.receive(io, p.buf[p.len + total_read ..]);
+            const n = msg.data.len;
+            if (n == 0) {
+                break;
+            }
+            total_read += n;
+        }
+        return total_read;
     }
 
     fn moveRemainingDataToBeginning(p: *PacketReader) void {
@@ -99,27 +110,22 @@ pub const PacketReader = struct {
 
         // possible to move remaining data to the beginning of the buffer
         // such that it will be enough?
-        if (!p.should_double_buf) {
-            // move remaining data to the beginning of the buffer
-            const unused = p.buf.len - n_remain;
-            if (unused >= req_n) {
-                p.moveRemainingDataToBeginning();
-                return;
-            }
+        const unused = p.buf.len - n_remain;
+        if (unused >= req_n) {
+            p.moveRemainingDataToBeginning();
+            return;
         }
 
-        const new_len = blk: {
-            var current = p.buf.len;
-            if (p.should_double_buf) {
-                current *= 2;
-                p.should_double_buf = false;
-            }
-            break :blk utils.nextPowerOf2(@truncate(req_n + current));
-        };
+        const new_len = utils.nextPowerOf2(@truncate(req_n + p.buf.len));
 
         // try resize
         if (p.allocator.resize(p.buf, new_len)) {
             p.buf = p.buf[0..new_len];
+            // after resizing, buf wil look like this: [...[valid data][X]]
+            if ((p.buf.len - p.len) >= req_n) {
+                // if X is large enough, we don't need to move data
+                return;
+            }
             p.moveRemainingDataToBeginning();
             return;
         }

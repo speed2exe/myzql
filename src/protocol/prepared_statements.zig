@@ -538,7 +538,7 @@ test "writeNullBitmap" {
         var fake_packet_writer: PacketWriter = .{
             .buf = &buf,
             .pos = 0,
-            .stream = undefined,
+            .socket = undefined,
             .allocator = std.testing.allocator,
         };
         fake_packet_writer =
