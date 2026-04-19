@@ -3,6 +3,7 @@ const myzql = @import("myzql");
 const Conn = myzql.conn.Conn;
 const test_config = @import("./config.zig").test_config;
 const test_config_with_db = @import("./config.zig").test_config_with_db;
+const build_options = @import("build_options");
 const test_config_unix = @import("./config.zig").test_config_unix;
 const ErrorPacket = myzql.protocol.generic_response.ErrorPacket;
 const minInt = std.math.minInt;
@@ -40,7 +41,8 @@ test "ping" {
 }
 
 test "ping unix socket" {
-    var c = try Conn.init(allocator, io, &test_config_unix);
+    const cfg = test_config_unix orelse return error.SkipZigTest;
+    var c = try Conn.init(allocator, io, &cfg);
     defer c.deinit(allocator, io);
     try c.ping(io);
 }

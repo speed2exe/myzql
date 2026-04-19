@@ -54,12 +54,8 @@ pub const Conn = struct {
     /// Lifetime of `Conn` must be within the lifetime of `config` since some fields in `config` are referenced directly.
     pub fn init(allocator: Allocator, io: Io, config: *const Config) !Conn {
         var conn: Conn = blk: {
-            var ip_address: *const Io.net.IpAddress = undefined;
             const stream = switch (config.address) {
-                .ip => ip: {
-                    ip_address = &config.address.ip;
-                    break :ip try config.address.ip.connect(io, .{ .mode = .stream });
-                },
+                .ip => try config.address.ip.connect(io, .{ .mode = .stream }),
                 .unix => try config.address.unix.connect(io),
             };
 
@@ -67,7 +63,7 @@ pub const Conn = struct {
                 .connected = true,
                 .stream = stream,
                 .reader = try PacketReader.init(allocator, stream.socket),
-                .writer = try PacketWriter.init(allocator, ip_address, stream.socket),
+                .writer = try PacketWriter.init(allocator, stream.socket),
                 .capabilities = undefined, // not known until we get the first packet
                 .sequence_id = undefined, // not known until we get the first packet
 

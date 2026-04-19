@@ -12,9 +12,7 @@ pub const test_config_with_db: Config = .{
     .database = "mysql",
 };
 
-pub const test_config_unix: Config = if (build_options.unix_socket_path) |path| .{
+pub const test_config_unix: ?Config = if (build_options.unix_socket_path) |path| .{
     .password = "password",
     .address = .{ .unix = std.Io.net.UnixAddress.init(path) catch unreachable },
-} else .{
-    .password = "password",
-};
+} else null;

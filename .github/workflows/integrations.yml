@@ -35,7 +35,7 @@ jobs:
           mkdir -p /tmp/mysql
           docker run --name mysql_server_unix --env MYSQL_ROOT_PASSWORD=password -v /tmp/mysql:/var/run/mysqld -d mysql
           while ! test -S /tmp/mysql/mysqld.sock; do sleep 1; docker ps -a; done
-          zig build integration_test -Dunix-socket-path=/tmp/mysql/mysqld.sock --summary all
+          zig build integration_test -Dunix-socket-path=/tmp/mysql/mysqld.sock -Dtest-filter="unix socket" --summary all
           rm -rf zig-cache/ zig-out/
 
       # - name: Auth Test
