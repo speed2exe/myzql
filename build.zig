@@ -29,6 +29,11 @@ pub fn build(b: *std.Build) void {
     const unit_test_step = b.step("unit_test", "Run unit tests");
     unit_test_step.dependOn(&run_unit_tests.step);
 
+    // -Dunix-socket-path="/path/to/mysqld.sock"
+    const unix_socket_path = b.option([]const u8, "unix-socket-path", "Path to MySQL Unix domain socket for integration tests");
+    const integration_test_opts = b.addOptions();
+    integration_test_opts.addOption(?[]const u8, "unix_socket_path", unix_socket_path);
+
     // zig build -Dtest-filter="..." integration_test
     const integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -38,6 +43,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     integration_tests.root_module.addImport("myzql", myzql);
+    integration_tests.root_module.addOptions("build_options", integration_test_opts);
     if (test_filter) |t| integration_tests.filters = t;
 
     // zig build [install]

@@ -54,20 +54,16 @@ pub const Conn = struct {
     /// Lifetime of `Conn` must be within the lifetime of `config` since some fields in `config` are referenced directly.
     pub fn init(allocator: Allocator, io: Io, config: *const Config) !Conn {
         var conn: Conn = blk: {
-            var ip_address: *const Io.net.IpAddress = undefined;
             const stream = switch (config.address) {
-                .ip => ip: {
-                    ip_address = &config.address.ip;
-                    break :ip try config.address.ip.connect(io, .{ .mode = .stream });
-                },
+                .ip => try config.address.ip.connect(io, .{ .mode = .stream }),
                 .unix => try config.address.unix.connect(io),
             };
 
             break :blk .{
                 .connected = true,
                 .stream = stream,
-                .reader = try PacketReader.init(allocator, stream.socket),
-                .writer = try PacketWriter.init(allocator, ip_address, stream.socket),
+                .reader = try PacketReader.init(allocator, stream),
+                .writer = try PacketWriter.init(allocator, stream),
                 .capabilities = undefined, // not known until we get the first packet
                 .sequence_id = undefined, // not known until we get the first packet
 
@@ -281,21 +277,20 @@ pub const Conn = struct {
                     switch (more_data[0]) {
                         auth.caching_sha2_password_fast_auth_success => {}, // success (do nothing, wait for next packet)
                         auth.caching_sha2_password_full_authentication_start => {
-                            // Full Authentication start
-
-                            // TODO: support TLS
-                            // // if TLS, send password as plain text
-                            // try conn.sendBytesAsPacket(config.password);
-
+                            // Request RSA public key from server.
+                            // On unix socket (secure channel), MySQL responds with OK directly instead
+                            // of sending an RSA key — the connection is already trusted.
                             try c.writeBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
                             try c.writer.flush(io);
                             const pk_packet = try c.readPacket(io);
 
-                            // Decode public key
+                            // Unix socket / secure channel: server sends OK directly
+                            if (pk_packet.payload[0] == constants.OK) return;
+
+                            // TODO: support TLS (send plain text over TLS instead of RSA)
                             const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
                             defer decoded_pk.deinit(allocator);
 
-                            // Encrypt password
                             const enc_pw = try auth.encryptPassword(allocator, config.password, auth_data, &decoded_pk.value);
                             defer allocator.free(enc_pw);
 
