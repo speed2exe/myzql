@@ -278,25 +278,33 @@ pub const Conn = struct {
                         auth.caching_sha2_password_fast_auth_success => {}, // success (do nothing, wait for next packet)
                         auth.caching_sha2_password_full_authentication_start => {
                             // Full Authentication start
+                            // Unix socket and TLS connections are considered secure: send password as plain text.
+                            // Non-secure connections: request RSA public key and encrypt the password.
+                            switch (config.address) {
+                                .unix => {
+                                    const plain_pw = try allocator.alloc(u8, config.password.len + 1);
+                                    defer allocator.free(plain_pw);
+                                    @memcpy(plain_pw[0..config.password.len], config.password);
+                                    plain_pw[config.password.len] = 0;
+                                    try c.writeBytesAsPacket(plain_pw);
+                                    try c.writer.flush(io);
+                                },
+                                .ip => {
+                                    // TODO: support TLS (send plain text over TLS)
+                                    try c.writeBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
+                                    try c.writer.flush(io);
+                                    const pk_packet = try c.readPacket(io);
 
-                            // TODO: support TLS
-                            // // if TLS, send password as plain text
-                            // try conn.sendBytesAsPacket(config.password);
+                                    const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
+                                    defer decoded_pk.deinit(allocator);
 
-                            try c.writeBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
-                            try c.writer.flush(io);
-                            const pk_packet = try c.readPacket(io);
+                                    const enc_pw = try auth.encryptPassword(allocator, config.password, auth_data, &decoded_pk.value);
+                                    defer allocator.free(enc_pw);
 
-                            // Decode public key
-                            const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
-                            defer decoded_pk.deinit(allocator);
-
-                            // Encrypt password
-                            const enc_pw = try auth.encryptPassword(allocator, config.password, auth_data, &decoded_pk.value);
-                            defer allocator.free(enc_pw);
-
-                            try c.writeBytesAsPacket(enc_pw);
-                            try c.writer.flush(io);
+                                    try c.writeBytesAsPacket(enc_pw);
+                                    try c.writer.flush(io);
+                                },
+                            }
                         },
                         else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
