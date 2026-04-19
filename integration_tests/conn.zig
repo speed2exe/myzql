@@ -3,6 +3,7 @@ const myzql = @import("myzql");
 const Conn = myzql.conn.Conn;
 const test_config = @import("./config.zig").test_config;
 const test_config_with_db = @import("./config.zig").test_config_with_db;
+const test_config_unix = @import("./config.zig").test_config_unix;
 const ErrorPacket = myzql.protocol.generic_response.ErrorPacket;
 const minInt = std.math.minInt;
 const maxInt = std.math.maxInt;
@@ -34,6 +35,12 @@ fn queryExpectOkLogError(c: *Conn, query: []const u8) void {
 
 test "ping" {
     var c = try Conn.init(allocator, io, &test_config);
+    defer c.deinit(allocator, io);
+    try c.ping(io);
+}
+
+test "ping unix socket" {
+    var c = try Conn.init(allocator, io, &test_config_unix);
     defer c.deinit(allocator, io);
     try c.ping(io);
 }
