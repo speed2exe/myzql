@@ -11,11 +11,11 @@
 | 0.13.2      | 0.13.0                    |
 | 0.14.0      | 0.14.0                    |
 | 0.15.1      | 0.15.1                    |
-| main        | 0.15.1                    |
+| main        | 0.16.0                    |
 
 ## Features
 - Native Zig code, no external dependencies
-- TCP protocol
+- TCP and Unix socket connections
 - Prepared Statement
 - Structs from query result
 - Data insertion
@@ -63,28 +63,48 @@ or
 
 ### Connection
 ```zig
+const std = @import("std");
 const myzql = @import("myzql");
 const Conn = myzql.conn.Conn;
 
 pub fn main() !void {
-    // Setting up client
+    const io = std.Io.default();
+
+    // TCP connection (default)
     var client = try Conn.init(
         allocator,
+        io,
         &.{
             .username = "some-user",   // default: "root"
             .password = "password123", // default: ""
             .database = "customers",   // default: ""
 
-            // Current default value.
-            // Use std.net.getAddressList if you need to look up ip based on hostname
-            .address =  std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 3306),
-            // ...
+            // Default: 127.0.0.1:3306
+            .address = .{ .ip = std.Io.net.IpAddress.parseLiteral("127.0.0.1:3306") catch unreachable },
         },
     );
-    defer client.deinit(allocator);
+    defer client.deinit(allocator, io);
 
-    // Connection and Authentication
-    try client.ping();
+    try client.ping(io);
+}
+```
+
+### Unix Socket Connection
+```zig
+pub fn main() !void {
+    const io = std.Io.default();
+
+    var client = try Conn.init(
+        allocator,
+        io,
+        &.{
+            .password = "password123",
+            .address = .{ .unix = try std.Io.net.UnixAddress.init("/var/run/mysqld/mysqld.sock") },
+        },
+    );
+    defer client.deinit(allocator, io);
+
+    try client.ping(io);
 }
 ```
 
@@ -94,9 +114,10 @@ pub fn main() !void {
 const OkPacket = protocol.generic_response.OkPacket;
 
 pub fn main() !void {
+    const io = std.Io.default();
     // ...
     // You can do a text query (text protocol) by using `query` method on `Conn`
-    const result = try c.query("CREATE DATABASE testdb");
+    const result = try c.query(io, "CREATE DATABASE testdb");
 
     // Query results can have a few variant:
     // - ok:   OkPacket     => query is ok
@@ -130,7 +151,8 @@ const TextElems = myzql.result.TextElems;
 const TextElemIter = myzql.result.TextElemIter;
 
 pub fn main() !void {
-    const result = try c.queryRows(allocator, "SELECT * FROM customers.purchases");
+    const io = std.Io.default();
+    const result = try c.queryRows(allocator, io, "SELECT * FROM customers.purchases");
 
     // This is a query that returns rows, you have to collect the result.
     // you can use `expect(.rows)` to try interpret query result as ResultSet(TextResultRow)
@@ -158,7 +180,7 @@ pub fn main() !void {
     // You can also use `tableTexts` to collect all rows at once.
     // Under the hood, it does network calls and allocations, until EOF or error.
     // Results are valid until `deinit` is called on TableTexts.
-    const result = try c.queryRows(allocator, "SELECT * FROM customers.purchases");
+    const result = try c.queryRows(allocator, io, "SELECT * FROM customers.purchases");
     const rows: ResultSet(TextResultRow) = try result.expect(.rows);
     const table = try rows.tableTexts(allocator);
     defer table.deinit(allocator); // table is valid until deinit is called
@@ -182,9 +204,10 @@ const PreparedStatement = myzql.result.PreparedStatement;
 const OkPacket = myzql.protocol.generic_response.OkPacket;
 
 pub fn main() void {
+    const io = std.Io.default();
     // In order to do a insertion, you would first need to do a prepared statement.
     // Allocation is required as we need to store metadata of parameters and return type
-    const prep_res = try c.prepare(allocator, "INSERT INTO test.person (name, age) VALUES (?, ?)");
+    const prep_res = try c.prepare(allocator, io, "INSERT INTO test.person (name, age) VALUES (?, ?)");
     defer prep_res.deinit(allocator);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -194,7 +217,7 @@ pub fn main() void {
         .{ "Sam", 24 },
     };
     inline for (params) |param| {
-        const exe_res = try c.execute(&prep_stmt, param);
+        const exe_res = try c.execute(io, &prep_stmt, param);
         const ok: OkPacket = try exe_res.expect(.ok); // expecting ok here because there's no rows returned
         const last_insert_id: u64 = ok.last_insert_id;
         std.debug.print("last_insert_id: {any}\n", .{last_insert_id});
@@ -212,7 +235,8 @@ const BinaryResultRow = myzql.result.BinaryResultRow;
 const ResultSet = myzql.result.ResultSet;
 
 fn main() !void {
-    const prep_res = try c.prepare(allocator, "SELECT name, age FROM test.person");
+    const io = std.Io.default();
+    const prep_res = try c.prepare(allocator, io, "SELECT name, age FROM test.person");
     defer prep_res.deinit(allocator);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -223,7 +247,7 @@ fn main() !void {
     };
 
     { // Iterating over rows, scanning into struct or creating struct
-        const query_res = try c.executeRows(allocator, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try c.executeRows(allocator, io, &prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         while (try rows_iter.next()) |row| {
@@ -249,7 +273,7 @@ fn main() !void {
     }
 
     { // collect all rows into a table ([]const Person)
-        const query_res = try c.executeRows(allocator, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try c.executeRows(allocator, io, &prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         const person_structs = try rows_iter.tableStructs(Person, allocator);
@@ -276,8 +300,9 @@ const DateTime = myzql.temporal.DateTime;
 const Duration = myzql.temporal.Duration;
 
 fn main() !void {
+    const io = std.Io.default();
     { // Insert
-        const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?, ?)");
+        const prep_res = try c.prepare(allocator, io, "INSERT INTO test.temporal_types_example VALUES (?, ?)");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -299,7 +324,7 @@ fn main() !void {
         };
         const params = .{.{ my_time, my_duration }};
         inline for (params) |param| {
-            const exe_res = try c.execute(&prep_stmt, param);
+            const exe_res = try c.execute(io, &prep_stmt, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -309,10 +334,10 @@ fn main() !void {
             event_time: DateTime,
             duration: Duration,
         };
-        const prep_res = try c.prepare(allocator, "SELECT * FROM test.temporal_types_example");
+        const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.temporal_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try c.executeRows(allocator, &prep_stmt, .{});
+        const res = try c.executeRows(allocator, io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -335,8 +360,9 @@ CREATE TABLE test.array_types_example (
 
 ```zig
 fn main() !void {
+    const io = std.Io.default();
     { // Insert
-        const prep_res = try c.prepare(allocator, "INSERT INTO test.array_types_example VALUES (?, ?)");
+        const prep_res = try c.prepare(allocator, io, "INSERT INTO test.array_types_example VALUES (?, ?)");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -345,7 +371,7 @@ fn main() !void {
             .{ "Alice", null }
         };
         inline for (params) |param| {
-            const exe_res = try c.execute(&prep_stmt, param);
+            const exe_res = try c.execute(io, &prep_stmt, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -355,10 +381,10 @@ fn main() !void {
             name: [16:1]u8,
             mac_addr: ?[6]u8,
         };
-        const prep_res = try c.prepare(allocator, "SELECT * FROM test.array_types_example");
+        const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.array_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try c.executeRows(allocator, &prep_stmt, .{});
+        const res = try c.executeRows(allocator, io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -379,16 +405,29 @@ fn main() !void {
 ## Integration Tests
 - Start up mysql/mariadb in docker:
 ```bash
-# MySQL
+# MySQL (TCP)
 docker run --name some-mysql --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql
+```
+```bash
+# MySQL (Unix socket)
+mkdir -p /tmp/mysql
+docker run --name some-mysql-unix --env MYSQL_ROOT_PASSWORD=password -v /tmp/mysql:/var/run/mysqld -d mysql
 ```
 ```bash
 # MariaDB
 docker run --name some-mariadb --env MARIADB_ROOT_PASSWORD=password -p 3306:3306 -d mariadb
 ```
-- Run all the test: In root directory of project:
+- Run all the tests from the root directory of the project:
+```bash
+zig build integration_test --summary all
+```
+- Run with a filter:
 ```bash
 zig build -Dtest-filter="..." integration_test
+```
+- Run unix socket tests:
+```bash
+zig build integration_test -Dunix-socket-path=/tmp/mysql/mysqld.sock -Dtest-filter="unix socket" --summary all
 ```
 
 ## Philosophy
