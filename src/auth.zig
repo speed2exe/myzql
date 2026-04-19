@@ -54,7 +54,7 @@ pub fn decodePublicKey(encoded_bytes: []const u8, allocator: std.mem.Allocator) 
         break :blk std.mem.trim(u8, encoded_bytes[base64_start..base64_end], " \t\r\n");
     };
 
-    const dest = try allocator.alloc(u8, try base64.calcSizeUpperBound(base64_encoded.len));
+    const dest = try allocator.alloc(u8, base64.calcSizeUpperBound(base64_encoded.len));
     decoded_pk.allocated = dest;
     errdefer allocator.free(decoded_pk.allocated);
 
@@ -247,7 +247,9 @@ fn rsaEncryptOAEP(allocator: std.mem.Allocator, msg: []const u8, pk: *const Publ
     @memcpy(db[0..lHash.len], &lHash);
     db[db.len - msg.len - 1] = 1;
     @memcpy(db[db.len - msg.len ..], msg);
-    std.crypto.random.bytes(seed);
+
+    // not sure what this does and if it is required:
+    // std.crypto.random.bytes(seed);
 
     mgf1XOR(db, &init_hash, seed);
     mgf1XOR(seed, &init_hash, db);
