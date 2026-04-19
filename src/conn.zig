@@ -62,8 +62,8 @@ pub const Conn = struct {
             break :blk .{
                 .connected = true,
                 .stream = stream,
-                .reader = try PacketReader.init(allocator, stream.socket),
-                .writer = try PacketWriter.init(allocator, stream.socket),
+                .reader = try PacketReader.init(allocator, stream),
+                .writer = try PacketWriter.init(allocator, stream),
                 .capabilities = undefined, // not known until we get the first packet
                 .sequence_id = undefined, // not known until we get the first packet
 

@@ -5,17 +5,17 @@ pub const PacketWriter = struct {
     allocator: std.mem.Allocator,
     buf: []u8,
     pos: usize, // buf[0..pos]: buffer is written but not flushed
-    socket: std.Io.net.Socket,
+    stream: std.Io.net.Stream,
 
     pub fn init(
         allocator: std.mem.Allocator,
-        socket: std.Io.net.Socket,
+        stream: std.Io.net.Stream,
     ) !PacketWriter {
         return .{
             .allocator = allocator,
             .buf = &.{},
             .pos = 0,
-            .socket = socket,
+            .stream = stream,
         };
     }
 
@@ -62,7 +62,7 @@ pub const PacketWriter = struct {
         var written: usize = 0;
         const data = p.buf[0..p.pos];
         while (written < data.len) {
-            written += try io.vtable.netWrite(io.userdata, p.socket.handle, data[written..], &.{""}, 0);
+            written += try io.vtable.netWrite(io.userdata, p.stream.socket.handle, data[written..], &.{""}, 0);
         }
         p.pos = 0;
     }

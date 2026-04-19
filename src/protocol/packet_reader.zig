@@ -3,17 +3,17 @@ const utils = @import("./utils.zig");
 const Packet = @import("./packet.zig");
 
 pub const PacketReader = struct {
-    socket: std.Io.net.Socket,
+    stream: std.Io.net.Stream,
     allocator: std.mem.Allocator,
 
     buf: []u8, // internal buffer
     pos: usize, // unread data starts from pos
     len: usize, // unread data ends at len, so unread data is in buf[pos..len]
 
-    pub fn init(allocator: std.mem.Allocator, socket: std.Io.net.Socket) !PacketReader {
+    pub fn init(allocator: std.mem.Allocator, stream: std.Io.net.Stream) !PacketReader {
         return .{
             .buf = &.{},
-            .socket = socket,
+            .stream = stream,
             .allocator = allocator,
             .pos = 0,
             .len = 0,
@@ -76,8 +76,7 @@ pub const PacketReader = struct {
     fn readAtLeast(p: *PacketReader, io: std.Io, at_least: usize) !usize {
         var total_read: usize = 0;
         while (total_read < at_least) {
-            const msg = try p.socket.receive(io, p.buf[p.len + total_read ..]);
-            const n = msg.data.len;
+            const n = try io.vtable.netRead(io.userdata, p.stream.socket.handle, @constCast(&[1][]u8{p.buf[p.len + total_read ..]}));
             if (n == 0) {
                 break;
             }
