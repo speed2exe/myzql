@@ -62,7 +62,7 @@ pub const PacketWriter = struct {
         var written: usize = 0;
         const data = p.buf[0..p.pos];
         while (written < data.len) {
-            written += try io.vtable.netWrite(io.userdata, p.socket.handle, data[written..], &.{}, 0);
+            written += try io.vtable.netWrite(io.userdata, p.socket.handle, data[written..], &.{""}, 0);
         }
         p.pos = 0;
     }
