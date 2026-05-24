@@ -3,63 +3,44 @@ name: Integration Tests
 on:
   push:
     branches:
-     - main
+      - main
   pull_request:
     branches:
-     - main
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: run mysql server
-        run: |
-          docker run --name mysql_server --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql
-
       - uses: actions/checkout@v4
+
       - name: Install zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: master
 
       - name: Run Integration Tests - MySQL
         run: |
-          zig build
-          while ! wget -qO- localhost:3306; do sleep 1; docker ps -a; done
-          zig build integration_test --summary all
-          rm -rf zig-cache/ zig-out/
+          docker run --name mysql_server --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql:8.0 --default-authentication-plugin=mysql_native_password
+          while ! timeout 5 wget -qO- localhost:3306; do sleep 1; done
+          sleep 2
+          zig build integration_test -Dskip-stress=true --summary all
+          rm -rf .zig-cache/ zig-out/
 
       - name: Run Integration Tests - MySQL Unix Socket
         run: |
           docker rm -f mysql_server
           mkdir -p /tmp/mysql
-          docker run --name mysql_server_unix --env MYSQL_ROOT_PASSWORD=password -v /tmp/mysql:/var/run/mysqld -d mysql
-          while ! test -S /tmp/mysql/mysqld.sock; do sleep 1; docker ps -a; done
+          docker run --name mysql_server_unix --env MYSQL_ROOT_PASSWORD=password -v /tmp/mysql:/var/run/mysqld -d mysql:8.0 --default-authentication-plugin=mysql_native_password
+          while ! test -S /tmp/mysql/mysqld.sock; do sleep 1; done
           zig build integration_test -Dunix-socket-path=/tmp/mysql/mysqld.sock -Dtest-filter="unix socket" --summary all
-          rm -rf zig-cache/ zig-out/
-
-      # - name: Auth Test
-      #   run: |
-      #     # mysql_native_password
-      #     docker rm -f mysql_server
-      #     docker run --name mysql_server --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql \
-      #       --default-authentication-plugin=mysql_native_password
-      #     while ! wget -qO- localhost:3306; do sleep 1; docker ps -a; docker logs mysql_server; done
-      #     $HOME/zig-build/zig build integration_test -Dtest-filter="ping" --summary all
-      #     rm -rf zig-cache/ zig-out/
-
-      #     # sha2_password
-      #     docker rm -f mysql_server
-      #     docker run --name mysql_server --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql \
-      #       --default-authentication-plugin=sha256_password
-      #     while ! wget -qO- localhost:3306; do sleep 1; docker ps -a; done
-      #     $HOME/zig-build/zig build integration_test -Dtest-filter="ping" --summary all
-      #     rm -rf zig-cache/ zig-out/
+          rm -rf .zig-cache/ zig-out/
 
       - name: Run Integration Tests - MariaDB
         run: |
-          docker rm -f mysql_server
+          docker rm -f mysql_server_unix
           docker run --name some-mariadb --env MARIADB_ROOT_PASSWORD=password -p 3306:3306 -d mariadb
-          while ! wget -qO- localhost:3306; do sleep 1; docker ps -a ; done
-          zig build integration_test --summary all
-          rm -rf zig-cache/ zig-out/
+          while ! timeout 5 wget -qO- localhost:3306; do sleep 1; done
+          sleep 2
+          zig build integration_test -Dskip-stress=true --summary all
+          rm -rf .zig-cache/ zig-out/

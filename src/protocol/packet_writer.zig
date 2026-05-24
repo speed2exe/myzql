@@ -3,19 +3,18 @@ const utils = @import("./utils.zig");
 
 pub const PacketWriter = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
+    stream: std.Io.net.Stream,
     buf: []u8,
     pos: usize, // buf[0..pos]: buffer is written but not flushed
-    stream: std.Io.net.Stream,
 
-    pub fn init(
-        allocator: std.mem.Allocator,
-        stream: std.Io.net.Stream,
-    ) !PacketWriter {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, stream: std.Io.net.Stream) !PacketWriter {
         return .{
             .allocator = allocator,
+            .io = io,
+            .stream = stream,
             .buf = &.{},
             .pos = 0,
-            .stream = stream,
         };
     }
 
@@ -58,12 +57,9 @@ pub const PacketWriter = struct {
     }
 
     // flush the buffer to the stream
-    pub inline fn flush(p: *PacketWriter, io: std.Io) !void {
-        var written: usize = 0;
+    pub inline fn flush(p: *PacketWriter) !void {
         const data = p.buf[0..p.pos];
-        while (written < data.len) {
-            written += try io.vtable.netWrite(io.userdata, p.stream.socket.handle, data[written..], &.{""}, 0);
-        }
+        _ = try p.io.vtable.netWrite(p.io.userdata, p.stream.socket.handle, &.{}, &.{data}, 1);
         p.pos = 0;
     }
 
@@ -150,7 +146,7 @@ pub const PacketWriter = struct {
         }
 
         const target_len = w.buf.len + req_n;
-        const new_len = utils.nextPowerOf2(@truncate(target_len));
+        const new_len = utils.nextPowerOf2(@intCast(target_len));
 
         // try resize
         if (w.allocator.resize(w.buf, new_len)) {
@@ -164,29 +160,3 @@ pub const PacketWriter = struct {
         w.buf = new_buf;
     }
 };
-
-// pub fn lengthEncodedStringPayloadSize(str_len: usize) u24 {
-//     var str_len_24: u24 = @intCast(str_len);
-//     if (str_len < 251) {
-//         str_len_24 += 1;
-//     } else if (str_len < 1 << 16) {
-//         str_len_24 += 3;
-//     } else if (str_len < 1 << 24) {
-//         str_len_24 += 4;
-//     } else if (str_len < 1 << 64) {
-//         str_len_24 += 9;
-//     } else unreachable;
-//     return str_len_24;
-// }
-
-// pub fn lengthEncodedIntegerPayloadSize(v: u64) u24 {
-//     if (v < 251) {
-//         return 1;
-//     } else if (v < 1 << 16) {
-//         return 3;
-//     } else if (v < 1 << 24) {
-//         return 4;
-//     } else if (v < 1 << 64) {
-//         return 9;
-//     } else unreachable;
-// }

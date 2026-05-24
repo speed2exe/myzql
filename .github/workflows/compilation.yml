@@ -3,10 +3,10 @@ name: Compilation
 on:
   push:
     branches:
-     - main
+      - main
   pull_request:
     branches:
-     - main
+      - main
 
 jobs:
   build:
@@ -16,7 +16,7 @@ jobs:
       - name: Install zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: master
 
       - name: Build for Ubuntu
         run: |

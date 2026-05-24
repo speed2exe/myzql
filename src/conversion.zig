@@ -285,12 +285,12 @@ inline fn binElemToValue(
                             => {
                                 const str = reader.readLengthEncodedString();
                                 if (array.sentinel()) |sentinel| {
-                                    var ret: [array.len:sentinel]u8 = [_:sentinel]u8{sentinel} ** array.len;
+                                    var ret: [array.len:sentinel]u8 = @splat(sentinel);
                                     const min = @min(str.len, array.len);
                                     @memcpy(ret[0..min], str[0..min]);
                                     return ret;
                                 } else {
-                                    var ret: [array.len]u8 = [_]u8{0} ** array.len;
+                                    var ret: [array.len]u8 = @splat(@as(u8, 0));
                                     const min = @min(str.len, array.len);
                                     @memcpy(ret[0..min], str[0..min]);
                                     return ret;
