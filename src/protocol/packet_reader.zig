@@ -3,18 +3,19 @@ const utils = @import("./utils.zig");
 const Packet = @import("./packet.zig");
 
 pub const PacketReader = struct {
-    stream: std.Io.net.Stream,
     allocator: std.mem.Allocator,
-
+    stream: std.Io.net.Stream,
+    io: std.Io,
     buf: []u8, // internal buffer
     pos: usize, // unread data starts from pos
     len: usize, // unread data ends at len, so unread data is in buf[pos..len]
 
-    pub fn init(allocator: std.mem.Allocator, stream: std.Io.net.Stream) !PacketReader {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, stream: std.Io.net.Stream) !PacketReader {
         return .{
-            .buf = &.{},
-            .stream = stream,
             .allocator = allocator,
+            .io = io,
+            .stream = stream,
+            .buf = &.{},
             .pos = 0,
             .len = 0,
         };
@@ -25,13 +26,13 @@ pub const PacketReader = struct {
     }
 
     // invalidates the last packet returned
-    pub fn readPacket(p: *PacketReader, io: std.Io) !Packet.Packet {
+    pub fn readPacket(p: *PacketReader) !Packet.Packet {
         if (p.pos == p.len) {
             p.pos = 0;
             p.len = 0;
-            try p.readToBufferAtLeast(io, 4);
+            try p.readToBufferAtLeast(4);
         } else if (p.len - p.pos < 4) {
-            try p.readToBufferAtLeast(io, 4);
+            try p.readToBufferAtLeast(4);
         }
 
         // Packet header
@@ -42,7 +43,7 @@ pub const PacketReader = struct {
         { // read more bytes from network if required
             const n_valid_unread = p.len - p.pos;
             if (n_valid_unread < payload_length) {
-                try p.readToBufferAtLeast(io, payload_length - n_valid_unread);
+                try p.readToBufferAtLeast(payload_length - n_valid_unread);
             }
         }
 
@@ -57,9 +58,9 @@ pub const PacketReader = struct {
     }
 
     // read at least `at_least` bytes from network into the internal buffer
-    fn readToBufferAtLeast(p: *PacketReader, io: std.Io, at_least: usize) !void {
+    fn readToBufferAtLeast(p: *PacketReader, at_least: usize) !void {
         try p.expandBufIfNeeded(at_least);
-        const n = try p.readAtLeast(io, at_least);
+        const n = try p.readAtLeast(at_least);
         if (n == 0) {
             return error.UnexpectedEndOfStream;
         }
@@ -73,13 +74,12 @@ pub const PacketReader = struct {
         }
     }
 
-    fn readAtLeast(p: *PacketReader, io: std.Io, at_least: usize) !usize {
+    fn readAtLeast(p: *PacketReader, at_least: usize) !usize {
         var total_read: usize = 0;
         while (total_read < at_least) {
-            const n = try io.vtable.netRead(io.userdata, p.stream.socket.handle, @constCast(&[1][]u8{p.buf[p.len + total_read ..]}));
-            if (n == 0) {
-                break;
-            }
+            var bufs: [1][]u8 = .{p.buf[p.len + total_read ..]};
+            const n = try p.stream.read(p.io, &bufs);
+            if (n == 0) break;
             total_read += n;
         }
         return total_read;
@@ -115,7 +115,7 @@ pub const PacketReader = struct {
             return;
         }
 
-        const new_len = utils.nextPowerOf2(@truncate(req_n + p.buf.len));
+        const new_len = utils.nextPowerOf2(@intCast(req_n + p.buf.len));
 
         // try resize
         if (p.allocator.resize(p.buf, new_len)) {

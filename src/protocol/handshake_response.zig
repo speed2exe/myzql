@@ -34,7 +34,7 @@ pub const HandshakeResponse41 = struct {
 
         try writer.writeInt(u32, h.max_packet_size);
         try writer.writeInt(u8, h.character_set);
-        try writer.write(&([_]u8{0} ** 23)); // filler
+        try writer.write(&(@as([23]u8, @splat(0)))); // filler
         try writer.writeNullTerminatedString(h.username);
 
         if ((h.client_flag & constants.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) > 0) {

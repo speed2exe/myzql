@@ -65,8 +65,8 @@ pub fn QueryResultRows(comptime T: type) type {
         rows: ResultSet(T),
 
         // allocation happens when a result set is returned
-        pub fn init(c: *Conn, allocator: Allocator, io: Io) !QueryResultRows(T) {
-            const packet = try c.readPacket(io);
+        pub fn init(c: *Conn, allocator: Allocator) !QueryResultRows(T) {
+            const packet = try c.readPacket();
             return switch (packet.payload[0]) {
                 constants.OK => {
                     std.log.warn(
@@ -77,7 +77,7 @@ pub fn QueryResultRows(comptime T: type) type {
                 },
                 constants.ERR => .{ .err = ErrorPacket.init(&packet) },
                 constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-                else => .{ .rows = try ResultSet(T).init(c, allocator, io, &packet) },
+                else => .{ .rows = try ResultSet(T).init(c, allocator, &packet) },
             };
         }
 
@@ -118,12 +118,12 @@ pub fn ResultSet(comptime T: type) type {
         conn: *Conn,
         col_defs: []const ColumnDefinition41,
 
-        pub fn init(conn: *Conn, allocator: Allocator, io: Io, packet: *const Packet) !ResultSet(T) {
+        pub fn init(conn: *Conn, allocator: Allocator, packet: *const Packet) !ResultSet(T) {
             var reader = packet.reader();
             const n_columns = reader.readLengthEncodedInteger();
             std.debug.assert(reader.finished());
 
-            try conn.readPutResultColumns(allocator, io, n_columns);
+            try conn.readPutResultColumns(allocator, n_columns);
 
             return .{
                 .conn = conn,
@@ -139,28 +139,28 @@ pub fn ResultSet(comptime T: type) type {
             allocator.free(r.col_defs);
         }
 
-        pub fn readRow(r: *const ResultSet(T), io: Io) !ResultRow(T) {
-            return ResultRow(T).init(io, r.conn, r.col_defs);
+        pub fn readRow(r: *const ResultSet(T)) !ResultRow(T) {
+            return ResultRow(T).init(r.conn, r.col_defs);
         }
 
         /// Collect all text result rows into a `TableTexts` struct.
         /// Allocates memory; caller must call `deinit` on the returned value.
-        pub fn tableTexts(r: *ResultSet(TextResultRow), allocator: Allocator, io: Io) !TableTexts {
-            var all_rows = try collectAllRowsPacketUntilEof(r.conn, allocator, io);
+        pub fn tableTexts(r: *ResultSet(TextResultRow), allocator: Allocator) !TableTexts {
+            var all_rows = try collectAllRowsPacketUntilEof(r.conn, allocator);
             errdefer deinitOwnedPacketList(allocator, &all_rows);
             return try TableTexts.init(all_rows, allocator, r.col_defs.len);
         }
 
         /// Return the first row of the result set, draining remaining rows.
         /// Returns `null` if the result set is empty.
-        pub fn first(r: *const ResultSet(T), io: Io) !?T {
-            const row_res = try r.readRow(io);
+        pub fn first(r: *const ResultSet(T)) !?T {
+            const row_res = try r.readRow();
             return switch (row_res) {
                 .ok => null,
                 .err => |err| err.asError(),
                 .row => |row| blk: {
                     const i = r.iter();
-                    while (try i.next(io)) |_| {}
+                    while (try i.next()) |_| {}
                     break :blk row;
                 },
             };
@@ -298,8 +298,8 @@ pub fn ResultRow(comptime T: type) type {
         ok: OkPacket,
         row: T,
 
-        fn init(io: Io, conn: *Conn, col_defs: []const ColumnDefinition41) !ResultRow(T) {
-            const packet = try conn.readPacket(io);
+        fn init(conn: *Conn, col_defs: []const ColumnDefinition41) !ResultRow(T) {
+            const packet = try conn.readPacket();
             return switch (packet.payload[0]) {
                 constants.ERR => .{ .err = ErrorPacket.init(&packet) },
                 constants.EOF => .{ .ok = OkPacket.init(&packet, conn.capabilities) },
@@ -338,13 +338,13 @@ fn deinitOwnedPacketList(allocator: Allocator, packet_list: *std.ArrayList(Packe
     packet_list.deinit(allocator);
 }
 
-fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: Allocator, io: Io) !std.ArrayList(Packet) {
+fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: Allocator) !std.ArrayList(Packet) {
     var packet_list: std.ArrayList(Packet) = .empty;
     errdefer deinitOwnedPacketList(allocator, &packet_list);
 
     // Accumulate all packets until EOF
     while (true) {
-        const packet = try conn.readPacket(io);
+        const packet = try conn.readPacket();
         return switch (packet.payload[0]) {
             constants.ERR => ErrorPacket.init(&packet).asError(),
             constants.EOF => {
@@ -367,11 +367,11 @@ pub const PrepareResult = union(enum) {
     err: ErrorPacket,
     stmt: PreparedStatement,
 
-    pub fn init(c: *Conn, allocator: Allocator, io: Io) !PrepareResult {
-        const response_packet = try c.readPacket(io);
+    pub fn init(c: *Conn, allocator: Allocator) !PrepareResult {
+        const response_packet = try c.readPacket();
         return switch (response_packet.payload[0]) {
             constants.ERR => .{ .err = ErrorPacket.init(&response_packet) },
-            constants.OK => .{ .stmt = try PreparedStatement.init(&response_packet, c, allocator, io) },
+            constants.OK => .{ .stmt = try PreparedStatement.init(&response_packet, c, allocator) },
             else => return response_packet.asError(),
         };
     }
@@ -418,7 +418,7 @@ pub const PreparedStatement = struct {
     /// Result column definitions (columns returned by the query).
     res_cols: []const ColumnDefinition41,
 
-    pub fn init(ok_packet: *const Packet, conn: *Conn, allocator: Allocator, io: Io) !PreparedStatement {
+    pub fn init(ok_packet: *const Packet, conn: *Conn, allocator: Allocator) !PreparedStatement {
         const prep_ok = PrepareOk.init(ok_packet, conn.capabilities);
 
         const col_count = prep_ok.num_params + prep_ok.num_columns;
@@ -436,7 +436,7 @@ pub const PreparedStatement = struct {
         errdefer allocator.free(col_defs);
 
         for (packets, col_defs) |*packet, *col_def| {
-            packet.* = try (try conn.readPacket(io)).cloneAlloc(allocator);
+            packet.* = try (try conn.readPacket()).cloneAlloc(allocator);
             col_def.* = ColumnDefinition41.init(packet);
         }
 
@@ -468,8 +468,8 @@ pub fn ResultRowIter(comptime T: type) type {
 
         /// Advance the iterator and return the next row, or `null` at end-of-results.
         /// Returns an error if the server sends an error packet.
-        pub fn next(iter: *const ResultRowIter(T), io: Io) !?T {
-            const row_res = try iter.result_set.readRow(io);
+        pub fn next(iter: *const ResultRowIter(T)) !?T {
+            const row_res = try iter.result_set.readRow();
             return switch (row_res) {
                 .ok => return null,
                 .err => |err| err.asError(),
@@ -480,8 +480,8 @@ pub fn ResultRowIter(comptime T: type) type {
         /// Collect all remaining rows into a `TableStructs(Struct)`.
         /// Allocates memory; caller must call `deinit` on the returned value.
         /// Only available when T is `BinaryResultRow`.
-        pub fn tableStructs(iter: *const ResultRowIter(BinaryResultRow), comptime Struct: type, allocator: Allocator, io: Io) !TableStructs(Struct) {
-            return TableStructs(Struct).init(iter, allocator, io);
+        pub fn tableStructs(iter: *const ResultRowIter(BinaryResultRow), comptime Struct: type, allocator: Allocator) !TableStructs(Struct) {
+            return TableStructs(Struct).init(iter, allocator);
         }
     };
 }
@@ -544,9 +544,9 @@ pub fn TableStructs(comptime Struct: type) type {
     return struct {
         struct_list: std.ArrayList(Struct),
 
-        pub fn init(iter: *const ResultRowIter(BinaryResultRow), allocator: Allocator, io: Io) !TableStructs(Struct) {
+        pub fn init(iter: *const ResultRowIter(BinaryResultRow), allocator: Allocator) !TableStructs(Struct) {
             var struct_list: std.ArrayList(Struct) = .empty;
-            while (try iter.next(io)) |row| {
+            while (try iter.next()) |row| {
                 const new_struct_ptr = try struct_list.addOne(allocator);
                 try conversion.scanBinResultRow(new_struct_ptr, &row.packet, row.col_defs, allocator);
             }

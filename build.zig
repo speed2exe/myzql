@@ -31,12 +31,16 @@ pub fn build(b: *std.Build) void {
 
     // -Dunix-socket-path="/path/to/mysqld.sock"
     const unix_socket_path = b.option([]const u8, "unix-socket-path", "Path to MySQL Unix domain socket for integration tests");
+    // -Dskip-stress=true (skip 16M-row stress test, useful for CI)
+    const skip_stress = b.option(bool, "skip-stress", "Skip the stress test (heavy, 16M rows)") orelse false;
     const integration_test_opts = b.addOptions();
     integration_test_opts.addOption(?[]const u8, "unix_socket_path", unix_socket_path);
+    integration_test_opts.addOption(bool, "skip_stress", skip_stress);
 
     // zig build -Dtest-filter="..." integration_test
     const integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
+            .link_libc = true,
             .root_source_file = b.path("./integration_tests/main.zig"),
             .target = target,
             .optimize = optimize,
