@@ -273,8 +273,8 @@ pub const BinaryResultRow = struct {
 
     fn structFreeDynamic(s: anytype, allocator: Allocator) void {
         const s_ti = @typeInfo(@TypeOf(s)).@"struct";
-        inline for (s_ti.fields) |field| {
-            structFreeStr(field.type, @field(s, field.name), allocator);
+        inline for (s_ti.field_names, s_ti.field_types) |field_name, field_type| {
+            structFreeStr(field_type, @field(s, field_name), allocator);
         }
     }
 
