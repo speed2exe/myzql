@@ -150,6 +150,7 @@ pub const PacketWriter = struct {
 
         // try resize
         if (w.allocator.resize(w.buf, new_len)) {
+            w.buf.len = new_len;
             return;
         }
 

@@ -3,3 +3,4 @@ zig-cache/
 zig-out/
 logs_*/
 .DS_Store
+error.log
