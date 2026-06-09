@@ -18,31 +18,32 @@ pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const 
     const null_bitmap = reader.readRefRuntime(null_bitmap_len);
 
     const child_type = @typeInfo(@TypeOf(dest)).pointer.child;
-    const struct_fields = @typeInfo(child_type).@"struct".fields;
+    const struct_field_names = @typeInfo(child_type).@"struct".field_names;
+    const struct_field_types = @typeInfo(child_type).@"struct".field_types;
 
-    if (struct_fields.len != col_defs.len) {
-        std.log.err("received {d} columns from mysql, but given {d} fields for struct", .{ struct_fields.len, col_defs.len });
+    if (struct_field_names.len != struct_field_types.len and (struct_field_names != col_defs.len)) {
+        std.log.err("received {d} columns from mysql, but given {d} fields for struct", .{ struct_field_names.len, col_defs.len });
         return error.ColumnAndFieldCountMismatch;
     }
 
-    inline for (struct_fields, col_defs, 0..) |field, col_def, i| {
-        const field_info = @typeInfo(field.type);
+    inline for (struct_field_names, struct_field_types, col_defs, 0..) |field_name, field_type, col_def, i| {
+        const field_info = @typeInfo(field_type);
         const isNull = binResIsNull(null_bitmap, i);
 
         switch (field_info) {
             .optional => {
                 if (isNull) {
-                    @field(dest, field.name) = null;
+                    @field(dest, field_name) = null;
                 } else {
-                    @field(dest, field.name) = try binElemToValue(field_info.optional.child, field.name, &col_def, &reader, allocator);
+                    @field(dest, field_name) = try binElemToValue(field_info.optional.child, field_name, &col_def, &reader, allocator);
                 }
             },
             else => {
                 if (isNull) {
-                    std.log.err("column: {s} value is null, but field: {s} is not nullable\n", .{ col_def.name, field.name });
+                    std.log.err("column: {s} value is null, but field: {s} is not nullable\n", .{ col_def.name, field_name });
                     return error.UnexpectedNullMySQLValue;
                 }
-                @field(dest, field.name) = try binElemToValue(field.type, field.name, &col_def, &reader, allocator);
+                @field(dest, field_name) = try binElemToValue(field_type, field_name, &col_def, &reader, allocator);
             },
         }
     }
@@ -198,9 +199,9 @@ inline fn binElemToValue(
                 .MYSQL_TYPE_NEWDECIMAL,
                 => {
                     const str = reader.readLengthEncodedString();
-                    inline for (e.fields) |f| {
-                        if (std.mem.eql(u8, str, f.name)) {
-                            return @field(FieldType, f.name);
+                    inline for (e.field_names) |f| {
+                        if (std.mem.eql(u8, str, f)) {
+                            return @field(FieldType, f);
                         }
                     }
                     std.log.err(

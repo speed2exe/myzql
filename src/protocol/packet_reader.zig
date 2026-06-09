@@ -119,7 +119,7 @@ pub const PacketReader = struct {
 
         // try resize
         if (p.allocator.resize(p.buf, new_len)) {
-            p.buf = p.buf[0..new_len];
+            p.buf.len = new_len;
             // after resizing, buf wil look like this: [...[valid data][X]]
             if ((p.buf.len - p.len) >= req_n) {
                 // if X is large enough, we don't need to move data
