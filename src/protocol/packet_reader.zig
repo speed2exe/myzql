@@ -78,7 +78,7 @@ pub const PacketReader = struct {
         var total_read: usize = 0;
         while (total_read < at_least) {
             var bufs: [1][]u8 = .{p.buf[p.len + total_read ..]};
-            const n = try p.stream.read(p.io, &bufs);
+            const n = try p.io.vtable.netRead(p.io.userdata, p.stream.socket.handle, &bufs);
             if (n == 0) break;
             total_read += n;
         }
