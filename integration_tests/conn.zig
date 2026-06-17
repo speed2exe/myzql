@@ -282,6 +282,7 @@ test "prepare execute - first" {
         const expected = MyType{ .a = 1 };
 
         const first = try rows.first(allocator);
+        defer if (first) |f| f.deinit(allocator);
         try std.testing.expect(first != null);
 
         var value: MyType = undefined;
@@ -303,6 +304,7 @@ test "prepare execute - first" {
         const rows = try query_res.expect(.rows);
 
         const first = try rows.first(allocator);
+        defer if (first) |f| f.deinit(allocator);
         try std.testing.expectEqual(null, first);
         try c.ping();
     }

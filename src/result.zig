@@ -175,6 +175,7 @@ pub fn ResultSet(comptime T: type) type {
 
                     var owned_row = row;
                     owned_row.packet = cloned;
+                    owned_row.owned = true;
                     break :blk owned_row;
                 },
             };
@@ -195,6 +196,7 @@ pub fn ResultSet(comptime T: type) type {
 pub const TextResultRow = struct {
     packet: Packet,
     col_defs: []const ColumnDefinition41,
+    owned: bool = false,
 
     pub fn iter(t: *const TextResultRow) TextElemIter {
         return TextElemIter.init(&t.packet);
@@ -202,6 +204,10 @@ pub const TextResultRow = struct {
 
     pub fn textElems(t: *const TextResultRow, allocator: Allocator) !TextElems {
         return TextElems.init(&t.packet, allocator, t.col_defs.len);
+    }
+
+    pub fn deinit(t: *const TextResultRow, allocator: Allocator) void {
+        if (t.owned) t.packet.deinit(allocator);
     }
 };
 
@@ -260,6 +266,7 @@ fn scanTextResultRow(dest: []?[]const u8, packet: *const Packet) void {
 pub const BinaryResultRow = struct {
     packet: Packet,
     col_defs: []const ColumnDefinition41,
+    owned: bool = false,
 
     /// Scan the row into the struct pointed to by `dest`.
     /// String fields (`[]u8`, `[]const u8`) are shallow-copied and point into the row's
@@ -283,6 +290,10 @@ pub const BinaryResultRow = struct {
     pub fn structDestroy(s: anytype, allocator: Allocator) void {
         structFreeDynamic(s.*, allocator);
         allocator.destroy(s);
+    }
+
+    pub fn deinit(b: *const BinaryResultRow, allocator: Allocator) void {
+        if (b.owned) b.packet.deinit(allocator);
     }
 
     fn structFreeDynamic(s: anytype, allocator: Allocator) void {
