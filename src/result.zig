@@ -153,15 +153,29 @@ pub fn ResultSet(comptime T: type) type {
 
         /// Return the first row of the result set, draining remaining rows.
         /// Returns `null` if the result set is empty.
-        pub fn first(r: *const ResultSet(T)) !?T {
+        /// `allocator` is used to clone the first row's packet so it survives
+        /// the drain loop (which may reallocate the reader buffer).
+        /// The returned row's packet data is heap-allocated and valid for the
+        /// row's lifetime; a small amount of heap memory leaks when the row
+        /// goes out of scope.
+        pub fn first(r: *const ResultSet(T), allocator: Allocator) !?T {
             const row_res = try r.readRow();
             return switch (row_res) {
                 .ok => null,
                 .err => |err| err.asError(),
                 .row => |row| blk: {
+                    // Clone the first row's packet into owned memory before
+                    // draining remaining rows, which may reallocate/free the
+                    // reader buffer and invalidate the original packet payload.
+                    const cloned = try row.packet.cloneAlloc(allocator);
+                    errdefer allocator.free(cloned.payload);
+
                     const i = r.iter();
                     while (try i.next()) |_| {}
-                    break :blk row;
+
+                    var owned_row = row;
+                    owned_row.packet = cloned;
+                    break :blk owned_row;
                 },
             };
         }

@@ -304,7 +304,7 @@ test "prepare execute - first" {
 
         const expected = MyType{ .a = 1 };
 
-        const first = try rows.first();
+        const first = try rows.first(allocator);
         try std.testing.expect(first != null);
 
         var value: MyType = undefined;
@@ -325,7 +325,7 @@ test "prepare execute - first" {
         const query_res = try mc.executeRows(allocator, &prep_stmt, .{});
         const rows = try query_res.expect(.rows);
 
-        const first = try rows.first();
+        const first = try rows.first(allocator);
         try std.testing.expectEqual(null, first);
         try mc.ping();
     }
