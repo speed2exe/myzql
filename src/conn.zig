@@ -28,7 +28,8 @@ const TextResultRow = result.TextResultRow;
 const BinaryResultRow = result.BinaryResultRow;
 const ResultMeta = @import("./result_meta.zig").ResultMeta;
 
-const max_packet_size = 1 << 24 - 1;
+// Maximum allowed MySQL packet size (16MB - 1 bytes)
+const max_packet_size = (1 << 24) - 1;
 
 // TODO: make this adjustable during compile time
 const buffer_size: usize = 4096;
