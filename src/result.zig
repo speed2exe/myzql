@@ -10,6 +10,7 @@ const PayloadReader = protocol.packet.PayloadReader;
 const OkPacket = protocol.generic_response.OkPacket;
 const ErrorPacket = protocol.generic_response.ErrorPacket;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
+const PacketReader = protocol.packet_reader.PacketReader;
 const Conn = @import("./conn.zig").Conn;
 const conversion = @import("./conversion.zig");
 
@@ -159,8 +160,49 @@ pub fn ResultSet(comptime T: type) type {
                 .ok => null,
                 .err => |err| err.asError(),
                 .row => |row| blk: {
-                    const i = r.iter();
-                    while (try i.next()) |_| {}
+                    const reader = &r.conn.reader;
+
+                    // Drain any full packets already buffered in conn.reader.
+                    // Advancing pos alone won't trigger buffer reallocation,
+                    // so the first row's packet payload stays valid.
+                    drain_buffered: while (reader.pos + 4 <= reader.len) {
+                        const hdr = reader.buf[reader.pos..];
+                        const payload_len = std.mem.readInt(u24, hdr[0..3], .little);
+                        if (reader.pos + 4 + payload_len > reader.len) break :drain_buffered;
+                        const pkt_type = hdr[4];
+                        reader.pos += 4 + payload_len;
+                        switch (pkt_type) {
+                            constants.ERR => return error.ErrorPacket,
+                            constants.EOF => break :blk row,
+                            else => continue :drain_buffered,
+                        }
+                    }
+
+                    // Drain remaining rows from the stream through a temporary
+                    // reader so conn.reader's buffer is never expanded or moved.
+                    var temp_reader = try PacketReader.init(
+                        reader.allocator,
+                        reader.io,
+                        reader.stream,
+                    );
+                    defer temp_reader.deinit();
+
+                    // Feed any partial buffered data into the temp reader.
+                    if (reader.pos < reader.len) {
+                        const tail = try reader.allocator.dupe(u8, reader.buf[reader.pos..reader.len]);
+                        reader.pos = reader.len;
+                        temp_reader.buf = tail;
+                        temp_reader.len = tail.len;
+                    }
+
+                    while (true) {
+                        const pkt = try temp_reader.readPacket();
+                        switch (pkt.payload[0]) {
+                            constants.ERR => return ErrorPacket.init(&pkt).asError(),
+                            constants.EOF => break,
+                            else => continue,
+                        }
+                    }
                     break :blk row;
                 },
             };

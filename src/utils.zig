@@ -2,8 +2,8 @@ const std = @import("std");
 
 fn numSlice(comptime N: usize, shape: *const [N]usize) usize {
     return switch (N) {
-        0 => return 0,
-        1 => return shape[0],
+        0 => 0,
+        1 => shape[0],
         else => numSlice(N - 1, shape[1..]) * shape[0] + shape[0],
     };
 }

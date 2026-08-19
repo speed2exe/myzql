@@ -21,8 +21,10 @@ pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const 
     const struct_field_names = @typeInfo(child_type).@"struct".field_names;
     const struct_field_types = @typeInfo(child_type).@"struct".field_types;
 
-    if (struct_field_names.len != struct_field_types.len and (struct_field_names != col_defs.len)) {
-        std.log.err("received {d} columns from mysql, but given {d} fields for struct", .{ struct_field_names.len, col_defs.len });
+    if (struct_field_names.len != col_defs.len) {
+        //left always is `false` and struct_field_names.len always equals struct_field_types.len
+        //if (struct_field_names.len != struct_field_types.len and (struct_field_names != col_defs.len)) {
+        std.log.err("received {d} columns from mysql, but given {d} fields for struct", .{ col_defs.len, struct_field_names.len });
         return error.ColumnAndFieldCountMismatch;
     }
 
