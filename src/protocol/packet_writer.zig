@@ -59,7 +59,12 @@ pub const PacketWriter = struct {
     // flush the buffer to the stream
     pub inline fn flush(p: *PacketWriter) !void {
         const data = p.buf[0..p.pos];
-        _ = try p.io.vtable.netWrite(p.io.userdata, p.stream.socket.handle, &.{}, &.{data}, 1);
+
+        const result = try p.io.operate(.{ .net_write = .{
+            .socket_handle = p.stream.socket.handle,
+            .data = &.{data},
+        } });
+        _ = try result.net_write;
         p.pos = 0;
     }
 
