@@ -95,9 +95,9 @@ pub const Conn = struct {
         // more auth exchange based on auth_method
         // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_authentication_methods.html
         switch (auth_plugin) {
-            .caching_sha2_password => try conn.auth_caching_sha2_password(allocator, &auth_data, config),
-            .mysql_native_password => try conn.auth_mysql_native_password(&auth_data, config),
-            .sha256_password => try conn.auth_sha256_password(allocator, &auth_data, config),
+            .caching_sha2_password => try conn.auth_caching_sha2_password(allocator, &auth_data, config, false),
+            .mysql_native_password => try conn.auth_mysql_native_password(allocator, &auth_data, config, false),
+            .sha256_password => try conn.auth_sha256_password(allocator, &auth_data, config, false),
             else => {
                 std.log.warn("Unsupported auth plugin: {any}\n", .{auth_plugin});
                 return error.UnsupportedAuthPlugin;
@@ -222,23 +222,78 @@ pub const Conn = struct {
         return packet.asError();
     }
 
-    fn auth_mysql_native_password(c: *Conn, auth_data: *const [20]u8, config: *const Config) !void {
+    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_auth_switch_request.html
+    // Handle an AUTH_SWITCH_REQUEST packet (0xFE) sent by the server.
+    // Payload: string[NUL] plugin name, string[EOF] plugin data (usually a 20-byte salt).
+    // Replies with an AuthSwitchResponse (the new plugin's auth response) and then
+    // continues processing the server's response (which may be another auth switch).
+    // explicit error set: auth_mysql_native_password / auth_caching_sha2_password /
+    // auth_sha256_password can call back into authSwitch, so inferred error sets
+    // would create a dependency loop
+    fn authSwitch(
+        c: *Conn,
+        allocator: Allocator,
+        packet: *const Packet,
+        config: *const Config,
+    ) anyerror!void {
+        std.debug.assert(packet.payload[0] == constants.AUTH_SWITCH);
+
+        // plugin name is NUL-terminated, followed by plugin data up to end of payload
+        const nul = std.mem.indexOfScalar(u8, packet.payload[1..], 0) orelse return error.MalformedAuthSwitchRequest;
+        const plugin_name = packet.payload[1 .. 1 + nul];
+        var plugin_data = packet.payload[1 + nul + 1 ..];
+        // the new plugin's data may include a trailing NUL (e.g. native password salt)
+        if (plugin_data.len > 0 and plugin_data[plugin_data.len - 1] == 0) {
+            plugin_data = plugin_data[0 .. plugin_data.len - 1];
+        }
+
+        const new_plugin = auth.AuthPlugin.fromName(plugin_name);
+        switch (new_plugin) {
+            .mysql_native_password => {
+                if (plugin_data.len != 20) return error.MalformedAuthSwitchRequest;
+                try c.auth_mysql_native_password(allocator, plugin_data[0..20], config, true);
+            },
+            .caching_sha2_password => {
+                if (plugin_data.len != 20) return error.MalformedAuthSwitchRequest;
+                try c.auth_caching_sha2_password(allocator, plugin_data[0..20], config, true);
+            },
+            .sha256_password => {
+                if (plugin_data.len != 20) return error.MalformedAuthSwitchRequest;
+                try c.auth_sha256_password(allocator, plugin_data[0..20], config, true);
+            },
+            else => {
+                std.log.warn("Unsupported auth switch plugin: {s}\n", .{plugin_name});
+                return error.UnsupportedAuthPlugin;
+            },
+        }
+    }
+
+    fn auth_mysql_native_password(c: *Conn, allocator: Allocator, auth_data: *const [20]u8, config: *const Config, is_auth_switch: bool) !void {
         const auth_resp = auth.scramblePassword(auth_data, config.password);
-        const response = HandshakeResponse41.init(.mysql_native_password, config, if (config.password.len > 0) &auth_resp else &[_]u8{});
-        try c.writePacket(response);
+        if (is_auth_switch) {
+            try c.writeBytesAsPacket(if (config.password.len > 0) &auth_resp else &[_]u8{});
+        } else {
+            const response = HandshakeResponse41.init(.mysql_native_password, config, if (config.password.len > 0) &auth_resp else &[_]u8{});
+            try c.writePacket(response);
+        }
         try c.writer.flush();
 
         const packet = try c.readPacket();
         return switch (packet.payload[0]) {
             constants.OK => {},
+            constants.AUTH_SWITCH => c.authSwitch(allocator, &packet, config),
             else => packet.asError(),
         };
     }
 
-    fn auth_sha256_password(c: *Conn, allocator: Allocator, auth_data: *const [20]u8, config: *const Config) !void {
+    fn auth_sha256_password(c: *Conn, allocator: Allocator, auth_data: *const [20]u8, config: *const Config, is_auth_switch: bool) !void {
         // TODO: if there is already a pub key, skip requesting it
-        const response = HandshakeResponse41.init(.sha256_password, config, &[_]u8{auth.sha256_password_public_key_request});
-        try c.writePacket(response);
+        if (is_auth_switch) {
+            try c.writeBytesAsPacket(&[_]u8{auth.sha256_password_public_key_request});
+        } else {
+            const response = HandshakeResponse41.init(.sha256_password, config, &[_]u8{auth.sha256_password_public_key_request});
+            try c.writePacket(response);
+        }
         try c.writer.flush();
 
         const pk_packet = try c.readPacket();
@@ -256,6 +311,7 @@ pub const Conn = struct {
         const resp_packet = try c.readPacket();
         return switch (resp_packet.payload[0]) {
             constants.OK => {},
+            constants.AUTH_SWITCH => c.authSwitch(allocator, &resp_packet, config),
             else => resp_packet.asError(),
         };
     }
@@ -265,10 +321,15 @@ pub const Conn = struct {
         allocator: Allocator,
         auth_data: *const [20]u8,
         config: *const Config,
+        is_auth_switch: bool,
     ) !void {
         const auth_resp = auth.scrambleSHA256Password(auth_data, config.password);
-        const response = HandshakeResponse41.init(.caching_sha2_password, config, &auth_resp);
-        try c.writePacket(&response);
+        if (is_auth_switch) {
+            try c.writeBytesAsPacket(&auth_resp);
+        } else {
+            const response = HandshakeResponse41.init(.caching_sha2_password, config, &auth_resp);
+            try c.writePacket(&response);
+        }
         try c.writer.flush();
 
         while (true) {
@@ -303,6 +364,14 @@ pub const Conn = struct {
                         },
                         else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
+                },
+                // authSwitch completes the entire nested exchange (including reading the
+                // server's final OK/ERR), so the outer caching_sha2 loop must not try to
+                // read yet another packet afterwards — the server has nothing more to
+                // send and we would block forever.
+                constants.AUTH_SWITCH => {
+                    try c.authSwitch(allocator, &packet, config);
+                    return;
                 },
                 else => return packet.asError(),
             }
