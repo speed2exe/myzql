@@ -190,7 +190,7 @@ pub fn main() !void {
     // Results are valid until `deinit` is called on TableTexts.
     const result = try c.queryRows(allocator, io, "SELECT * FROM customers.purchases");
     const rows: ResultSet(TextResultRow) = try result.expect(.rows);
-    const table = try rows.tableTexts(allocator);
+    const table = try rows.tableTexts(allocator, io);
     defer table.deinit(allocator); // table is valid until deinit is called
     std.debug.print("table: {any}\n", .{table.table});
 ```
@@ -217,7 +217,7 @@ pub fn main() !void {
     const io: std.Io = threaded.io();
     // In order to do a insertion, you would first need to do a prepared statement.
     // Allocation is required as we need to store metadata of parameters and return type
-    const prep_res = try c.prepare(allocator, "INSERT INTO test.person (name, age) VALUES (?, ?)");
+    const prep_res = try c.prepare(allocator, io, "INSERT INTO test.person (name, age) VALUES (?, ?)");
     defer prep_res.deinit(allocator);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -248,7 +248,7 @@ fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     const io: std.Io = threaded.io();
-    const prep_res = try c.prepare(allocator, "SELECT name, age FROM test.person");
+    const prep_res = try c.prepare(allocator, io, "SELECT name, age FROM test.person");
     defer prep_res.deinit(allocator);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -288,7 +288,7 @@ fn main() !void {
         const query_res = try c.executeRows(allocator, &prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
-        const person_structs = try rows_iter.tableStructs(Person, allocator);
+        const person_structs = try rows_iter.tableStructs(Person, allocator, io);
         defer person_structs.deinit(allocator); // data is valid until deinit is called
         std.debug.print("person_structs: {any}\n", .{person_structs.struct_list.items});
     }
@@ -316,7 +316,7 @@ fn main() !void {
     defer threaded.deinit();
     const io: std.Io = threaded.io();
     { // Insert
-        const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?, ?)");
+        const prep_res = try c.prepare(allocator, io, "INSERT INTO test.temporal_types_example VALUES (?, ?)");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -348,14 +348,14 @@ fn main() !void {
             event_time: DateTime,
             duration: Duration,
         };
-        const prep_res = try c.prepare(allocator, "SELECT * FROM test.temporal_types_example");
+        const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.temporal_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
         const res = try c.executeRows(allocator, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
-        const structs = try rows_iter.tableStructs(DateTimeDuration, allocator);
+        const structs = try rows_iter.tableStructs(DateTimeDuration, allocator, io);
         defer structs.deinit(allocator);
         std.debug.print("structs: {any}\n", .{structs.struct_list.items}); // structs.struct_list.items: []const DateTimeDuration
         // Do something with structs
@@ -378,7 +378,7 @@ fn main() !void {
     defer threaded.deinit();
     const io: std.Io = threaded.io();
     { // Insert
-        const prep_res = try c.prepare(allocator, "INSERT INTO test.array_types_example VALUES (?, ?)");
+        const prep_res = try c.prepare(allocator, io, "INSERT INTO test.array_types_example VALUES (?, ?)");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -397,14 +397,14 @@ fn main() !void {
             name: [16:1]u8,
             mac_addr: ?[6]u8,
         };
-        const prep_res = try c.prepare(allocator, "SELECT * FROM test.array_types_example");
+        const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.array_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
         const res = try c.executeRows(allocator, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
-        const structs = try rows_iter.tableStructs(Client, allocator);
+        const structs = try rows_iter.tableStructs(Client, allocator, io);
         defer structs.deinit(allocator);
         std.debug.print("structs: {any}\n", .{structs.struct_list.items}); // structs.struct_list.items: []const Client
         // Do something with structs
