@@ -260,6 +260,71 @@ pub const Conn = struct {
         };
     }
 
+    /// Handle an AUTH_SWITCH_REQUEST from the server by responding with the
+    /// scramble for the requested plugin, then waiting for the final
+    /// OK/ERR packet. Returns after the server accepts or rejects the auth.
+    fn authSwitch(c: *Conn, allocator: Allocator, switch_req: protocol.auth_switch_request.AuthSwitchRequest, config: *const Config) !void {
+        const plugin = auth.AuthPlugin.fromName(switch_req.plugin_name);
+        // plugin_data includes a trailing NUL terminator; the salt is the first 20 bytes
+        if (switch_req.plugin_data.len < 20) return error.AuthSwitchMalformedData;
+        const salt = switch_req.plugin_data[0..20].*;
+
+        switch (plugin) {
+            .mysql_native_password => {
+                const auth_resp = auth.scramblePassword(&salt, config.password);
+                const resp = HandshakeResponse41.init(.mysql_native_password, config, if (config.password.len > 0) &auth_resp else &[_]u8{});
+                try c.writePacket(resp);
+                try c.writer.flush();
+            },
+            .caching_sha2_password => {
+                const auth_resp = auth.scrambleSHA256Password(&salt, config.password);
+                const resp = HandshakeResponse41.init(.caching_sha2_password, config, if (config.password.len > 0) &auth_resp else &[_]u8{});
+                try c.writePacket(resp);
+                try c.writer.flush();
+            },
+            else => {
+                std.log.warn("Unsupported auth switch plugin: {s}\n", .{switch_req.plugin_name});
+                return error.UnsupportedAuthPlugin;
+            },
+        }
+
+        // Wait for the server's final verdict, handling possible further
+        // AUTH_MORE_DATA / AUTH_SWITCH exchanges.
+        while (true) {
+            const packet = try c.readPacket();
+            switch (packet.payload[0]) {
+                constants.OK => return,
+                constants.ERR => return packet.asError(),
+                constants.AUTH_SWITCH => {
+                    const next = protocol.auth_switch_request.AuthSwitchRequest.initFromPacket(&packet);
+                    return c.authSwitch(allocator, next, config);
+                },
+                constants.AUTH_MORE_DATA => {
+                    const more_data = packet.payload[1..];
+                    if (more_data.len == 0) return error.UnsupportedCachingSha2PasswordMoreData;
+                    switch (more_data[0]) {
+                        auth.caching_sha2_password_fast_auth_success => {}, // wait for OK packet
+                        auth.caching_sha2_password_full_authentication_start => {
+                            try c.writeBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
+                            try c.writer.flush();
+                            const pk_packet = try c.readPacket();
+                            if (pk_packet.payload[0] == constants.OK) return;
+                            if (pk_packet.payload[0] == constants.ERR) return pk_packet.asError();
+                            const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
+                            defer decoded_pk.deinit(allocator);
+                            const enc_pw = try auth.encryptPassword(allocator, config.password, &salt, &decoded_pk.value);
+                            defer allocator.free(enc_pw);
+                            try c.writeBytesAsPacket(enc_pw);
+                            try c.writer.flush();
+                        },
+                        else => return error.UnsupportedCachingSha2PasswordMoreData,
+                    }
+                },
+                else => return packet.asError(),
+            }
+        }
+    }
+
     fn auth_caching_sha2_password(
         c: *Conn,
         allocator: Allocator,
@@ -303,6 +368,10 @@ pub const Conn = struct {
                         },
                         else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
+                },
+                constants.AUTH_SWITCH => {
+                    const switch_req = protocol.auth_switch_request.AuthSwitchRequest.initFromPacket(&packet);
+                    return c.authSwitch(allocator, switch_req, config);
                 },
                 else => return packet.asError(),
             }
