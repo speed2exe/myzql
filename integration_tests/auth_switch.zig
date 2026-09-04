@@ -25,7 +25,6 @@ test "auth switch: caching_sha2_password server switches to mysql_native_passwor
         const setup_queries = [_][]const u8{
             "DROP USER IF EXISTS 'authswitch'@'%'",
             "CREATE USER 'authswitch'@'%' IDENTIFIED WITH mysql_native_password BY 'password'",
-            "FLUSH PRIVILEGES",
         };
         for (setup_queries) |q| {
             const res = try c.query(io, q);
