@@ -22,13 +22,16 @@ test "auth switch: caching_sha2_password server switches to mysql_native_passwor
         var c = try Conn.init(allocator, io, &test_config);
         defer c.deinit(allocator, io);
 
+        // MySQL uses IDENTIFIED WITH ... BY, MariaDB uses IDENTIFIED VIA ... USING PASSWORD().
+        // Try both; one of them will succeed depending on the server flavor.
         const setup_queries = [_][]const u8{
             "DROP USER IF EXISTS 'authswitch'@'%'",
             "CREATE USER 'authswitch'@'%' IDENTIFIED WITH mysql_native_password BY 'password'",
+            "CREATE USER 'authswitch'@'%' IDENTIFIED VIA mysql_native_password USING PASSWORD('password')",
         };
         for (setup_queries) |q| {
-            const res = try c.query(io, q);
-            _ = try res.expect(.ok);
+            const res = c.query(io, q) catch continue;
+            _ = res.expect(.ok) catch continue;
         }
     }
 
