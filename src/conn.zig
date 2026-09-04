@@ -365,7 +365,14 @@ pub const Conn = struct {
                         else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
                 },
-                constants.AUTH_SWITCH => try c.authSwitch(allocator, &packet, config),
+                // authSwitch completes the entire nested exchange (including reading the
+                // server's final OK/ERR), so the outer caching_sha2 loop must not try to
+                // read yet another packet afterwards — the server has nothing more to
+                // send and we would block forever.
+                constants.AUTH_SWITCH => {
+                    try c.authSwitch(allocator, &packet, config);
+                    return;
+                },
                 else => return packet.asError(),
             }
         }
