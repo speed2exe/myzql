@@ -115,7 +115,7 @@ pub const ExecuteRequest = struct {
             }
 
             inline for (params, enum_field_types) |param, enum_field_type| {
-                try writer.writeInt(u8, @intFromEnum(enum_field_type));
+                try writer.writeInt(u8, @backingInt(enum_field_type));
                 const sign_flag = switch (@typeInfo(@TypeOf(param))) {
                     .comptime_int => if (param > maxInt(i64)) 0x80 else 0,
                     .int => |int| if (int.signedness == .unsigned) 0x80 else 0,

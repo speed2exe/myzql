@@ -3,15 +3,13 @@ const utils = @import("./utils.zig");
 
 pub const PacketWriter = struct {
     allocator: std.mem.Allocator,
-    io: std.Io,
     stream: std.Io.net.Stream,
     buf: []u8,
     pos: usize, // buf[0..pos]: buffer is written but not flushed
 
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, stream: std.Io.net.Stream) !PacketWriter {
+    pub fn init(allocator: std.mem.Allocator, stream: std.Io.net.Stream) !PacketWriter {
         return .{
             .allocator = allocator,
-            .io = io,
             .stream = stream,
             .buf = &.{},
             .pos = 0,
@@ -57,10 +55,10 @@ pub const PacketWriter = struct {
     }
 
     // flush the buffer to the stream
-    pub inline fn flush(p: *PacketWriter) !void {
+    pub inline fn flush(p: *PacketWriter, io: std.Io) !void {
         const data = p.buf[0..p.pos];
 
-        const result = try p.io.operate(.{ .net_write = .{
+        const result = try io.operate(.{ .net_write = .{
             .socket_handle = p.stream.socket.handle,
             .data = &.{data},
         } });

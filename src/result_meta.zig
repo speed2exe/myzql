@@ -21,13 +21,13 @@ pub const ResultMeta = struct {
         r.col_defs.deinit(allocator);
     }
 
-    pub inline fn readPutResultColumns(r: *ResultMeta, allocator: Allocator, c: *Conn, n: usize) !void {
+    pub inline fn readPutResultColumns(r: *ResultMeta, allocator: Allocator, io: std.Io, c: *Conn, n: usize) !void {
         r.raw.clearRetainingCapacity();
         r.col_defs.clearRetainingCapacity();
 
         const col_defs = try r.col_defs.addManyAsSlice(allocator, n);
         for (col_defs) |*col_def| {
-            var packet = try c.readPacket();
+            var packet = try c.readPacket(io);
             const payload_owned = try r.raw.addManyAsSlice(allocator, packet.payload.len);
             @memcpy(payload_owned, packet.payload);
             packet.payload = payload_owned;

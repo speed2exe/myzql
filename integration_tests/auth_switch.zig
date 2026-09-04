@@ -43,5 +43,5 @@ test "auth switch: caching_sha2_password server switches to mysql_native_passwor
     };
     var c = try Conn.init(allocator, io, &switch_config);
     defer c.deinit(allocator, io);
-    try c.ping();
+    try c.ping(io);
 }
