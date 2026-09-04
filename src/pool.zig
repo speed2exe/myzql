@@ -121,6 +121,7 @@ pub const Pool = struct {
         for (p.idle.items) |conn| {
             conn.deinit(p.allocator, p.io);
             p.allocator.destroy(conn);
+            p.total_count -= 1;
         }
         p.idle.deinit(p.allocator);
 

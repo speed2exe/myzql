@@ -268,7 +268,13 @@ pub const Conn = struct {
         }
     }
 
-    fn auth_mysql_native_password(c: *Conn, allocator: Allocator, auth_data: *const [20]u8, config: *const Config, is_auth_switch: bool) !void {
+    fn auth_mysql_native_password(
+        c: *Conn,
+        allocator: Allocator,
+        auth_data: *const [20]u8,
+        config: *const Config,
+        comptime is_auth_switch: bool,
+    ) !void {
         const auth_resp = auth.scramblePassword(auth_data, config.password);
         if (is_auth_switch) {
             try c.writeBytesAsPacket(if (config.password.len > 0) &auth_resp else &[_]u8{});
@@ -286,7 +292,13 @@ pub const Conn = struct {
         };
     }
 
-    fn auth_sha256_password(c: *Conn, allocator: Allocator, auth_data: *const [20]u8, config: *const Config, is_auth_switch: bool) !void {
+    fn auth_sha256_password(
+        c: *Conn,
+        allocator: Allocator,
+        auth_data: *const [20]u8,
+        config: *const Config,
+        comptime is_auth_switch: bool,
+    ) !void {
         // TODO: if there is already a pub key, skip requesting it
         if (is_auth_switch) {
             try c.writeBytesAsPacket(&[_]u8{auth.sha256_password_public_key_request});
@@ -321,7 +333,7 @@ pub const Conn = struct {
         allocator: Allocator,
         auth_data: *const [20]u8,
         config: *const Config,
-        is_auth_switch: bool,
+        comptime is_auth_switch: bool,
     ) !void {
         const auth_resp = auth.scrambleSHA256Password(auth_data, config.password);
         if (is_auth_switch) {
