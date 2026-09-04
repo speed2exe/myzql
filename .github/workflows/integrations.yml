@@ -44,3 +44,25 @@ jobs:
           sleep 2
           zig build integration_test -Dskip-stress=true --summary all
           rm -rf .zig-cache/ zig-out/
+
+  auth-switch-repro:
+    # Reproducer for the AUTH_SWITCH_REQUEST bug: mysql:8.0 with its DEFAULT
+    # authentication plugin (caching_sha2_password) + an account created with
+    # mysql_native_password forces the server to send an AuthSwitchRequest (0xFE),
+    # which unfixed myzql mishandles (error.UnexpectedPacket / packets out of order).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: master
+
+      - name: Run Auth Switch Repro - MySQL (default caching_sha2_password)
+        run: |
+          docker run --name mysql_server_authswitch --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql:8.0
+          while ! timeout 5 wget -qO- localhost:3306; do sleep 1; done
+          sleep 2
+          zig build integration_test -Dskip-stress=true -Dtest-filter="auth switch" --summary all
+          rm -rf .zig-cache/ zig-out/
