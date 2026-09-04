@@ -27,7 +27,6 @@
 
 ## TODOs
 - Config from URL
-- Connection Pooling
 - TLS support
 
 ## Add as dependency to your Zig project
@@ -69,7 +68,9 @@ const myzql = @import("myzql");
 const Conn = myzql.conn.Conn;
 
 pub fn main() !void {
-    const io = std.Io.default();
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
 
     // TCP connection (default)
     var client = try Conn.init(
@@ -86,14 +87,16 @@ pub fn main() !void {
     );
     defer client.deinit(allocator, io);
 
-    try client.ping(io);
+    try client.ping();
 }
 ```
 
 ### Unix Socket Connection
 ```zig
 pub fn main() !void {
-    const io = std.Io.default();
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
 
     var client = try Conn.init(
         allocator,
@@ -105,7 +108,7 @@ pub fn main() !void {
     );
     defer client.deinit(allocator, io);
 
-    try client.ping(io);
+    try client.ping();
 }
 ```
 
@@ -115,7 +118,9 @@ pub fn main() !void {
 const OkPacket = protocol.generic_response.OkPacket;
 
 pub fn main() !void {
-    const io = std.Io.default();
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
     // ...
     // You can do a text query (text protocol) by using `query` method on `Conn`
     const result = try c.query(io, "CREATE DATABASE testdb");
@@ -152,7 +157,9 @@ const TextElems = myzql.result.TextElems;
 const TextElemIter = myzql.result.TextElemIter;
 
 pub fn main() !void {
-    const io = std.Io.default();
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
     const result = try c.queryRows(allocator, io, "SELECT * FROM customers.purchases");
 
     // This is a query that returns rows, you have to collect the result.
@@ -204,11 +211,13 @@ const QueryResult = myzql.result.QueryResult;
 const PreparedStatement = myzql.result.PreparedStatement;
 const OkPacket = myzql.protocol.generic_response.OkPacket;
 
-pub fn main() void {
-    const io = std.Io.default();
+pub fn main() !void {
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
     // In order to do a insertion, you would first need to do a prepared statement.
     // Allocation is required as we need to store metadata of parameters and return type
-    const prep_res = try c.prepare(allocator, io, "INSERT INTO test.person (name, age) VALUES (?, ?)");
+    const prep_res = try c.prepare(allocator, "INSERT INTO test.person (name, age) VALUES (?, ?)");
     defer prep_res.deinit(allocator);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -236,8 +245,10 @@ const BinaryResultRow = myzql.result.BinaryResultRow;
 const ResultSet = myzql.result.ResultSet;
 
 fn main() !void {
-    const io = std.Io.default();
-    const prep_res = try c.prepare(allocator, io, "SELECT name, age FROM test.person");
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
+    const prep_res = try c.prepare(allocator, "SELECT name, age FROM test.person");
     defer prep_res.deinit(allocator);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -248,14 +259,14 @@ fn main() !void {
     };
 
     { // Iterating over rows, scanning into struct or creating struct
-        const query_res = try c.executeRows(allocator, io, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try c.executeRows(allocator, &prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         while (try rows_iter.next()) |row| {
             { // Option 1: scanning into preallocated person
                 var person: Person = undefined;
                 try row.scan(&person);
-                person.greet();
+                std.debug.print("{s} is {d} years old\n", .{ person.name, person.age });
                 // Important: if any field is a string, it will be valid until the next row is scanned
                 // or next query. If your rows return have strings and you want to keep the data longer,
                 // use the method below instead.
@@ -268,13 +279,13 @@ fn main() !void {
                 // if your struct contains strings.
                 // person is valid until BinaryResultRow.structDestroy is called.
                 defer BinaryResultRow.structDestroy(person_ptr, allocator);
-                person_ptr.greet();
+                std.debug.print("{s} is {d} years old\n", .{ person_ptr.name, person_ptr.age });
             }
         }
     }
 
     { // collect all rows into a table ([]const Person)
-        const query_res = try c.executeRows(allocator, io, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try c.executeRows(allocator, &prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         const person_structs = try rows_iter.tableStructs(Person, allocator);
@@ -301,9 +312,11 @@ const DateTime = myzql.temporal.DateTime;
 const Duration = myzql.temporal.Duration;
 
 fn main() !void {
-    const io = std.Io.default();
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
     { // Insert
-        const prep_res = try c.prepare(allocator, io, "INSERT INTO test.temporal_types_example VALUES (?, ?)");
+        const prep_res = try c.prepare(allocator, "INSERT INTO test.temporal_types_example VALUES (?, ?)");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -335,10 +348,10 @@ fn main() !void {
             event_time: DateTime,
             duration: Duration,
         };
-        const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.temporal_types_example");
+        const prep_res = try c.prepare(allocator, "SELECT * FROM test.temporal_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try c.executeRows(allocator, io, &prep_stmt, .{});
+        const res = try c.executeRows(allocator, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -361,9 +374,11 @@ CREATE TABLE test.array_types_example (
 
 ```zig
 fn main() !void {
-    const io = std.Io.default();
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
     { // Insert
-        const prep_res = try c.prepare(allocator, io, "INSERT INTO test.array_types_example VALUES (?, ?)");
+        const prep_res = try c.prepare(allocator, "INSERT INTO test.array_types_example VALUES (?, ?)");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -382,10 +397,10 @@ fn main() !void {
             name: [16:1]u8,
             mac_addr: ?[6]u8,
         };
-        const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.array_types_example");
+        const prep_res = try c.prepare(allocator, "SELECT * FROM test.array_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try c.executeRows(allocator, io, &prep_stmt, .{});
+        const res = try c.executeRows(allocator, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
