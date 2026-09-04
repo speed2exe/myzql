@@ -12,7 +12,7 @@
 | 0.14.0      | 0.14.0                    |
 | 0.15.1      | 0.15.1                    |
 | 0.16.0      | 0.16.0                    |
-| main        | 0.16.0                    |
+| main        | v0.17.0-dev.1978+c961124d9|
 
 ## Features
 - Native Zig code, no external dependencies
