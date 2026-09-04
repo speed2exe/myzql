@@ -227,12 +227,15 @@ pub const Conn = struct {
     // Payload: string[NUL] plugin name, string[EOF] plugin data (usually a 20-byte salt).
     // Replies with an AuthSwitchResponse (the new plugin's auth response) and then
     // continues processing the server's response (which may be another auth switch).
+    // explicit error set: auth_mysql_native_password / auth_caching_sha2_password /
+    // auth_sha256_password can call back into authSwitch, so inferred error sets
+    // would create a dependency loop
     fn authSwitch(
         c: *Conn,
         allocator: Allocator,
         packet: *const Packet,
         config: *const Config,
-    ) !void {
+    ) anyerror!void {
         std.debug.assert(packet.payload[0] == constants.AUTH_SWITCH);
 
         // plugin name is NUL-terminated, followed by plugin data up to end of payload
