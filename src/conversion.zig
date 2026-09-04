@@ -127,7 +127,7 @@ inline fn binElemToValue(
     allocator: ?std.mem.Allocator,
 ) !FieldType {
     const field_info = @typeInfo(FieldType);
-    const col_type: EnumFieldType = @enumFromInt(col_def.column_type);
+    const col_type: EnumFieldType = @fromBackingInt(@intCast(col_def.column_type));
 
     switch (FieldType) {
         DateTime => {

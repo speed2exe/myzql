@@ -63,8 +63,8 @@ pub const Conn = struct {
             break :blk .{
                 .connected = true,
                 .stream = stream,
-                .reader = try PacketReader.init(allocator, io, stream),
-                .writer = try PacketWriter.init(allocator, io, stream),
+                .reader = try PacketReader.init(allocator, stream),
+                .writer = try PacketWriter.init(allocator, stream),
                 .capabilities = undefined, // not known until we get the first packet
                 .sequence_id = undefined, // not known until we get the first packet
 
@@ -74,7 +74,7 @@ pub const Conn = struct {
         errdefer conn.deinit(allocator, io);
 
         const auth_plugin, const auth_data = blk: {
-            const packet = try conn.readPacket();
+            const packet = try conn.readPacket(io);
             const handshake_v10 = switch (packet.payload[0]) {
                 constants.HANDSHAKE_V10 => HandshakeV10.init(&packet),
                 constants.ERR => return ErrorPacket.initFirst(&packet).asError(),
@@ -95,9 +95,9 @@ pub const Conn = struct {
         // more auth exchange based on auth_method
         // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_authentication_methods.html
         switch (auth_plugin) {
-            .caching_sha2_password => try conn.auth_caching_sha2_password(allocator, &auth_data, config, false),
-            .mysql_native_password => try conn.auth_mysql_native_password(allocator, &auth_data, config, false),
-            .sha256_password => try conn.auth_sha256_password(allocator, &auth_data, config, false),
+            .caching_sha2_password => try conn.auth_caching_sha2_password(allocator, io, &auth_data, config, false),
+            .mysql_native_password => try conn.auth_mysql_native_password(allocator, io, &auth_data, config, false),
+            .sha256_password => try conn.auth_sha256_password(allocator, io, &auth_data, config, false),
             else => {
                 std.log.warn("Unsupported auth plugin: {any}\n", .{auth_plugin});
                 return error.UnsupportedAuthPlugin;
@@ -113,7 +113,7 @@ pub const Conn = struct {
     /// Close the connection and free resources.
     /// Sends a COM_QUIT packet to the server before closing.
     pub fn deinit(c: *Conn, allocator: Allocator, io: Io) void {
-        c.quit() catch |err| {
+        c.quit(io) catch |err| {
             std.log.err("Failed to quit: {any}\n", .{err});
         };
         c.stream.close(io);
@@ -123,11 +123,11 @@ pub const Conn = struct {
     }
 
     /// Send a ping to the server to verify the connection is alive.
-    pub fn ping(c: *Conn) !void {
+    pub fn ping(c: *Conn, io: std.Io) !void {
         c.ready();
         try c.writeBytesAsPacket(&[_]u8{constants.COM_PING});
-        try c.writer.flush();
-        const packet = try c.readPacket();
+        try c.writer.flush(io);
+        const packet = try c.readPacket(io);
 
         switch (packet.payload[0]) {
             constants.OK => _ = OkPacket.init(&packet, c.capabilities),
@@ -139,12 +139,12 @@ pub const Conn = struct {
     /// Returns `QueryResult` which is either `.ok` (OkPacket) or `.err` (ErrorPacket).
     /// Use `queryRows` instead if your query returns a result set.
     // query that doesn't return any rows
-    pub fn query(c: *Conn, io: Io, query_string: []const u8) !QueryResult {
+    pub fn query(c: *Conn, io: std.Io, query_string: []const u8) !QueryResult {
         c.ready();
         const query_req: QueryRequest = .{ .query = query_string };
         try c.writePacket(query_req);
-        try c.writer.flush();
-        const packet = try c.readPacket();
+        try c.writer.flush(io);
+        const packet = try c.readPacket(io);
         return c.queryResult(io, &packet);
     }
 
@@ -152,23 +152,23 @@ pub const Conn = struct {
     /// Returns `QueryResultRows(TextResultRow)` which is either `.rows` (ResultSet) or `.err` (ErrorPacket).
     /// Use `query` instead if your query does not return a result set.
     // query that expect rows, even if it returns 0 rows
-    pub fn queryRows(c: *Conn, allocator: Allocator, query_string: []const u8) !QueryResultRows(TextResultRow) {
+    pub fn queryRows(c: *Conn, allocator: Allocator, io: std.Io, query_string: []const u8) !QueryResultRows(TextResultRow) {
         c.ready();
         const query_req: QueryRequest = .{ .query = query_string };
         try c.writePacket(query_req);
-        try c.writer.flush();
-        return QueryResultRows(TextResultRow).init(c, allocator);
+        try c.writer.flush(io);
+        return QueryResultRows(TextResultRow).init(c, allocator, io);
     }
 
     /// Prepare a SQL statement for execution.
     /// Returns `PrepareResult` which is either `.stmt` (PreparedStatement) or `.err` (ErrorPacket).
     /// The caller must call `deinit` on the returned `PrepareResult` to free resources.
-    pub fn prepare(c: *Conn, allocator: Allocator, query_string: []const u8) !PrepareResult {
+    pub fn prepare(c: *Conn, allocator: Allocator, io: std.Io, query_string: []const u8) !PrepareResult {
         c.ready();
         const prepare_request: PrepareRequest = .{ .query = query_string };
         try c.writePacket(prepare_request);
-        try c.writer.flush();
-        return PrepareResult.init(c, allocator);
+        try c.writer.flush(io);
+        return PrepareResult.init(c, allocator, io);
     }
 
     /// Execute a prepared statement that does not return rows (e.g. INSERT, UPDATE, DELETE).
@@ -185,8 +185,8 @@ pub const Conn = struct {
             .prep_stmt = prep_stmt,
         };
         try c.writePacketWithParam(execute_request, params);
-        try c.writer.flush();
-        const packet = try c.readPacket();
+        try c.writer.flush(io);
+        const packet = try c.readPacket(io);
         return c.queryResult(io, &packet);
     }
 
@@ -195,7 +195,7 @@ pub const Conn = struct {
     /// Returns `QueryResultRows(BinaryResultRow)` which is either `.rows` (ResultSet) or `.err` (ErrorPacket).
     /// Use `execute` instead if your query does not return a result set.
     // execute a prepared statement that expect rows, even if it returns 0 rows
-    pub fn executeRows(c: *Conn, allocator: Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
+    pub fn executeRows(c: *Conn, allocator: Allocator, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
         c.ready();
         std.debug.assert(prep_stmt.res_cols.len > 0); // executeRows expects rows
         c.sequence_id = 0;
@@ -204,15 +204,15 @@ pub const Conn = struct {
             .prep_stmt = prep_stmt,
         };
         try c.writePacketWithParam(execute_request, params);
-        try c.writer.flush();
-        return QueryResultRows(BinaryResultRow).init(c, allocator);
+        try c.writer.flush(io);
+        return QueryResultRows(BinaryResultRow).init(c, allocator, io);
     }
 
-    fn quit(c: *Conn) !void {
+    fn quit(c: *Conn, io: std.Io) !void {
         c.ready();
         try c.writeBytesAsPacket(&[_]u8{constants.COM_QUIT});
-        try c.writer.flush();
-        const packet = c.readPacket() catch |err| switch (err) {
+        try c.writer.flush(io);
+        const packet = c.readPacket(io) catch |err| switch (err) {
             error.UnexpectedEndOfStream => {
                 c.connected = false;
                 return;
@@ -233,6 +233,7 @@ pub const Conn = struct {
     fn authSwitch(
         c: *Conn,
         allocator: Allocator,
+        io: std.Io,
         packet: *const Packet,
         config: *const Config,
     ) anyerror!void {
@@ -251,15 +252,15 @@ pub const Conn = struct {
         switch (new_plugin) {
             .mysql_native_password => {
                 if (plugin_data.len != 20) return error.MalformedAuthSwitchRequest;
-                try c.auth_mysql_native_password(allocator, plugin_data[0..20], config, true);
+                try c.auth_mysql_native_password(allocator, io, plugin_data[0..20], config, true);
             },
             .caching_sha2_password => {
                 if (plugin_data.len != 20) return error.MalformedAuthSwitchRequest;
-                try c.auth_caching_sha2_password(allocator, plugin_data[0..20], config, true);
+                try c.auth_caching_sha2_password(allocator, io, plugin_data[0..20], config, true);
             },
             .sha256_password => {
                 if (plugin_data.len != 20) return error.MalformedAuthSwitchRequest;
-                try c.auth_sha256_password(allocator, plugin_data[0..20], config, true);
+                try c.auth_sha256_password(allocator, io, plugin_data[0..20], config, true);
             },
             else => {
                 std.log.warn("Unsupported auth switch plugin: {s}\n", .{plugin_name});
@@ -271,6 +272,7 @@ pub const Conn = struct {
     fn auth_mysql_native_password(
         c: *Conn,
         allocator: Allocator,
+        io: std.Io,
         auth_data: *const [20]u8,
         config: *const Config,
         comptime is_auth_switch: bool,
@@ -282,12 +284,12 @@ pub const Conn = struct {
             const response = HandshakeResponse41.init(.mysql_native_password, config, if (config.password.len > 0) &auth_resp else &[_]u8{});
             try c.writePacket(response);
         }
-        try c.writer.flush();
+        try c.writer.flush(io);
 
-        const packet = try c.readPacket();
+        const packet = try c.readPacket(io);
         return switch (packet.payload[0]) {
             constants.OK => {},
-            constants.AUTH_SWITCH => c.authSwitch(allocator, &packet, config),
+            constants.AUTH_SWITCH => c.authSwitch(allocator, io, &packet, config),
             else => packet.asError(),
         };
     }
@@ -295,6 +297,7 @@ pub const Conn = struct {
     fn auth_sha256_password(
         c: *Conn,
         allocator: Allocator,
+        io: std.Io,
         auth_data: *const [20]u8,
         config: *const Config,
         comptime is_auth_switch: bool,
@@ -306,9 +309,9 @@ pub const Conn = struct {
             const response = HandshakeResponse41.init(.sha256_password, config, &[_]u8{auth.sha256_password_public_key_request});
             try c.writePacket(response);
         }
-        try c.writer.flush();
+        try c.writer.flush(io);
 
-        const pk_packet = try c.readPacket();
+        const pk_packet = try c.readPacket(io);
 
         // Decode public key
         const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
@@ -318,12 +321,12 @@ pub const Conn = struct {
         defer allocator.free(enc_pw);
 
         try c.writeBytesAsPacket(enc_pw);
-        try c.writer.flush();
+        try c.writer.flush(io);
 
-        const resp_packet = try c.readPacket();
+        const resp_packet = try c.readPacket(io);
         return switch (resp_packet.payload[0]) {
             constants.OK => {},
-            constants.AUTH_SWITCH => c.authSwitch(allocator, &resp_packet, config),
+            constants.AUTH_SWITCH => c.authSwitch(allocator, io, &resp_packet, config),
             else => resp_packet.asError(),
         };
     }
@@ -331,6 +334,7 @@ pub const Conn = struct {
     fn auth_caching_sha2_password(
         c: *Conn,
         allocator: Allocator,
+        io: std.Io,
         auth_data: *const [20]u8,
         config: *const Config,
         comptime is_auth_switch: bool,
@@ -342,10 +346,10 @@ pub const Conn = struct {
             const response = HandshakeResponse41.init(.caching_sha2_password, config, &auth_resp);
             try c.writePacket(&response);
         }
-        try c.writer.flush();
+        try c.writer.flush(io);
 
         while (true) {
-            const packet = try c.readPacket();
+            const packet = try c.readPacket(io);
             switch (packet.payload[0]) {
                 constants.OK => return,
                 constants.AUTH_MORE_DATA => {
@@ -357,8 +361,8 @@ pub const Conn = struct {
                             // On unix socket (secure channel), MySQL responds with OK directly instead
                             // of sending an RSA key — the connection is already trusted.
                             try c.writeBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
-                            try c.writer.flush();
-                            const pk_packet = try c.readPacket();
+                            try c.writer.flush(io);
+                            const pk_packet = try c.readPacket(io);
 
                             // Unix socket / secure channel: server sends OK directly
                             if (pk_packet.payload[0] == constants.OK) return;
@@ -372,7 +376,7 @@ pub const Conn = struct {
                             defer allocator.free(enc_pw);
 
                             try c.writeBytesAsPacket(enc_pw);
-                            try c.writer.flush();
+                            try c.writer.flush(io);
                         },
                         else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
@@ -382,7 +386,7 @@ pub const Conn = struct {
                 // read yet another packet afterwards — the server has nothing more to
                 // send and we would block forever.
                 constants.AUTH_SWITCH => {
-                    try c.authSwitch(allocator, &packet, config);
+                    try c.authSwitch(allocator, io, &packet, config);
                     return;
                 },
                 else => return packet.asError(),
@@ -390,14 +394,14 @@ pub const Conn = struct {
         }
     }
 
-    pub inline fn readPacket(c: *Conn) !Packet {
-        const packet = try c.reader.readPacket();
+    pub inline fn readPacket(c: *Conn, io: std.Io) !Packet {
+        const packet = try c.reader.readPacket(io);
         c.sequence_id = packet.sequence_id +% 1;
         return packet;
     }
 
-    pub inline fn readPutResultColumns(c: *Conn, allocator: Allocator, n: usize) !void {
-        try c.result_meta.readPutResultColumns(allocator, c, n);
+    pub inline fn readPutResultColumns(c: *Conn, allocator: Allocator, io: std.Io, n: usize) !void {
+        try c.result_meta.readPutResultColumns(allocator, io, c, n);
     }
 
     inline fn writePacket(c: *Conn, packet: anytype) !void {

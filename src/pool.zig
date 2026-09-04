@@ -140,7 +140,7 @@ pub const Pool = struct {
     ///
     /// Returns `error.PoolExhausted` if all connections are in use and
     /// `max_size` has been reached.
-    pub fn acquire(p: *Pool) !*Conn {
+    pub fn acquire(p: *Pool, io: std.Io) !*Conn {
         p.mutex.lockUncancelable(p.io);
         defer p.mutex.unlock(p.io);
 
@@ -153,7 +153,7 @@ pub const Pool = struct {
                 continue;
             }
             // Health check — if ping fails, close and try the next one
-            conn.ping() catch {
+            conn.ping(io) catch {
                 conn.deinit(p.allocator, p.io);
                 p.allocator.destroy(conn);
                 p.total_count -= 1;
@@ -216,10 +216,10 @@ pub const Pool = struct {
     ///
     /// Convenience methods on `ManagedConn` forward to the underlying `Conn`
     /// without requiring you to pass `io` explicitly.
-    pub fn acquireManaged(p: *Pool) !ManagedConn {
+    pub fn acquireManaged(p: *Pool, io: std.Io) !ManagedConn {
         return ManagedConn{
             .pool = p,
-            .conn = try p.acquire(),
+            .conn = try p.acquire(io),
         };
     }
 
@@ -258,8 +258,8 @@ pub const Pool = struct {
         }
 
         /// Send a ping to verify the connection is alive.
-        pub fn ping(m: *ManagedConn) !void {
-            return m.conn.ping();
+        pub fn ping(m: *ManagedConn, io: std.Io) !void {
+            return m.conn.ping(io);
         }
 
         /// Execute a query that does not return rows (INSERT, UPDATE, DELETE, etc.).
@@ -268,13 +268,13 @@ pub const Pool = struct {
         }
 
         /// Execute a query that returns rows (SELECT, etc.).
-        pub fn queryRows(m: *ManagedConn, allocator: Allocator, query_string: []const u8) !QueryResultRows(TextResultRow) {
-            return m.conn.queryRows(allocator, query_string);
+        pub fn queryRows(m: *ManagedConn, allocator: Allocator, io: std.Io, query_string: []const u8) !QueryResultRows(TextResultRow) {
+            return m.conn.queryRows(allocator, io, query_string);
         }
 
         /// Prepare a SQL statement for execution.
-        pub fn prepare(m: *ManagedConn, allocator: Allocator, query_string: []const u8) !PrepareResult {
-            return m.conn.prepare(allocator, query_string);
+        pub fn prepare(m: *ManagedConn, allocator: Allocator, io: std.Io, query_string: []const u8) !PrepareResult {
+            return m.conn.prepare(allocator, io, query_string);
         }
 
         /// Execute a prepared statement that does not return rows.
@@ -283,8 +283,8 @@ pub const Pool = struct {
         }
 
         /// Execute a prepared statement that returns rows.
-        pub fn executeRows(m: *ManagedConn, allocator: Allocator, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
-            return m.conn.executeRows(allocator, prep_stmt, params);
+        pub fn executeRows(m: *ManagedConn, allocator: Allocator, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
+            return m.conn.executeRows(allocator, io, prep_stmt, params);
         }
     };
 };
