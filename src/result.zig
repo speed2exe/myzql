@@ -132,14 +132,6 @@ pub fn ResultSet(comptime T: type) type {
             };
         }
 
-        fn deinit(r: *const ResultSet(T), allocator: Allocator) void {
-            for (r.col_packets) |packet| {
-                packet.deinit(allocator);
-            }
-            allocator.free(r.col_packets);
-            allocator.free(r.col_defs);
-        }
-
         pub fn readRow(r: *const ResultSet(T), io: std.Io) !ResultRow(T) {
             return ResultRow(T).init(r.conn, io, r.col_defs);
         }
