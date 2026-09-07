@@ -22,7 +22,7 @@ jobs:
       - name: Run Integration Tests - MySQL
         run: |
           docker run --name mysql_server --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql:8.0 --default-authentication-plugin=mysql_native_password
-          while ! docker exec mysql_server mysqladmin ping -h localhost --silent; do sleep 1; done
+          timeout 120 bash -c 'until docker logs mysql_server 2>&1 | grep -q "ready for connections"; do sleep 1; done'
           zig build integration_test -Dskip-stress=true --summary all
           rm -rf .zig-cache/ zig-out/
 
@@ -39,7 +39,7 @@ jobs:
         run: |
           docker rm -f mysql_server_unix
           docker run --name some-mariadb --env MARIADB_ROOT_PASSWORD=password -p 3306:3306 -d mariadb
-          while ! docker exec some-mariadb mariadb-admin ping -h localhost --silent; do sleep 1; done
+          timeout 120 bash -c 'until docker logs some-mariadb 2>&1 | grep -q "ready for connections"; do sleep 1; done'
           zig build integration_test -Dskip-stress=true --summary all
           rm -rf .zig-cache/ zig-out/
 
@@ -60,6 +60,6 @@ jobs:
       - name: Run Auth Switch Repro - MySQL (default caching_sha2_password)
         run: |
           docker run --name mysql_server_authswitch --env MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql:8.0
-          while ! docker exec mysql_server_authswitch mysqladmin ping -h localhost --silent; do sleep 1; done
+          timeout 120 bash -c 'until docker logs mysql_server_authswitch 2>&1 | grep -q "ready for connections"; do sleep 1; done'
           zig build integration_test -Dskip-stress=true -Dtest-filter="auth switch" --summary all
           rm -rf .zig-cache/ zig-out/
