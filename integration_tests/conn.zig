@@ -562,10 +562,10 @@ test "binary data types - string" {
             .{ null, "foo", null, "c" },
             .{ null, "", null, "a" },
             .{
-                @as(?*const [3]u8, "baz"),
-                @as([*:0]const u8, "bar"),
-                @as(?[]const u8, null),
-                @as(MyEnum, .c),
+                runtimeValue(@as(?*const [3]u8, "baz")),
+                runtimeValue(@as([*:0]const u8, "bar")),
+                runtimeValue(@as(?[]const u8, null)),
+                runtimeValue(@as(MyEnum, .c)),
             },
         };
         inline for (params) |param| {
