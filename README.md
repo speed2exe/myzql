@@ -160,7 +160,7 @@ pub fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     const io: std.Io = threaded.io();
-    const result = try c.queryRows(allocator, io, "SELECT * FROM customers.purchases");
+    const result = try c.queryRows(io, "SELECT * FROM customers.purchases");
 
     // This is a query that returns rows, you have to collect the result.
     // you can use `expect(.rows)` to try interpret query result as ResultSet(TextResultRow)
@@ -188,7 +188,7 @@ pub fn main() !void {
     // You can also use `tableTexts` to collect all rows at once.
     // Under the hood, it does network calls and allocations, until EOF or error.
     // Results are valid until `deinit` is called on TableTexts.
-    const result = try c.queryRows(allocator, io, "SELECT * FROM customers.purchases");
+    const result = try c.queryRows(io, "SELECT * FROM customers.purchases");
     const rows: ResultSet(TextResultRow) = try result.expect(.rows);
     const table = try rows.tableTexts(allocator, io);
     defer table.deinit(allocator); // table is valid until deinit is called
@@ -259,7 +259,7 @@ fn main() !void {
     };
 
     { // Iterating over rows, scanning into struct or creating struct
-        const query_res = try c.executeRows(allocator, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try c.executeRows(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         while (try rows_iter.next()) |row| {
@@ -285,7 +285,7 @@ fn main() !void {
     }
 
     { // collect all rows into a table ([]const Person)
-        const query_res = try c.executeRows(allocator, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try c.executeRows(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         const person_structs = try rows_iter.tableStructs(Person, allocator, io);
@@ -351,7 +351,7 @@ fn main() !void {
         const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.temporal_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try c.executeRows(allocator, &prep_stmt, .{});
+        const res = try c.executeRows(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -400,7 +400,7 @@ fn main() !void {
         const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.array_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try c.executeRows(allocator, &prep_stmt, .{});
+        const res = try c.executeRows(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 

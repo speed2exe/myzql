@@ -66,7 +66,7 @@ pub fn QueryResultRows(comptime T: type) type {
         rows: ResultSet(T),
 
         // allocation happens when a result set is returned
-        pub fn init(c: *Conn, allocator: Allocator, io: std.Io) !QueryResultRows(T) {
+        pub fn init(c: *Conn, io: std.Io) !QueryResultRows(T) {
             const packet = try c.readPacket(io);
             return switch (packet.payload[0]) {
                 constants.OK => {
@@ -78,7 +78,7 @@ pub fn QueryResultRows(comptime T: type) type {
                 },
                 constants.ERR => .{ .err = ErrorPacket.init(&packet) },
                 constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-                else => .{ .rows = try ResultSet(T).init(c, allocator, io, &packet) },
+                else => .{ .rows = try ResultSet(T).init(c, io, &packet) },
             };
         }
 
@@ -87,7 +87,7 @@ pub fn QueryResultRows(comptime T: type) type {
         ///
         /// Example:
         /// ```zig
-        /// const result: QueryResultRows(TextResultRow) = try conn.queryRows(allocator, "SELECT * FROM table");
+        /// const result: QueryResultRows(TextResultRow) = try conn.queryRows("SELECT * FROM table");
         /// const rows: ResultSet(TextResultRow) = try result.expect(.rows);
         /// ```
         pub fn expect(
@@ -119,25 +119,17 @@ pub fn ResultSet(comptime T: type) type {
         conn: *Conn,
         col_defs: []const ColumnDefinition41,
 
-        pub fn init(conn: *Conn, allocator: Allocator, io: std.Io, packet: *const Packet) !ResultSet(T) {
+        pub fn init(conn: *Conn, io: std.Io, packet: *const Packet) !ResultSet(T) {
             var reader = packet.reader();
             const n_columns = reader.readLengthEncodedInteger();
             std.debug.assert(reader.finished());
 
-            try conn.readPutResultColumns(allocator, io, n_columns);
+            try conn.readPutResultColumns(io, n_columns);
 
             return .{
                 .conn = conn,
                 .col_defs = conn.result_meta.col_defs.items,
             };
-        }
-
-        fn deinit(r: *const ResultSet(T), allocator: Allocator) void {
-            for (r.col_packets) |packet| {
-                packet.deinit(allocator);
-            }
-            allocator.free(r.col_packets);
-            allocator.free(r.col_defs);
         }
 
         pub fn readRow(r: *const ResultSet(T), io: std.Io) !ResultRow(T) {
