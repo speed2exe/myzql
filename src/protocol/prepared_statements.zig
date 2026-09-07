@@ -446,11 +446,11 @@ pub fn nullBitsParamsAttrs(params: anytype, start: usize, attrs: []const BinaryP
     return byte;
 }
 
-inline fn isNull(param: anytype) bool {
-    return comptime switch (@typeInfo(@TypeOf(param))) {
-        inline .optional => if (param) |p| isNull(p) else true,
-        inline .null => true,
-        inline else => false,
+fn isNull(param: anytype) bool {
+    return switch (@typeInfo(@TypeOf(param))) {
+        .optional => if (param) |p| isNull(p) else true,
+        .null => true,
+        else => false,
     };
 }
 
