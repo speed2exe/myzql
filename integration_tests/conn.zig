@@ -1040,6 +1040,36 @@ test "stress" {
     }
 }
 
+test "second query after a per-call arena is freed crashes" {
+    var conn = try Conn.init(allocator, io, &test_config);
+    defer conn.deinit(allocator, io);
+
+    var i: usize = 0;
+    while (i < 5) : (i += 1) {
+        // One fresh arena per query, freed when the iteration ends.
+        var arena_state = std.heap.ArenaAllocator.init(allocator);
+        defer arena_state.deinit();
+        const arena = arena_state.allocator();
+
+        const query_res = try conn.queryRows(
+            arena,
+            io,
+            "SELECT 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15",
+        );
+        const rows = try query_res.expect(.rows);
+
+        // Fully drain the result set (all rows + trailing EOF packet), as
+        // documented — the crash happens even with a complete drain.
+        var iter = rows.iter();
+        while (try iter.next(io)) |row| {
+            var elems = row.iter();
+            while (elems.next()) |_| {}
+        }
+
+        std.debug.print("iteration {d} ok\n", .{i});
+    }
+}
+
 fn runtimeValue(a: anytype) @TypeOf(a) {
     return a;
 }
