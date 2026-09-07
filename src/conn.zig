@@ -38,6 +38,7 @@ const buffer_size: usize = 4096;
 /// Use `init` to establish a connection, and `deinit` to close it.
 /// A single `Conn` must not be used concurrently from multiple threads.
 pub const Conn = struct {
+    allocator: Allocator,
     connected: bool,
     stream: Io.net.Stream,
     reader: PacketReader,
@@ -61,6 +62,7 @@ pub const Conn = struct {
             };
 
             break :blk .{
+                .allocator = allocator,
                 .connected = true,
                 .stream = stream,
                 .reader = try PacketReader.init(allocator, stream),
@@ -152,12 +154,12 @@ pub const Conn = struct {
     /// Returns `QueryResultRows(TextResultRow)` which is either `.rows` (ResultSet) or `.err` (ErrorPacket).
     /// Use `query` instead if your query does not return a result set.
     // query that expect rows, even if it returns 0 rows
-    pub fn queryRows(c: *Conn, allocator: Allocator, io: std.Io, query_string: []const u8) !QueryResultRows(TextResultRow) {
+    pub fn queryRows(c: *Conn, io: std.Io, query_string: []const u8) !QueryResultRows(TextResultRow) {
         c.ready();
         const query_req: QueryRequest = .{ .query = query_string };
         try c.writePacket(query_req);
         try c.writer.flush(io);
-        return QueryResultRows(TextResultRow).init(c, allocator, io);
+        return QueryResultRows(TextResultRow).init(c, io);
     }
 
     /// Prepare a SQL statement for execution.
@@ -195,7 +197,7 @@ pub const Conn = struct {
     /// Returns `QueryResultRows(BinaryResultRow)` which is either `.rows` (ResultSet) or `.err` (ErrorPacket).
     /// Use `execute` instead if your query does not return a result set.
     // execute a prepared statement that expect rows, even if it returns 0 rows
-    pub fn executeRows(c: *Conn, allocator: Allocator, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
+    pub fn executeRows(c: *Conn, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
         c.ready();
         std.debug.assert(prep_stmt.res_cols.len > 0); // executeRows expects rows
         c.sequence_id = 0;
@@ -205,7 +207,7 @@ pub const Conn = struct {
         };
         try c.writePacketWithParam(execute_request, params);
         try c.writer.flush(io);
-        return QueryResultRows(BinaryResultRow).init(c, allocator, io);
+        return QueryResultRows(BinaryResultRow).init(c, io);
     }
 
     fn quit(c: *Conn, io: std.Io) !void {
@@ -400,8 +402,8 @@ pub const Conn = struct {
         return packet;
     }
 
-    pub inline fn readPutResultColumns(c: *Conn, allocator: Allocator, io: std.Io, n: usize) !void {
-        try c.result_meta.readPutResultColumns(allocator, io, c, n);
+    pub inline fn readPutResultColumns(c: *Conn, io: std.Io, n: usize) !void {
+        try c.result_meta.readFromConn(io, c, n);
     }
 
     inline fn writePacket(c: *Conn, packet: anytype) !void {

@@ -268,8 +268,8 @@ pub const Pool = struct {
         }
 
         /// Execute a query that returns rows (SELECT, etc.).
-        pub fn queryRows(m: *ManagedConn, allocator: Allocator, io: std.Io, query_string: []const u8) !QueryResultRows(TextResultRow) {
-            return m.conn.queryRows(allocator, io, query_string);
+        pub fn queryRows(m: *ManagedConn, io: std.Io, query_string: []const u8) !QueryResultRows(TextResultRow) {
+            return m.conn.queryRows(io, query_string);
         }
 
         /// Prepare a SQL statement for execution.
@@ -283,8 +283,8 @@ pub const Pool = struct {
         }
 
         /// Execute a prepared statement that returns rows.
-        pub fn executeRows(m: *ManagedConn, allocator: Allocator, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
-            return m.conn.executeRows(allocator, io, prep_stmt, params);
+        pub fn executeRows(m: *ManagedConn, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
+            return m.conn.executeRows(io, prep_stmt, params);
         }
     };
 };
