@@ -18,8 +18,17 @@ pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const 
     const null_bitmap = reader.readRefRuntime(null_bitmap_len);
 
     const child_type = @typeInfo(@TypeOf(dest)).pointer.child;
-    const struct_field_names = @typeInfo(child_type).@"struct".field_names;
-    const struct_field_types = @typeInfo(child_type).@"struct".field_types;
+    const struct_fields = @typeInfo(child_type).@"struct".fields;
+    const struct_field_names = comptime blk: {
+        var names: [struct_fields.len][]const u8 = undefined;
+        for (struct_fields, 0..) |f, i| names[i] = f.name;
+        break :blk names;
+    };
+    const struct_field_types = comptime blk: {
+        var types: [struct_fields.len]type = undefined;
+        for (struct_fields, 0..) |f, i| types[i] = f.type;
+        break :blk types;
+    };
 
     if (struct_field_names.len != col_defs.len) {
         //left always is `false` and struct_field_names.len always equals struct_field_types.len
@@ -127,7 +136,7 @@ inline fn binElemToValue(
     allocator: ?std.mem.Allocator,
 ) !FieldType {
     const field_info = @typeInfo(FieldType);
-    const col_type: EnumFieldType = @fromBackingInt(@intCast(col_def.column_type));
+    const col_type: EnumFieldType = @enumFromInt(@as(u8, @intCast(col_def.column_type)));
 
     switch (FieldType) {
         DateTime => {
@@ -184,7 +193,7 @@ inline fn binElemToValue(
                 else => {},
             }
         },
-        .@"enum" => |e| {
+        .@"enum" => {
             switch (col_type) {
                 .MYSQL_TYPE_STRING,
                 .MYSQL_TYPE_VARCHAR,
@@ -201,7 +210,8 @@ inline fn binElemToValue(
                 .MYSQL_TYPE_NEWDECIMAL,
                 => {
                     const str = reader.readLengthEncodedString();
-                    inline for (e.field_names) |f| {
+                    inline for (@typeInfo(FieldType).@"enum".fields) |ef| {
+                        const f = ef.name;
                         if (std.mem.eql(u8, str, f)) {
                             return @field(FieldType, f);
                         }

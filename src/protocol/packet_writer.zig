@@ -58,11 +58,7 @@ pub const PacketWriter = struct {
     pub inline fn flush(p: *PacketWriter, io: std.Io) !void {
         const data = p.buf[0..p.pos];
 
-        const result = try io.operate(.{ .net_write = .{
-            .socket_handle = p.stream.socket.handle,
-            .data = &.{data},
-        } });
-        _ = try result.net_write;
+        _ = try io.vtable.netWrite(io.userdata, p.stream.socket.handle, "", &.{data}, 1);
         p.pos = 0;
     }
 
