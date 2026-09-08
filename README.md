@@ -11,7 +11,7 @@
 | 0.13.2      | 0.13.0                    |
 | 0.14.0      | 0.14.0                    |
 | 0.15.1      | 0.15.1                    |
-| 0.16.0      | 0.16.0                    |
+| 0.16.1      | 0.16.0                    |
 | main        | v0.17.0-dev.1978+c961124d9|
 
 ## Features
@@ -32,7 +32,7 @@
 ## Add as dependency to your Zig project
 ### Fetch dependency
 ```bash
-zig fetch --save git+https://github.com/speed2exe/myzql#0.16.0
+zig fetch --save git+https://github.com/speed2exe/myzql#0.16.1
 ```
 or
 - `build.zig.zon`
@@ -41,7 +41,7 @@ or
     .dependencies = .{
       .myzql = .{
         // choose a tag according to "Version Compatibility" table
-        .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.16.0.tar.gz",
+        .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.16.1.tar.gz",
         .hash = "1220582ea45580eec6b16aa93d2a9404467db8bc1d911806d367513aa40f3817f84c",
       }
     },
