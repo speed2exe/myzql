@@ -58,8 +58,8 @@ pub fn QueryResult(comptime T: type) type {
     };
 }
 
-/// Result of a query that returns rows (from `Conn.queryRows` or `Conn.executeRows`).
-/// T is either `TextResultRow` (from `queryRows`) or `BinaryResultRow` (from `executeRows`).
+/// Result of a query that returns rows.
+/// T is either `TextResultRow` (from text protocol queries) or `BinaryResultRow` (from prepared statement execution).
 /// Use `.expect(.rows)` to get the `ResultSet(T)`, or `.expect(.err)` to get the `ErrorPacket`.
 pub fn QueryResultRows(comptime T: type) type {
     return union(enum) {
@@ -88,7 +88,7 @@ pub fn QueryResultRows(comptime T: type) type {
         ///
         /// Example:
         /// ```zig
-        /// const result: QueryResultRows(TextResultRow) = try conn.queryRows("SELECT * FROM table");
+        /// const result: QueryResultRows(TextResultRow) = try conn.execute(&prep_stmt, .{});
         /// const rows: ResultSet(TextResultRow) = try result.expect(.rows);
         /// ```
         pub fn expect(
@@ -112,7 +112,7 @@ pub fn QueryResultRows(comptime T: type) type {
 }
 
 /// A result set returned by a query that produces rows.
-/// T is either `TextResultRow` (from `queryRows`) or `BinaryResultRow` (from `executeRows`).
+/// T is either `TextResultRow` (from text protocol queries) or `BinaryResultRow` (from prepared statement execution).
 /// Use `iter()` to iterate over rows, `first()` to get only the first row,
 /// or `tableTexts()` / `tableStructs()` (via the iterator) to collect all rows at once.
 pub fn ResultSet(comptime T: type) type {
@@ -209,7 +209,7 @@ pub fn ResultSet(comptime T: type) type {
     };
 }
 
-/// A single row returned by a text protocol query (`Conn.queryRows`).
+/// A single row returned by a text protocol query (via `Conn.query`).
 /// Use `iter()` to iterate over raw text elements,
 /// or `textElems()` to collect all elements into an allocated slice.
 pub const TextResultRow = struct {
@@ -274,7 +274,7 @@ fn scanTextResultRow(dest: []?[]const u8, packet: *const Packet) void {
     }
 }
 
-/// A single row returned by a binary protocol query (`Conn.executeRows`).
+/// A single row returned by a binary protocol query (via `Conn.execute`).
 /// Use `scan` to scan row values into an existing struct,
 /// or `structCreate` to allocate a new struct (must be freed with `structDestroy`).
 pub const BinaryResultRow = struct {
@@ -441,7 +441,7 @@ pub const PrepareResult = union(enum) {
 };
 
 /// A prepared statement returned by `Conn.prepare`.
-/// Pass a pointer to this to `Conn.execute` or `Conn.executeRows` to run the query.
+/// Pass a pointer to this to `Conn.execute` to run the query.
 /// Resources are freed when `PrepareResult.deinit` is called.
 pub const PreparedStatement = struct {
     prep_ok: PrepareOk,
