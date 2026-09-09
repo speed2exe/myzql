@@ -6,7 +6,6 @@ const Config = @import("./config.zig").Config;
 const Conn = @import("./conn.zig").Conn;
 const result = @import("./result.zig");
 const QueryResult = result.QueryResult;
-const QueryResultRows = result.QueryResultRows;
 const PrepareResult = result.PrepareResult;
 const PreparedStatement = result.PreparedStatement;
 const TextResultRow = result.TextResultRow;
@@ -23,7 +22,7 @@ pub const Options = struct {
 ///
 /// Usage:
 /// ```zig
-/// var pool = try Pool.init(allocator, io, &config, .{ .max_size = 10 });
+/// var pool = try Pool.init(allocator, &config, .{ .max_size = 10 });
 /// defer pool.deinit();
 ///
 /// var mc = try pool.acquireManaged();
@@ -35,7 +34,6 @@ pub const Options = struct {
 /// (internal connections store pointers to pool-owned config strings).
 pub const Pool = struct {
     allocator: Allocator,
-    io: Io,
 
     /// Owned copy of config with all string fields cloned into pool-owned memory.
     owned_config: OwnedConfig,
@@ -72,7 +70,7 @@ pub const Pool = struct {
     /// Clones string fields from `config` into pool-owned memory so the
     /// original `config` does not need to outlive the pool.
     /// No connections are created until `acquire` is called.
-    pub fn init(allocator: Allocator, io: Io, config: *const Config, options: Options) !Pool {
+    pub fn init(allocator: Allocator, config: *const Config, options: Options) !Pool {
         const username = try allocator.dupeSentinel(u8, config.username, 0);
         errdefer allocator.free(username);
 
@@ -100,7 +98,6 @@ pub const Pool = struct {
 
         return .{
             .allocator = allocator,
-            .io = io,
             .owned_config = owned_config,
             .idle = std.ArrayList(*Conn).empty,
             .total_count = 0,
@@ -114,12 +111,12 @@ pub const Pool = struct {
     /// Any connections currently in use (acquired but not yet released) will
     /// not be closed by this call — the caller is responsible for releasing
     /// them first. A warning is logged if connections remain outstanding.
-    pub fn deinit(p: *Pool) void {
-        p.mutex.lockUncancelable(p.io);
-        defer p.mutex.unlock(p.io);
+    pub fn deinit(p: *Pool, io: std.Io) void {
+        p.mutex.lockUncancelable(io);
+        defer p.mutex.unlock(io);
 
         for (p.idle.items) |conn| {
-            conn.deinit(p.allocator, p.io);
+            conn.deinit(p.allocator, io);
             p.allocator.destroy(conn);
             p.total_count -= 1;
         }
@@ -141,20 +138,20 @@ pub const Pool = struct {
     /// Returns `error.PoolExhausted` if all connections are in use and
     /// `max_size` has been reached.
     pub fn acquire(p: *Pool, io: std.Io) !*Conn {
-        p.mutex.lockUncancelable(p.io);
-        defer p.mutex.unlock(p.io);
+        p.mutex.lockUncancelable(io);
+        defer p.mutex.unlock(io);
 
         // Try to reuse an idle connection
         while (p.idle.pop()) |conn| {
             if (!conn.connected) {
-                conn.deinit(p.allocator, p.io);
+                conn.deinit(p.allocator, io);
                 p.allocator.destroy(conn);
                 p.total_count -= 1;
                 continue;
             }
             // Health check — if ping fails, close and try the next one
             conn.ping(io) catch {
-                conn.deinit(p.allocator, p.io);
+                conn.deinit(p.allocator, io);
                 p.allocator.destroy(conn);
                 p.total_count -= 1;
                 continue;
@@ -170,7 +167,7 @@ pub const Pool = struct {
         const conn = try p.allocator.create(Conn);
         errdefer p.allocator.destroy(conn);
 
-        conn.* = try Conn.init(p.allocator, p.io, &p.owned_config.value);
+        conn.* = try Conn.init(p.allocator, io, &p.owned_config.value);
         p.total_count += 1;
         return conn;
     }
@@ -181,13 +178,13 @@ pub const Pool = struct {
     /// metadata) so it's ready for the next user. If the connection has died
     /// (`connected == false`), it is closed and freed instead of being
     /// returned to the pool.
-    pub fn release(p: *Pool, conn: *Conn) void {
-        p.mutex.lockUncancelable(p.io);
-        defer p.mutex.unlock(p.io);
+    pub fn release(p: *Pool, conn: *Conn, io: std.Io) void {
+        p.mutex.lockUncancelable(io);
+        defer p.mutex.unlock(io);
 
         if (!conn.connected) {
             // Connection died while in use — close and free
-            conn.deinit(p.allocator, p.io);
+            conn.deinit(p.allocator, io);
             p.allocator.destroy(conn);
             p.total_count -= 1;
             return;
@@ -203,7 +200,7 @@ pub const Pool = struct {
 
         p.idle.append(p.allocator, conn) catch {
             // Out of memory — close the connection rather than leaking
-            conn.deinit(p.allocator, p.io);
+            conn.deinit(p.allocator, io);
             p.allocator.destroy(conn);
             p.total_count -= 1;
         };
@@ -224,17 +221,17 @@ pub const Pool = struct {
     }
 
     /// Returns the number of idle connections currently in the pool.
-    pub fn idleCount(p: *Pool) usize {
-        p.mutex.lockUncancelable(p.io);
-        defer p.mutex.unlock(p.io);
+    pub fn idleCount(p: *Pool, io: std.Io) usize {
+        p.mutex.lockUncancelable(io);
+        defer p.mutex.unlock(io);
         return p.idle.items.len;
     }
 
     /// Returns the total number of connections managed by the pool
     /// (idle + in-use).
-    pub fn totalCount(p: *Pool) usize {
-        p.mutex.lockUncancelable(p.io);
-        defer p.mutex.unlock(p.io);
+    pub fn totalCount(p: *Pool, io: std.Io) usize {
+        p.mutex.lockUncancelable(io);
+        defer p.mutex.unlock(io);
         return p.total_count;
     }
 
@@ -247,8 +244,8 @@ pub const Pool = struct {
         conn: *Conn,
 
         /// Return the connection to the pool.
-        pub fn deinit(m: *ManagedConn) void {
-            m.pool.release(m.conn);
+        pub fn deinit(m: *ManagedConn, io: std.Io) void {
+            m.pool.release(m.conn, io);
         }
 
         /// Access the underlying raw `Conn` for operations not covered by
@@ -263,13 +260,8 @@ pub const Pool = struct {
         }
 
         /// Execute a query that does not return rows (INSERT, UPDATE, DELETE, etc.).
-        pub fn query(m: *ManagedConn, query_string: []const u8) !QueryResult {
-            return m.conn.query(m.pool.io, query_string);
-        }
-
-        /// Execute a query that returns rows (SELECT, etc.).
-        pub fn queryRows(m: *ManagedConn, io: std.Io, query_string: []const u8) !QueryResultRows(TextResultRow) {
-            return m.conn.queryRows(io, query_string);
+        pub fn query(m: *ManagedConn, io: std.Io, query_string: []const u8) !QueryResult(TextResultRow) {
+            return m.conn.query(io, query_string);
         }
 
         /// Prepare a SQL statement for execution.
@@ -278,13 +270,8 @@ pub const Pool = struct {
         }
 
         /// Execute a prepared statement that does not return rows.
-        pub fn execute(m: *ManagedConn, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult {
-            return m.conn.execute(m.pool.io, prep_stmt, params);
-        }
-
-        /// Execute a prepared statement that returns rows.
-        pub fn executeRows(m: *ManagedConn, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
-            return m.conn.executeRows(io, prep_stmt, params);
+        pub fn execute(m: *ManagedConn, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
+            return m.conn.execute(io, prep_stmt, params);
         }
     };
 };

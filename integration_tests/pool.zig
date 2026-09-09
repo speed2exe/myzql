@@ -24,7 +24,7 @@ const allocator = std.testing.allocator;
 
 // convenient function for testing
 fn queryExpectOk(mc: *Pool.ManagedConn, query: []const u8) !void {
-    const query_res = try mc.query(query);
+    const query_res = try mc.query(io, query);
     _ = try query_res.expect(.ok);
 }
 
@@ -35,57 +35,57 @@ fn queryExpectOkLogError(mc: *Pool.ManagedConn, query: []const u8) void {
 }
 
 test "ping" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
     try mc.ping(io);
 }
 
 test "ping unix socket" {
     const cfg = test_config_unix orelse return error.SkipZigTest;
-    var pool = try Pool.init(allocator, io, &cfg, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &cfg, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
     try mc.ping(io);
 }
 
 test "connect with database" {
-    var pool = try Pool.init(allocator, io, &test_config_with_db, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config_with_db, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
     try mc.ping(io);
 }
 
 test "query database create and drop" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
     try queryExpectOk(&mc, "CREATE DATABASE testdb");
     try queryExpectOk(&mc, "DROP DATABASE testdb");
 }
 
 test "query syntax error" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
-    const qr = try mc.query("garbage query");
+    const qr = try mc.query(io, "garbage query");
     _ = try qr.expect(.err);
 }
 
 test "query text protocol" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
     { // Iterating over rows and elements
-        const query_res = try mc.queryRows(io, "SELECT 1");
+        const query_res = try mc.query(io, "SELECT 1");
 
         const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
         const rows_iter: ResultRowIter(TextResultRow) = rows.iter();
@@ -97,7 +97,7 @@ test "query text protocol" {
         }
     }
     { // Iterating over rows, collecting elements into []const ?[]const u8
-        const query_res = try mc.queryRows(io, "SELECT 3, 4, null, 6, 7");
+        const query_res = try mc.query(io, "SELECT 3, 4, null, 6, 7");
         const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
         const rows_iter: ResultRowIter(TextResultRow) = rows.iter();
         while (try rows_iter.next(io)) |row| {
@@ -111,7 +111,7 @@ test "query text protocol" {
         }
     }
     { // Iterating over rows, collecting elements into []const []const ?[]const u8
-        const query_res = try mc.queryRows(io, "SELECT 8,9 UNION ALL SELECT 10,11");
+        const query_res = try mc.query(io, "SELECT 8,9 UNION ALL SELECT 10,11");
         var rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
         var table = try rows.tableTexts(allocator, io);
         defer table.deinit(allocator);
@@ -127,10 +127,10 @@ test "query text protocol" {
 }
 
 test "prepare check" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
     const c = mc.raw();
     { // prepare no execute
         const prep_res = try mc.prepare(allocator, io, "CREATE TABLE default.testtable (id INT, name VARCHAR(255))");
@@ -153,31 +153,31 @@ test "prepare check" {
 }
 
 test "prepare execute - 1" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
     {
         const prep_res = try mc.prepare(allocator, io, "CREATE DATABASE testdb");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try mc.execute(&prep_stmt, .{});
+        const query_res = try mc.execute(io, &prep_stmt, .{});
         _ = try query_res.expect(.ok);
     }
     {
         const prep_res = try mc.prepare(allocator, io, "DROP DATABASE testdb");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try mc.execute(&prep_stmt, .{});
+        const query_res = try mc.execute(io, &prep_stmt, .{});
         _ = try query_res.expect(.ok);
     }
 }
 
 test "prepare execute - 2" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
     const prep_res_1 = try mc.prepare(allocator, io, "CREATE DATABASE testdb");
     defer prep_res_1.deinit(allocator);
@@ -188,20 +188,20 @@ test "prepare execute - 2" {
     const prep_stmt_2: PreparedStatement = try prep_res_2.expect(.stmt);
 
     {
-        const query_res = try mc.execute(&prep_stmt_1, .{});
+        const query_res = try mc.execute(io, &prep_stmt_1, .{});
         _ = try query_res.expect(.ok);
     }
     {
-        const query_res = try mc.execute(&prep_stmt_2, .{});
+        const query_res = try mc.execute(io, &prep_stmt_2, .{});
         _ = try query_res.expect(.ok);
     }
 }
 
 test "prepare execute with result" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
     {
         const query =
@@ -210,7 +210,7 @@ test "prepare execute with result" {
         const prep_res = try mc.prepare(allocator, io, query);
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try mc.executeRows(io, &prep_stmt, .{});
+        const query_res = try mc.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
 
         const MyType = struct {
@@ -241,7 +241,7 @@ test "prepare execute with result" {
         defer BinaryResultRow.structDestroy(dest_ptr, allocator);
 
         { // Dummy query to test for invalid memory reuse
-            const query_res2 = try mc.queryRows(io, "SELECT 3, 4, null, 6, 7");
+            const query_res2 = try mc.query(io, "SELECT 3, 4, null, 6, 7");
 
             const rows2: ResultSet(TextResultRow) = try query_res2.expect(.rows);
             const rows_iter2: ResultRowIter(TextResultRow) = rows2.iter();
@@ -261,7 +261,7 @@ test "prepare execute with result" {
         const prep_res = try mc.prepare(allocator, io, query);
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try mc.executeRows(io, &prep_stmt, .{});
+        const query_res = try mc.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -282,10 +282,10 @@ test "prepare execute with result" {
 }
 
 test "prepare execute - first" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
     {
         const query =
@@ -297,7 +297,7 @@ test "prepare execute - first" {
         const prep_res = try mc.prepare(allocator, io, query);
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.stmt);
-        const query_res = try mc.executeRows(io, &prep_stmt, .{});
+        const query_res = try mc.execute(io, &prep_stmt, .{});
         const rows = try query_res.expect(.rows);
 
         const MyType = struct { a: u8 };
@@ -322,7 +322,7 @@ test "prepare execute - first" {
         const prep_res = try mc.prepare(allocator, io, query);
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.stmt);
-        const query_res = try mc.executeRows(io, &prep_stmt, .{});
+        const query_res = try mc.execute(io, &prep_stmt, .{});
         const rows = try query_res.expect(.rows);
 
         const first = try rows.first(io);
@@ -332,10 +332,10 @@ test "prepare execute - first" {
 }
 
 test "binary data types - int" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
     try queryExpectOk(&mc, "CREATE DATABASE test");
     defer queryExpectOk(&mc, "DROP DATABASE test") catch {};
@@ -376,13 +376,13 @@ test "binary data types - int" {
             .{ @as(?i8, null), @as(?i16, null), @as(?i32, null), @as(?i64, null), @as(?u8, null), @as(?u16, null), @as(?u32, null), @as(?u64, null), @as(?u8, null), @as(?u64, null) },
         };
         inline for (params) |param| {
-            const exe_res = try mc.execute(&prep_stmt, param);
+            const exe_res = try mc.execute(io, &prep_stmt, param);
             _ = try exe_res.expect(.ok);
         }
     }
 
     { // Select (Text Protocol)
-        const res = try mc.queryRows(io, "SELECT * FROM test.int_types_example");
+        const res = try mc.query(io, "SELECT * FROM test.int_types_example");
         var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
         var table_texts = try rows.tableTexts(allocator, io);
@@ -418,7 +418,7 @@ test "binary data types - int" {
         const prep_res = try mc.prepare(allocator, io, "SELECT * FROM test.int_types_example LIMIT 4");
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.executeRows(io, &prep_stmt, .{});
+        const res = try mc.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
 
         const expected: []const IntTypesExample = &.{
@@ -479,10 +479,10 @@ test "binary data types - int" {
 }
 
 test "binary data types - float" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
     try queryExpectOk(&mc, "CREATE DATABASE test");
     defer queryExpectOk(&mc, "DROP DATABASE test") catch {};
@@ -511,13 +511,13 @@ test "binary data types - float" {
             .{ @as(?f32, null), @as(?f64, null) },
         };
         inline for (params) |param| {
-            const exe_res = try mc.execute(&prep_stmt, param);
+            const exe_res = try mc.execute(io, &prep_stmt, param);
             _ = try exe_res.expect(.ok);
         }
     }
 
     { // Text Protocol
-        const res = try mc.queryRows(io, "SELECT * FROM test.float_types_example");
+        const res = try mc.query(io, "SELECT * FROM test.float_types_example");
         var rows: ResultSet(TextResultRow) = try res.expect(.rows);
         var table_texts = try rows.tableTexts(allocator, io);
         defer table_texts.deinit(allocator);
@@ -544,7 +544,7 @@ test "binary data types - float" {
         const prep_res = try mc.prepare(allocator, io, "SELECT * FROM test.float_types_example LIMIT 3");
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.executeRows(io, &prep_stmt, .{});
+        const res = try mc.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const row_iter = rows.iter();
 
@@ -561,10 +561,10 @@ test "binary data types - float" {
 }
 
 test "binary data types - string" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
     try queryExpectOk(&mc, "CREATE DATABASE test");
     defer queryExpectOk(&mc, "DROP DATABASE test") catch {};
@@ -598,13 +598,13 @@ test "binary data types - string" {
             },
         };
         inline for (params) |param| {
-            const exe_res = try mc.execute(&prep_stmt, param);
+            const exe_res = try mc.execute(io, &prep_stmt, param);
             _ = try exe_res.expect(.ok);
         }
     }
 
     { // Text Protocol
-        const res = try mc.queryRows(io, "SELECT * FROM test.string_types_example");
+        const res = try mc.query(io, "SELECT * FROM test.string_types_example");
         var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
         var table_texts = try rows.tableTexts(allocator, io);
@@ -632,7 +632,7 @@ test "binary data types - string" {
         );
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.executeRows(io, &prep_stmt, .{});
+        const res = try mc.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -670,10 +670,10 @@ test "binary data types - string" {
 }
 
 test "binary data types - array" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
     try queryExpectOk(&mc, "CREATE DATABASE test");
     defer queryExpectOk(&mc, "DROP DATABASE test") catch {};
@@ -698,7 +698,7 @@ test "binary data types - array" {
             .{ "024", "123" },
         };
         inline for (params) |param| {
-            const exe_res = try mc.execute(&prep_stmt, param);
+            const exe_res = try mc.execute(io, &prep_stmt, param);
             _ = try exe_res.expect(.ok);
         }
 
@@ -707,13 +707,13 @@ test "binary data types - array" {
             .{ "02468", "12345" },
         };
         inline for (fail_params) |param| {
-            const exe_res = try mc.execute(&prep_stmt, param);
+            const exe_res = try mc.execute(io, &prep_stmt, param);
             _ = try exe_res.expect(.err);
         }
     }
 
     { // Text Protocol
-        const res = try mc.queryRows(io, "SELECT * FROM test.array_types_example");
+        const res = try mc.query(io, "SELECT * FROM test.array_types_example");
         var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
         var table_texts = try rows.tableTexts(allocator, io);
@@ -755,7 +755,7 @@ test "binary data types - array" {
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.stmt);
         {
-            const res = try mc.executeRows(io, &prep_stmt, .{});
+            const res = try mc.execute(io, &prep_stmt, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -781,7 +781,7 @@ test "binary data types - array" {
         }
 
         {
-            const res = try mc.executeRows(io, &prep_stmt, .{});
+            const res = try mc.execute(io, &prep_stmt, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -807,7 +807,7 @@ test "binary data types - array" {
         }
 
         {
-            const res = try mc.executeRows(io, &prep_stmt, .{});
+            const res = try mc.execute(io, &prep_stmt, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -833,7 +833,7 @@ test "binary data types - array" {
         }
 
         {
-            const res = try mc.executeRows(io, &prep_stmt, .{});
+            const res = try mc.execute(io, &prep_stmt, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -861,10 +861,10 @@ test "binary data types - array" {
 }
 
 test "binary data types - temporal" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
     try queryExpectOk(&mc, "CREATE DATABASE test");
     defer queryExpectOk(&mc, "DROP DATABASE test") catch {};
@@ -900,13 +900,13 @@ test "binary data types - temporal" {
         };
 
         inline for (params) |param| {
-            const exe_res = try mc.execute(&prep_stmt, param);
+            const exe_res = try mc.execute(io, &prep_stmt, param);
             _ = try exe_res.expect(.ok);
         }
     }
 
     { // Text Protocol
-        const res = try mc.queryRows(io, "SELECT * FROM test.temporal_types_example");
+        const res = try mc.query(io, "SELECT * FROM test.temporal_types_example");
         var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
         var table_texts = try rows.tableTexts(allocator, io);
@@ -933,7 +933,7 @@ test "binary data types - temporal" {
         const prep_res = try mc.prepare(allocator, io, "SELECT * FROM test.temporal_types_example LIMIT 3");
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.executeRows(io, &prep_stmt, .{});
+        const res = try mc.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -971,16 +971,16 @@ test "binary data types - temporal" {
 }
 
 test "select concat with params" {
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
     { // Select (Binary Protocol)
         const prep_res = try mc.prepare(allocator, io, "SELECT CONCAT(?, ?) AS col1");
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.executeRows(io, &prep_stmt, .{ runtimeValue("hello"), runtimeValue("world") });
+        const res = try mc.execute(io, &prep_stmt, .{ runtimeValue("hello"), runtimeValue("world") });
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -996,10 +996,10 @@ test "select concat with params" {
 test "stress" {
     if (build_options.skip_stress) return error.SkipZigTest;
 
-    var pool = try Pool.init(allocator, io, &test_config, .{ .max_size = 1 });
-    defer pool.deinit();
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
     var mc = try pool.acquireManaged(io);
-    defer mc.deinit();
+    defer mc.deinit(io);
 
     { // Select (Binary Protocol)
         const prep_res = try mc.prepare(allocator, io,
@@ -1062,7 +1062,7 @@ test "stress" {
         ); // https://stackoverflow.com/a/10432083
         defer prep_res.deinit(allocator);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.executeRows(io, &prep_stmt, .{});
+        const res = try mc.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 

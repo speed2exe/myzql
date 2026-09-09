@@ -14,48 +14,49 @@ const PacketReader = protocol.packet_reader.PacketReader;
 const Conn = @import("./conn.zig").Conn;
 const conversion = @import("./conversion.zig");
 
-/// Result of a query that does not return rows.
-/// Use `.expect(.ok)` to get the `OkPacket`, or `.expect(.err)` to get the `ErrorPacket`.
-pub const QueryResult = union(enum) {
-    ok: OkPacket,
-    err: ErrorPacket,
+pub fn QueryResult(comptime T: type) type {
+    return union(enum) {
+        ok: OkPacket,
+        err: ErrorPacket,
+        rows: ResultSet(T),
 
-    pub fn init(packet: *const Packet, capabilities: u32) !QueryResult {
-        return switch (packet.payload[0]) {
-            constants.OK => .{ .ok = OkPacket.init(packet, capabilities) },
-            constants.ERR => .{ .err = ErrorPacket.init(packet) },
-            constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-            else => {
-                std.log.warn(
-                    \\Unexpected packet: {any}\n,
-                    \\Are you expecting a result set? If so, use QueryResultRows instead.
-                    \\This is unrecoverable error.
-                , .{packet});
-                return error.UnrecoverableError;
-            },
-        };
-    }
+        pub fn init(packet: *const Packet, c: *Conn, io: std.Io) !@This() {
+            return switch (packet.payload[0]) {
+                constants.OK => .{ .ok = OkPacket.init(packet, c.capabilities) },
+                constants.ERR => .{ .err = ErrorPacket.init(packet) },
+                constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
+                else => .{ .rows = try ResultSet(T).init(c, io, packet) },
+            };
+        }
 
-    /// Unwrap the result to the given variant, returning an error if it does not match.
-    /// If the result is `.err`, the error packet's message is logged and returned as a Zig error.
-    pub fn expect(
-        q: QueryResult,
-        comptime value_variant: std.meta.FieldEnum(QueryResult),
-    ) !@FieldType(QueryResult, @tagName(value_variant)) {
-        return switch (q) {
-            value_variant => @field(q, @tagName(value_variant)),
-            else => {
-                return switch (q) {
-                    .err => |err| return err.asError(),
-                    .ok => |ok| {
-                        std.log.err("Unexpected OkPacket: {any}\n", .{ok});
-                        return error.UnexpectedOk;
-                    },
-                };
-            },
-        };
-    }
-};
+        /// Unwrap the result to the given variant, returning an error if it does not match.
+        ///
+        /// `.expect(.ok)` => `OkPacket`,
+        /// `.expect(.err)` => `ErrorPacket`,
+        /// `.expect(.rows)` => `ResultSet(T)`.
+        pub fn expect(
+            q: @This(),
+            comptime variant: std.meta.FieldEnum(@This()),
+        ) !@FieldType(@This(), @tagName(variant)) {
+            return switch (q) {
+                variant => @field(q, @tagName(variant)),
+                else => {
+                    return switch (q) {
+                        .rows => |rows| {
+                            std.log.err("Unexpected ResultSet: {any}", .{rows});
+                            return error.UnexpectedResultSet;
+                        },
+                        .err => |err| return err.asError(),
+                        .ok => |ok| {
+                            std.log.err("Unexpected OkPacket: {any}", .{ok});
+                            return error.UnexpectedOk;
+                        },
+                    };
+                },
+            };
+        }
+    };
+}
 
 /// Result of a query that returns rows (from `Conn.queryRows` or `Conn.executeRows`).
 /// T is either `TextResultRow` (from `queryRows`) or `BinaryResultRow` (from `executeRows`).
@@ -66,7 +67,7 @@ pub fn QueryResultRows(comptime T: type) type {
         rows: ResultSet(T),
 
         // allocation happens when a result set is returned
-        pub fn init(c: *Conn, io: std.Io) !QueryResultRows(T) {
+        pub fn init(c: *Conn, io: std.Io) !@This() {
             const packet = try c.readPacket(io);
             return switch (packet.payload[0]) {
                 constants.OK => {
@@ -91,8 +92,8 @@ pub fn QueryResultRows(comptime T: type) type {
         /// const rows: ResultSet(TextResultRow) = try result.expect(.rows);
         /// ```
         pub fn expect(
-            q: QueryResultRows(T),
-            comptime value_variant: std.meta.FieldEnum(QueryResultRows(T)),
+            q: @This(),
+            comptime value_variant: std.meta.FieldEnum(@This()),
         ) !@FieldType(QueryResultRows(T), @tagName(value_variant)) {
             return switch (q) {
                 value_variant => @field(q, @tagName(value_variant)),
