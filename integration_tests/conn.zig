@@ -73,7 +73,7 @@ test "query text protocol" {
     defer c.deinit(allocator, io);
 
     { // Iterating over rows and elements
-        const query_res = try c.queryRows(io, "SELECT 1");
+        const query_res = try c.query(io, "SELECT 1");
 
         const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
         const rows_iter: ResultRowIter(TextResultRow) = rows.iter();
@@ -85,7 +85,7 @@ test "query text protocol" {
         }
     }
     { // Iterating over rows, collecting elements into []const ?[]const u8
-        const query_res = try c.queryRows(io, "SELECT 3, 4, null, 6, 7");
+        const query_res = try c.query(io, "SELECT 3, 4, null, 6, 7");
         const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
         const rows_iter: ResultRowIter(TextResultRow) = rows.iter();
         while (try rows_iter.next(io)) |row| {
@@ -99,7 +99,7 @@ test "query text protocol" {
         }
     }
     { // Iterating over rows, collecting elements into []const []const ?[]const u8
-        const query_res = try c.queryRows(io, "SELECT 8,9 UNION ALL SELECT 10,11");
+        const query_res = try c.query(io, "SELECT 8,9 UNION ALL SELECT 10,11");
         var rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
         var table = try rows.tableTexts(allocator, io);
         defer table.deinit(allocator);
@@ -220,7 +220,7 @@ test "prepare execute with result" {
         defer BinaryResultRow.structDestroy(dest_ptr, allocator);
 
         { // Dummy query to test for invalid memory reuse
-            const query_res2 = try c.queryRows(io, "SELECT 3, 4, null, 6, 7");
+            const query_res2 = try c.query(io, "SELECT 3, 4, null, 6, 7");
 
             const rows2: ResultSet(TextResultRow) = try query_res2.expect(.rows);
             const rows_iter2: ResultRowIter(TextResultRow) = rows2.iter();
@@ -357,7 +357,7 @@ test "binary data types - int" {
     }
 
     { // Select (Text Protocol)
-        const res = try c.queryRows(io, "SELECT * FROM test.int_types_example");
+        const res = try c.query(io, "SELECT * FROM test.int_types_example");
         var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
         var table_texts = try rows.tableTexts(allocator, io);
@@ -490,7 +490,7 @@ test "binary data types - float" {
     }
 
     { // Text Protocol
-        const res = try c.queryRows(io, "SELECT * FROM test.float_types_example");
+        const res = try c.query(io, "SELECT * FROM test.float_types_example");
         var rows: ResultSet(TextResultRow) = try res.expect(.rows);
         var table_texts = try rows.tableTexts(allocator, io);
         defer table_texts.deinit(allocator);
@@ -575,7 +575,7 @@ test "binary data types - string" {
     }
 
     { // Text Protocol
-        const res = try c.queryRows(io, "SELECT * FROM test.string_types_example");
+        const res = try c.query(io, "SELECT * FROM test.string_types_example");
         var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
         var table_texts = try rows.tableTexts(allocator, io);
@@ -682,7 +682,7 @@ test "binary data types - array" {
     }
 
     { // Text Protocol
-        const res = try c.queryRows(io, "SELECT * FROM test.array_types_example");
+        const res = try c.query(io, "SELECT * FROM test.array_types_example");
         var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
         var table_texts = try rows.tableTexts(allocator, io);
@@ -873,7 +873,7 @@ test "binary data types - temporal" {
     }
 
     { // Text Protocol
-        const res = try c.queryRows(io, "SELECT * FROM test.temporal_types_example");
+        const res = try c.query(io, "SELECT * FROM test.temporal_types_example");
         var rows: ResultSet(TextResultRow) = try res.expect(.rows);
 
         var table_texts = try rows.tableTexts(allocator, io);

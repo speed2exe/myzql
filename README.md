@@ -115,7 +115,7 @@ pub fn main() !void {
 ## Querying
 ```zig
 
-const OkPacket = protocol.generic_response.OkPacket;
+const OkPacket = myzql.protocol.generic_response.OkPacket;
 
 pub fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
@@ -128,7 +128,7 @@ pub fn main() !void {
     // Query results can have a few variant:
     // - ok:   OkPacket     => query is ok
     // - err:  ErrorPacket  => error occurred
-    // In this example, res will either be `ok` or `err`.
+    // In this example, res will either be `ok` or `err` (or `rows` if the query returns a result set).
     // We are using the convenient method `expect` for simplified error handling.
     // If the result variant does not match the kind of result you have specified,
     // a message will be printed and you will get an error instead.
@@ -149,6 +149,7 @@ pub fn main() !void {
 ## Querying returning rows (Text Results)
 - If you want to have query results to be represented by custom created structs,
 this is not the section, scroll down to "Executing prepared statements returning results" instead.
+- Text protocol rows are obtained by calling `query` and expecting the `.rows` variant.
 ```zig
 const myzql = @import("myzql");
 const ResultSet = myzql.result.ResultSet;
@@ -160,13 +161,17 @@ pub fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     const io: std.Io = threaded.io();
-    const result = try c.queryRows(io, "SELECT * FROM customers.purchases");
+    const result = try c.query(io, "SELECT * FROM customers.purchases");
 
     // This is a query that returns rows, you have to collect the result.
     // you can use `expect(.rows)` to try interpret query result as ResultSet(TextResultRow)
     const rows: ResultSet(TextResultRow) = try result.expect(.rows);
 
-    // Allocation-free iterator over rows
+    // Alternatively, if you only need the first row, you can use `rows.first(io)`.
+    // It returns `?T` (`null` if there are no rows) and consumes the row.
+
+    // Allocation-free iterator over rows.
+    // Note: all rows must be consumed (iterated to `null`) before issuing another query.
     const rows_iter = rows.iter();
     while (try rows_iter.next()) |row| { // TextResultRow
         // Option 1: Iterate through every element in the row
@@ -188,7 +193,7 @@ pub fn main() !void {
     // You can also use `tableTexts` to collect all rows at once.
     // Under the hood, it does network calls and allocations, until EOF or error.
     // Results are valid until `deinit` is called on TableTexts.
-    const result = try c.queryRows(io, "SELECT * FROM customers.purchases");
+    const result = try c.query(io, "SELECT * FROM customers.purchases");
     const rows: ResultSet(TextResultRow) = try result.expect(.rows);
     const table = try rows.tableTexts(allocator, io);
     defer table.deinit(allocator); // table is valid until deinit is called
@@ -259,7 +264,7 @@ fn main() !void {
     };
 
     { // Iterating over rows, scanning into struct or creating struct
-        const query_res = try c.executeRows(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try c.execute(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         while (try rows_iter.next()) |row| {
@@ -285,7 +290,7 @@ fn main() !void {
     }
 
     { // collect all rows into a table ([]const Person)
-        const query_res = try c.executeRows(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try c.execute(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         const person_structs = try rows_iter.tableStructs(Person, allocator, io);
@@ -351,7 +356,7 @@ fn main() !void {
         const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.temporal_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try c.executeRows(io, &prep_stmt, .{});
+        const res = try c.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -400,7 +405,7 @@ fn main() !void {
         const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.array_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try c.executeRows(io, &prep_stmt, .{});
+        const res = try c.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 

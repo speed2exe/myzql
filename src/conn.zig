@@ -141,25 +141,13 @@ pub const Conn = struct {
     /// Returns `QueryResult` which is either `.ok` (OkPacket) or `.err` (ErrorPacket).
     /// Use `queryRows` instead if your query returns a result set.
     // query that doesn't return any rows
-    pub fn query(c: *Conn, io: std.Io, query_string: []const u8) !QueryResult {
+    pub fn query(c: *Conn, io: std.Io, query_string: []const u8) !QueryResult(TextResultRow) {
         c.ready();
         const query_req: QueryRequest = .{ .query = query_string };
         try c.writePacket(query_req);
         try c.writer.flush(io);
         const packet = try c.readPacket(io);
-        return c.queryResult(io, &packet);
-    }
-
-    /// Execute a text query that returns rows (e.g. SELECT).
-    /// Returns `QueryResultRows(TextResultRow)` which is either `.rows` (ResultSet) or `.err` (ErrorPacket).
-    /// Use `query` instead if your query does not return a result set.
-    // query that expect rows, even if it returns 0 rows
-    pub fn queryRows(c: *Conn, io: std.Io, query_string: []const u8) !QueryResultRows(TextResultRow) {
-        c.ready();
-        const query_req: QueryRequest = .{ .query = query_string };
-        try c.writePacket(query_req);
-        try c.writer.flush(io);
-        return QueryResultRows(TextResultRow).init(c, io);
+        return .init(&packet, c, io);
     }
 
     /// Prepare a SQL statement for execution.
@@ -178,10 +166,8 @@ pub const Conn = struct {
     /// Returns `QueryResult` which is either `.ok` (OkPacket) or `.err` (ErrorPacket).
     /// Use `executeRows` instead if your query returns a result set.
     // execute a prepared statement that doesn't return any rows
-    pub fn execute(c: *Conn, io: Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult {
+    pub fn execute(c: *Conn, io: Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
         c.ready();
-        std.debug.assert(prep_stmt.res_cols.len == 0); // execute expects no rows
-        c.sequence_id = 0;
         const execute_request: ExecuteRequest = .{
             .capabilities = c.capabilities,
             .prep_stmt = prep_stmt,
@@ -189,7 +175,7 @@ pub const Conn = struct {
         try c.writePacketWithParam(execute_request, params);
         try c.writer.flush(io);
         const packet = try c.readPacket(io);
-        return c.queryResult(io, &packet);
+        return .init(&packet, c, io);
     }
 
     /// Execute a prepared statement that returns rows (e.g. SELECT).
@@ -420,19 +406,6 @@ pub const Conn = struct {
 
     inline fn generateSequenceId(c: *Conn) u8 {
         return c.sequence_id;
-    }
-
-    inline fn queryResult(c: *Conn, io: Io, packet: *const Packet) !QueryResult {
-        const res = QueryResult.init(packet, c.capabilities) catch |err| {
-            switch (err) {
-                error.UnrecoverableError => {
-                    c.stream.close(io);
-                    c.connected = false;
-                    return err;
-                },
-            }
-        };
-        return res;
     }
 
     inline fn ready(c: *Conn) void {

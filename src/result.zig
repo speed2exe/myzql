@@ -14,51 +14,52 @@ const PacketReader = protocol.packet_reader.PacketReader;
 const Conn = @import("./conn.zig").Conn;
 const conversion = @import("./conversion.zig");
 
-/// Result of a query that does not return rows.
-/// Use `.expect(.ok)` to get the `OkPacket`, or `.expect(.err)` to get the `ErrorPacket`.
-pub const QueryResult = union(enum) {
-    ok: OkPacket,
-    err: ErrorPacket,
+pub fn QueryResult(comptime T: type) type {
+    return union(enum) {
+        ok: OkPacket,
+        err: ErrorPacket,
+        rows: ResultSet(T),
 
-    pub fn init(packet: *const Packet, capabilities: u32) !QueryResult {
-        return switch (packet.payload[0]) {
-            constants.OK => .{ .ok = OkPacket.init(packet, capabilities) },
-            constants.ERR => .{ .err = ErrorPacket.init(packet) },
-            constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
-            else => {
-                std.log.warn(
-                    \\Unexpected packet: {any}\n,
-                    \\Are you expecting a result set? If so, use QueryResultRows instead.
-                    \\This is unrecoverable error.
-                , .{packet});
-                return error.UnrecoverableError;
-            },
-        };
-    }
+        pub fn init(packet: *const Packet, c: *Conn, io: std.Io) !@This() {
+            return switch (packet.payload[0]) {
+                constants.OK => .{ .ok = OkPacket.init(packet, c.capabilities) },
+                constants.ERR => .{ .err = ErrorPacket.init(packet) },
+                constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
+                else => .{ .rows = try ResultSet(T).init(c, io, packet) },
+            };
+        }
 
-    /// Unwrap the result to the given variant, returning an error if it does not match.
-    /// If the result is `.err`, the error packet's message is logged and returned as a Zig error.
-    pub fn expect(
-        q: QueryResult,
-        comptime value_variant: std.meta.FieldEnum(QueryResult),
-    ) !@FieldType(QueryResult, @tagName(value_variant)) {
-        return switch (q) {
-            value_variant => @field(q, @tagName(value_variant)),
-            else => {
-                return switch (q) {
-                    .err => |err| return err.asError(),
-                    .ok => |ok| {
-                        std.log.err("Unexpected OkPacket: {any}\n", .{ok});
-                        return error.UnexpectedOk;
-                    },
-                };
-            },
-        };
-    }
-};
+        /// Unwrap the result to the given variant, returning an error if it does not match.
+        ///
+        /// `.expect(.ok)` => `OkPacket`,
+        /// `.expect(.err)` => `ErrorPacket`,
+        /// `.expect(.rows)` => `ResultSet(T)`.
+        pub fn expect(
+            q: @This(),
+            comptime variant: std.meta.FieldEnum(@This()),
+        ) !@FieldType(@This(), @tagName(variant)) {
+            return switch (q) {
+                variant => @field(q, @tagName(variant)),
+                else => {
+                    return switch (q) {
+                        .rows => |rows| {
+                            std.log.err("Unexpected ResultSet: {any}", .{rows});
+                            return error.UnexpectedResultSet;
+                        },
+                        .err => |err| return err.asError(),
+                        .ok => |ok| {
+                            std.log.err("Unexpected OkPacket: {any}", .{ok});
+                            return error.UnexpectedOk;
+                        },
+                    };
+                },
+            };
+        }
+    };
+}
 
-/// Result of a query that returns rows (from `Conn.queryRows` or `Conn.executeRows`).
-/// T is either `TextResultRow` (from `queryRows`) or `BinaryResultRow` (from `executeRows`).
+/// Result of a query that returns rows.
+/// T is either `TextResultRow` (from text protocol queries) or `BinaryResultRow` (from prepared statement execution).
 /// Use `.expect(.rows)` to get the `ResultSet(T)`, or `.expect(.err)` to get the `ErrorPacket`.
 pub fn QueryResultRows(comptime T: type) type {
     return union(enum) {
@@ -66,7 +67,7 @@ pub fn QueryResultRows(comptime T: type) type {
         rows: ResultSet(T),
 
         // allocation happens when a result set is returned
-        pub fn init(c: *Conn, io: std.Io) !QueryResultRows(T) {
+        pub fn init(c: *Conn, io: std.Io) !@This() {
             const packet = try c.readPacket(io);
             return switch (packet.payload[0]) {
                 constants.OK => {
@@ -87,12 +88,12 @@ pub fn QueryResultRows(comptime T: type) type {
         ///
         /// Example:
         /// ```zig
-        /// const result: QueryResultRows(TextResultRow) = try conn.queryRows("SELECT * FROM table");
+        /// const result: QueryResultRows(TextResultRow) = try conn.execute(&prep_stmt, .{});
         /// const rows: ResultSet(TextResultRow) = try result.expect(.rows);
         /// ```
         pub fn expect(
-            q: QueryResultRows(T),
-            comptime value_variant: std.meta.FieldEnum(QueryResultRows(T)),
+            q: @This(),
+            comptime value_variant: std.meta.FieldEnum(@This()),
         ) !@FieldType(QueryResultRows(T), @tagName(value_variant)) {
             return switch (q) {
                 value_variant => @field(q, @tagName(value_variant)),
@@ -111,7 +112,7 @@ pub fn QueryResultRows(comptime T: type) type {
 }
 
 /// A result set returned by a query that produces rows.
-/// T is either `TextResultRow` (from `queryRows`) or `BinaryResultRow` (from `executeRows`).
+/// T is either `TextResultRow` (from text protocol queries) or `BinaryResultRow` (from prepared statement execution).
 /// Use `iter()` to iterate over rows, `first()` to get only the first row,
 /// or `tableTexts()` / `tableStructs()` (via the iterator) to collect all rows at once.
 pub fn ResultSet(comptime T: type) type {
@@ -208,7 +209,7 @@ pub fn ResultSet(comptime T: type) type {
     };
 }
 
-/// A single row returned by a text protocol query (`Conn.queryRows`).
+/// A single row returned by a text protocol query (via `Conn.query`).
 /// Use `iter()` to iterate over raw text elements,
 /// or `textElems()` to collect all elements into an allocated slice.
 pub const TextResultRow = struct {
@@ -273,7 +274,7 @@ fn scanTextResultRow(dest: []?[]const u8, packet: *const Packet) void {
     }
 }
 
-/// A single row returned by a binary protocol query (`Conn.executeRows`).
+/// A single row returned by a binary protocol query (via `Conn.execute`).
 /// Use `scan` to scan row values into an existing struct,
 /// or `structCreate` to allocate a new struct (must be freed with `structDestroy`).
 pub const BinaryResultRow = struct {
@@ -440,7 +441,7 @@ pub const PrepareResult = union(enum) {
 };
 
 /// A prepared statement returned by `Conn.prepare`.
-/// Pass a pointer to this to `Conn.execute` or `Conn.executeRows` to run the query.
+/// Pass a pointer to this to `Conn.execute` to run the query.
 /// Resources are freed when `PrepareResult.deinit` is called.
 pub const PreparedStatement = struct {
     prep_ok: PrepareOk,
