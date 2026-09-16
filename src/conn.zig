@@ -137,10 +137,10 @@ pub const Conn = struct {
         }
     }
 
-    /// Execute a text query that does not return rows (e.g. CREATE, INSERT, UPDATE, DELETE).
-    /// Returns `QueryResult` which is either `.ok` (OkPacket) or `.err` (ErrorPacket).
-    /// Use `queryRows` instead if your query returns a result set.
-    // query that doesn't return any rows
+    /// Execute a text query (e.g. CREATE, INSERT, UPDATE, DELETE, SELECT).
+    /// Returns `QueryResult` which is `.ok` (OkPacket), `.err` (ErrorPacket),
+    /// or `.rows` (ResultSet(TextResultRow)) if the query returns a result set.
+    /// Use `expect(.rows)` on the result to access the rows.
     pub fn query(c: *Conn, io: std.Io, query_string: []const u8) !QueryResult(TextResultRow) {
         c.ready();
         const query_req: QueryRequest = .{ .query = query_string };

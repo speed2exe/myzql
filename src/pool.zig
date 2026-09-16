@@ -23,11 +23,11 @@ pub const Options = struct {
 /// Usage:
 /// ```zig
 /// var pool = try Pool.init(allocator, &config, .{ .max_size = 10 });
-/// defer pool.deinit();
+/// defer pool.deinit(io);
 ///
-/// var mc = try pool.acquireManaged();
-/// defer mc.deinit();
-/// const result = try mc.query("SELECT 1");
+/// var mc = try pool.acquireManaged(io);
+/// defer mc.deinit(io);
+/// const result = try mc.query(io, "SELECT 1");
 /// ```
 ///
 /// `Pool` must not be moved or copied after initialization
@@ -208,11 +208,10 @@ pub const Pool = struct {
 
     /// Borrow a connection wrapped in a `ManagedConn`.
     ///
-    /// `ManagedConn.deinit()` automatically returns the connection to the pool.
-    /// Use `defer mc.deinit()` to ensure the connection is always released.
+    /// `ManagedConn.deinit(io)` automatically returns the connection to the pool.
+    /// Use `defer mc.deinit(io)` to ensure the connection is always released.
     ///
-    /// Convenience methods on `ManagedConn` forward to the underlying `Conn`
-    /// without requiring you to pass `io` explicitly.
+    /// Convenience methods on `ManagedConn` forward to the underlying `Conn`.
     pub fn acquireManaged(p: *Pool, io: std.Io) !ManagedConn {
         return ManagedConn{
             .pool = p,
@@ -237,7 +236,7 @@ pub const Pool = struct {
 
     /// A managed connection that automatically returns itself to the pool on `deinit`.
     ///
-    /// Always use `defer managed_conn.deinit()` after acquiring to prevent
+    /// Always use `defer managed_conn.deinit(io)` after acquiring to prevent
     /// connection leaks.
     pub const ManagedConn = struct {
         pool: *Pool,
@@ -259,7 +258,7 @@ pub const Pool = struct {
             return m.conn.ping(io);
         }
 
-        /// Execute a query that does not return rows (INSERT, UPDATE, DELETE, etc.).
+        /// Execute a text query. Returns `QueryResult` (`.ok`, `.err`, or `.rows` if the query returns rows).
         pub fn query(m: *ManagedConn, io: std.Io, query_string: []const u8) !QueryResult(TextResultRow) {
             return m.conn.query(io, query_string);
         }

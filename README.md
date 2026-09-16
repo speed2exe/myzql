@@ -21,6 +21,7 @@
 - Structs from query result
 - Data insertion
 - MySQL DateTime and Time support
+- Thread-safe connection pool
 
 ## Requirements
 - MySQL/MariaDB 5.7.5 and up
@@ -71,6 +72,7 @@ pub fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     const io: std.Io = threaded.io();
+    const allocator = std.heap.page_allocator;
 
     // TCP connection (default)
     var client = try Conn.init(
@@ -97,6 +99,7 @@ pub fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     const io: std.Io = threaded.io();
+    const allocator = std.heap.page_allocator;
 
     var client = try Conn.init(
         allocator,
@@ -121,14 +124,15 @@ pub fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     const io: std.Io = threaded.io();
+    const allocator = std.heap.page_allocator;
     // ...
     // You can do a text query (text protocol) by using `query` method on `Conn`
-    const result = try c.query(io, "CREATE DATABASE testdb");
+    const result = try client.query(io, "CREATE DATABASE testdb");
 
     // Query results can have a few variant:
     // - ok:   OkPacket     => query is ok
     // - err:  ErrorPacket  => error occurred
-    // In this example, res will either be `ok` or `err` (or `rows` if the query returns a result set).
+    // In this example, result will either be `ok` or `err` (or `rows` if the query returns a result set).
     // We are using the convenient method `expect` for simplified error handling.
     // If the result variant does not match the kind of result you have specified,
     // a message will be printed and you will get an error instead.
@@ -161,7 +165,8 @@ pub fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     const io: std.Io = threaded.io();
-    const result = try c.query(io, "SELECT * FROM customers.purchases");
+    const allocator = std.heap.page_allocator;
+    const result = try client.query(io, "SELECT * FROM customers.purchases");
 
     // This is a query that returns rows, you have to collect the result.
     // you can use `expect(.rows)` to try interpret query result as ResultSet(TextResultRow)
@@ -173,7 +178,7 @@ pub fn main() !void {
     // Allocation-free iterator over rows.
     // Note: all rows must be consumed (iterated to `null`) before issuing another query.
     const rows_iter = rows.iter();
-    while (try rows_iter.next()) |row| { // TextResultRow
+    while (try rows_iter.next(io)) |row| { // TextResultRow
         // Option 1: Iterate through every element in the row
         var elems_iter: TextElemIter = row.iter();
         while (elems_iter.next()) |elem| { // ?[]const u8
@@ -193,7 +198,7 @@ pub fn main() !void {
     // You can also use `tableTexts` to collect all rows at once.
     // Under the hood, it does network calls and allocations, until EOF or error.
     // Results are valid until `deinit` is called on TableTexts.
-    const result = try c.query(io, "SELECT * FROM customers.purchases");
+    const result = try client.query(io, "SELECT * FROM customers.purchases");
     const rows: ResultSet(TextResultRow) = try result.expect(.rows);
     const table = try rows.tableTexts(allocator, io);
     defer table.deinit(allocator); // table is valid until deinit is called
@@ -220,9 +225,10 @@ pub fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     const io: std.Io = threaded.io();
+    const allocator = std.heap.page_allocator;
     // In order to do a insertion, you would first need to do a prepared statement.
     // Allocation is required as we need to store metadata of parameters and return type
-    const prep_res = try c.prepare(allocator, io, "INSERT INTO test.person (name, age) VALUES (?, ?)");
+    const prep_res = try client.prepare(allocator, io, "INSERT INTO test.person (name, age) VALUES (?, ?)");
     defer prep_res.deinit(allocator);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -232,7 +238,7 @@ pub fn main() !void {
         .{ "Sam", 24 },
     };
     inline for (params) |param| {
-        const exe_res = try c.execute(io, &prep_stmt, param);
+        const exe_res = try client.execute(io, &prep_stmt, param);
         const ok: OkPacket = try exe_res.expect(.ok); // expecting ok here because there's no rows returned
         const last_insert_id: u64 = ok.last_insert_id;
         std.debug.print("last_insert_id: {any}\n", .{last_insert_id});
@@ -249,11 +255,12 @@ const QueryResultRows = myzql.result.QueryResultRows;
 const BinaryResultRow = myzql.result.BinaryResultRow;
 const ResultSet = myzql.result.ResultSet;
 
-fn main() !void {
+pub fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     const io: std.Io = threaded.io();
-    const prep_res = try c.prepare(allocator, io, "SELECT name, age FROM test.person");
+    const allocator = std.heap.page_allocator;
+    const prep_res = try client.prepare(allocator, io, "SELECT name, age FROM test.person");
     defer prep_res.deinit(allocator);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -264,10 +271,10 @@ fn main() !void {
     };
 
     { // Iterating over rows, scanning into struct or creating struct
-        const query_res = try c.execute(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try client.execute(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
-        while (try rows_iter.next()) |row| {
+        while (try rows_iter.next(io)) |row| {
             { // Option 1: scanning into preallocated person
                 var person: Person = undefined;
                 try row.scan(&person);
@@ -290,7 +297,7 @@ fn main() !void {
     }
 
     { // collect all rows into a table ([]const Person)
-        const query_res = try c.execute(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try client.execute(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         const person_structs = try rows_iter.tableStructs(Person, allocator, io);
@@ -316,12 +323,13 @@ CREATE TABLE test.temporal_types_example (
 const DateTime = myzql.temporal.DateTime;
 const Duration = myzql.temporal.Duration;
 
-fn main() !void {
+pub fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     const io: std.Io = threaded.io();
+    const allocator = std.heap.page_allocator;
     { // Insert
-        const prep_res = try c.prepare(allocator, io, "INSERT INTO test.temporal_types_example VALUES (?, ?)");
+        const prep_res = try client.prepare(allocator, io, "INSERT INTO test.temporal_types_example VALUES (?, ?)");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -343,7 +351,7 @@ fn main() !void {
         };
         const params = .{.{ my_time, my_duration }};
         inline for (params) |param| {
-            const exe_res = try c.execute(io, &prep_stmt, param);
+            const exe_res = try client.execute(io, &prep_stmt, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -353,10 +361,10 @@ fn main() !void {
             event_time: DateTime,
             duration: Duration,
         };
-        const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.temporal_types_example");
+        const prep_res = try client.prepare(allocator, io, "SELECT * FROM test.temporal_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try c.execute(io, &prep_stmt, .{});
+        const res = try client.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -378,12 +386,13 @@ CREATE TABLE test.array_types_example (
 ```
 
 ```zig
-fn main() !void {
+pub fn main() !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     const io: std.Io = threaded.io();
+    const allocator = std.heap.page_allocator;
     { // Insert
-        const prep_res = try c.prepare(allocator, io, "INSERT INTO test.array_types_example VALUES (?, ?)");
+        const prep_res = try client.prepare(allocator, io, "INSERT INTO test.array_types_example VALUES (?, ?)");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
@@ -392,7 +401,7 @@ fn main() !void {
             .{ "Alice", null }
         };
         inline for (params) |param| {
-            const exe_res = try c.execute(io, &prep_stmt, param);
+            const exe_res = try client.execute(io, &prep_stmt, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -402,10 +411,10 @@ fn main() !void {
             name: [16:1]u8,
             mac_addr: ?[6]u8,
         };
-        const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.array_types_example");
+        const prep_res = try client.prepare(allocator, io, "SELECT * FROM test.array_types_example");
         defer prep_res.deinit(allocator);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try c.execute(io, &prep_stmt, .{});
+        const res = try client.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -419,6 +428,34 @@ fn main() !void {
 - Arrays will be initialized by their sentinel value. In this example, the value of the `name` field corresponding to `John`'s row will be `[16:1]u8 { 'J', 'o', 'h', 'n', 1, 1, 1, ... }`
 - If the array doesn't have a sentinel value, it will be zero-initialized.
 - Insufficiently sized arrays will silently truncate excess data
+
+### Connection Pool
+- `myzql.pool.Pool` is a thread-safe connection pool.
+- Connections are created lazily up to `max_size` (default: 10).
+- `acquire` returns `error.PoolExhausted` when all connections are in use.
+- Idle connections are health-checked (pinged) before being handed out.
+```zig
+const myzql = @import("myzql");
+const Config = myzql.config.Config;
+const Pool = myzql.pool.Pool;
+
+pub fn main() !void {
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
+    const allocator = std.heap.page_allocator;
+
+    const config: Config = .{ .database = "test" };
+    var pool = try Pool.init(allocator, &config, .{ .max_size = 10 });
+    defer pool.deinit(io);
+
+    const managed_conn = try pool.acquireManaged(io);
+    defer managed_conn.deinit(io);
+
+    const result = try managed_conn.query(io, "SELECT 1");
+    _ = try result.expect(.rows);
+}
+```
 
 ## Unit Tests
 - `zig build unit_test`
@@ -450,6 +487,10 @@ zig build -Dtest-filter="..." integration_test
 ```bash
 zig build integration_test -Dunix-socket-path=/tmp/mysql/mysqld.sock -Dtest-filter="unix socket" --summary all
 ```
+- Skip the heavy stress test (16M rows, useful for CI):
+```bash
+zig build integration_test -Dskip-stress=true --summary all
+```
 
 ## Philosophy
 ### Correctness
@@ -459,10 +500,13 @@ Low-level apis should contain all functionality you need.
 High-level apis are built on top of low-level ones for convenience and developer ergonomics.
 
 ### Binary Column Types support
-- MySQL Colums Types to Zig Values
+- MySQL Column Types to Zig Values
 ```
 - Null -> ?T
-- Int -> u64, u32, u16, u8
+- Int -> u64, u32, u16, u8, i64, i32, i16, i8
 - Float -> f32, f64
 - String -> []u8, []const u8, enum
+- Date/Datetime/Timestamp -> DateTime
+- Time -> Duration
+- String/Bytes -> [N]u8, [N:0]u8 (sentinel-filled, zero-filled if no sentinel, or truncated if too small)
 ```
