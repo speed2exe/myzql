@@ -56,13 +56,16 @@ pub const PacketWriter = struct {
 
     // flush the buffer to the stream
     pub inline fn flush(p: *PacketWriter, io: std.Io) !void {
-        const data = p.buf[0..p.pos];
-
-        const result = try io.operate(.{ .net_write = .{
-            .socket_handle = p.stream.socket.handle,
-            .data = &.{data},
-        } });
-        _ = try result.net_write;
+        var data = p.buf[0..p.pos];
+        while (data.len > 0) {
+            const result = try io.operate(.{ .net_write = .{
+                .socket_handle = p.stream.socket.handle,
+                .data = &.{data},
+            } });
+            const n = try result.net_write;
+            if (n == 0) return error.WriteZero;
+            data = data[n..];
+        }
         p.pos = 0;
     }
 

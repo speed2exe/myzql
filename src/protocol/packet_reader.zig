@@ -35,7 +35,7 @@ pub const PacketReader = struct {
 
         // Packet header
         const payload_length = std.mem.readInt(u24, p.buf[p.pos..][0..3], .little);
-        const sequence_id = p.buf[3];
+        const sequence_id = p.buf[p.pos + 3];
         p.pos += 4;
 
         { // read more bytes from network if required
