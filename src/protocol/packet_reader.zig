@@ -76,9 +76,9 @@ pub const PacketReader = struct {
         var total_read: usize = 0;
         while (total_read < at_least) {
             var bufs: [1][]u8 = .{p.buf[p.len + total_read ..]};
-            const n = try p.stream.read(io, &bufs);
-            if (n == 0) break;
-            total_read += n;
+            const result = try p.stream.readWithControl(io, &bufs, &.{});
+            if (result.data_len == 0) break;
+            total_read += result.data_len;
         }
         return total_read;
     }
