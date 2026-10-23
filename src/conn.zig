@@ -57,8 +57,9 @@ pub const Conn = struct {
     pub fn init(allocator: Allocator, io: Io, config: *const Config) !Conn {
         var conn: Conn = blk: {
             const stream = switch (config.address) {
-                .ip => try config.address.ip.connect(io, .{ .mode = .stream }),
-                .unix => try config.address.unix.connect(io),
+                .ip => |ip| try ip.connect(io, .{ .mode = .stream }),
+                .host => |host| try host.name.connect(io, host.port, .{ .mode = .stream }),
+                .unix => |unix| try unix.connect(io),
             };
 
             break :blk .{

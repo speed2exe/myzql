@@ -1,6 +1,7 @@
 const std = @import("std");
 const myzql = @import("myzql");
 const Conn = myzql.conn.Conn;
+const Config = myzql.config.Config;
 const test_config = @import("./config.zig").test_config;
 const test_config_with_db = @import("./config.zig").test_config_with_db;
 const build_options = @import("build_options");
@@ -34,6 +35,15 @@ fn queryExpectOkLogError(c: *Conn, query: []const u8) void {
     };
 }
 
+// Percent-encode every byte outside the unreserved set, so credentials and
+// paths can be embedded in a URL without changing its structure
+fn appendUrlEncoded(url: *std.ArrayList(u8), raw: []const u8) !void {
+    for (raw) |char| switch (char) {
+        'A'...'Z', 'a'...'z', '0'...'9', '-', '.', '_', '~' => try url.append(allocator, char),
+        else => try url.print(allocator, "%{X:0>2}", .{char}),
+    };
+}
+
 test "ping" {
     var c = try Conn.init(allocator, io, &test_config);
     defer c.deinit(allocator, io);
@@ -51,6 +61,91 @@ test "connect with database" {
     var c = try Conn.init(allocator, io, &test_config_with_db);
     defer c.deinit(allocator, io);
     try c.ping(io);
+}
+
+test "connect via url" {
+    // `localhost` is resolved by the driver, ip literals are covered by `test_config`
+    const port = test_config.address.ip.getPort();
+    var url: std.ArrayList(u8) = .empty;
+    defer url.deinit(allocator);
+
+    try url.appendSlice(allocator, "mysql://");
+    try appendUrlEncoded(&url, test_config.username);
+    try url.append(allocator, ':');
+    try appendUrlEncoded(&url, test_config.password);
+    try url.print(allocator, "@localhost:{d}/", .{port});
+    try appendUrlEncoded(&url, test_config_with_db.database);
+
+    var url_config = try Config.fromUrl(allocator, url.items);
+    defer url_config.deinit(allocator);
+    var c = try Conn.init(allocator, io, &url_config.value);
+    defer c.deinit(allocator, io);
+    try c.ping(io);
+}
+
+test "connect via url unix socket" {
+    const unix_config = test_config_unix orelse return error.SkipZigTest;
+    var url: std.ArrayList(u8) = .empty;
+    defer url.deinit(allocator);
+
+    try url.appendSlice(allocator, "mysql://");
+    try appendUrlEncoded(&url, test_config.username);
+    try url.append(allocator, ':');
+    try appendUrlEncoded(&url, test_config.password);
+    try url.appendSlice(allocator, "@/");
+    try appendUrlEncoded(&url, test_config_with_db.database);
+    try url.appendSlice(allocator, "?socket=");
+    try appendUrlEncoded(&url, unix_config.address.unix.path);
+
+    var url_config = try Config.fromUrl(allocator, url.items);
+    defer url_config.deinit(allocator);
+    var c = try Conn.init(allocator, io, &url_config.value);
+    defer c.deinit(allocator, io);
+    try c.ping(io);
+}
+
+test "connect via url - parameters are applied" {
+    // The path of the URL selects the default database and the query string
+    // changes the session, so ask the server for both after connecting
+    const port = test_config.address.ip.getPort();
+    var url: std.ArrayList(u8) = .empty;
+    defer url.deinit(allocator);
+
+    try url.appendSlice(allocator, "mysql://");
+    try appendUrlEncoded(&url, test_config.username);
+    try url.append(allocator, ':');
+    try appendUrlEncoded(&url, test_config.password);
+    try url.print(allocator, "@localhost:{d}/", .{port});
+    try appendUrlEncoded(&url, test_config_with_db.database);
+    try url.appendSlice(allocator, "?charset=latin1&clientFoundRows=true");
+
+    var url_config = try Config.fromUrl(allocator, url.items);
+    defer url_config.deinit(allocator);
+    try std.testing.expectEqual(true, url_config.value.client_found_rows);
+
+    var c = try Conn.init(allocator, io, &url_config.value);
+    defer c.deinit(allocator, io);
+
+    { // database from the path and charset from the query string are applied
+        const query_res = try c.query(io, "SELECT DATABASE(), @@character_set_client, @@collation_connection");
+        const rows: ResultSet(TextResultRow) = try query_res.expect(.rows);
+        const row = (try rows.first(io)) orelse return error.MissingRow;
+        const elems: TextElems = try row.textElems(allocator);
+        defer elems.deinit(allocator);
+
+        try std.testing.expectEqualStrings(test_config_with_db.database, elems.elems[0].?);
+        try std.testing.expectEqualStrings("latin1", elems.elems[1].?);
+        try std.testing.expectEqualStrings("latin1_general_ci", elems.elems[2].?);
+    }
+
+    { // client_found_rows reports matched instead of changed rows
+        try queryExpectOk(&c, "CREATE TEMPORARY TABLE url_config_update (id INT PRIMARY KEY, v INT)");
+        try queryExpectOk(&c, "INSERT INTO url_config_update VALUES (1, 1)");
+
+        const update_res = try c.query(io, "UPDATE url_config_update SET v = 1 WHERE id = 1");
+        const ok = try update_res.expect(.ok);
+        try std.testing.expectEqual(1, ok.affected_rows);
+    }
 }
 
 test "query database create and drop" {

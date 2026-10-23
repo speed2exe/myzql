@@ -28,7 +28,6 @@
 - MySQL/MariaDB 5.7.5 and up
 
 ## TODOs
-- Config from URL
 - TLS support
 
 ## Add as dependency to your Zig project
@@ -115,6 +114,54 @@ pub fn main() !void {
     try client.ping();
 }
 ```
+
+### Connection from URL
+- `Config.fromUrl` parses a MySQL connection URL and returns a `UrlConfig`.
+- `UrlConfig` owns the decoded strings that the `Config` refers to, so it must be kept alive for the whole lifetime of the connection.
+- `Pool.init` copies the config into pool-owned memory, so a pool created from a `UrlConfig` no longer depends on it.
+```zig
+const myzql = @import("myzql");
+const Config = myzql.config.Config;
+const Conn = myzql.conn.Conn;
+
+pub fn main() !void {
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
+    const allocator = std.heap.page_allocator;
+
+    // mysql://[user[:password]@][host[:port]][/database][?parameter=value&...]
+    var url_config = try Config.fromUrl(allocator, "mysql://some-user:password123@localhost:3306/customers?charset=utf8mb4");
+    defer url_config.deinit(allocator);
+
+    var client = try Conn.init(allocator, io, &url_config.value);
+    defer client.deinit(allocator, io);
+
+    try client.ping(io);
+}
+```
+- `mysql://` and `mariadb://` are accepted.
+- Every component may be percent-encoded, e.g. `mysql://us%40r:p%40ss@localhost/db`.
+- Host names such as `localhost` are resolved when the connection is established,
+while IP addresses (including bracketed IPv6 literals like `[::1]`) are used directly.
+- Leave the host empty and add a `socket` parameter to connect over a unix domain socket:
+```zig
+var url_config = try Config.fromUrl(allocator, "mysql://root:password123@/customers?socket=/var/run/mysqld/mysqld.sock");
+```
+- Supported parameters (keys are case-insensitive):
+
+| Parameter | Config field | Value |
+|-----------|--------------|-------|
+| `socket`, `unix_socket` | `address` | unix domain socket path |
+| `charset` | `collation` | character set (e.g. `utf8mb4`) or collation (e.g. `utf8mb4_bin`) name |
+| `clientFoundRows`, `client_found_rows` | `client_found_rows` | `true`, `false`, `1` or `0` |
+| `multiStatements`, `multi_statements` | `multi_statements` | `true`, `false`, `1` or `0` |
+| `ssl`, `tls` | `ssl` | `true`, `false`, `1` or `0` |
+
+- A parameter with an empty value keeps the default, so `?charset=` placeholders can be left in URL templates.
+- Unknown parameters and invalid values are rejected (`error.UnknownUrlParameter`,
+`error.InvalidUrlParameterValue`, `error.UnknownCharset`) instead of being silently ignored.
+- Note that TLS is not implemented yet, so `ssl=true` only requests the flag from the server.
 
 ## Querying
 ```zig

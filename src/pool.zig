@@ -56,19 +56,24 @@ pub const Pool = struct {
         username: [:0]u8,
         password: []u8,
         database: [:0]u8,
+        /// Copy of the string `Config.address` refers to, either a host name or
+        /// a unix socket path. Empty for `.ip`, which owns no memory.
+        address_data: []u8,
         value: Config,
 
         fn deinit(oc: *OwnedConfig, allocator: Allocator) void {
             allocator.free(oc.username);
             allocator.free(oc.password);
             allocator.free(oc.database);
+            allocator.free(oc.address_data);
         }
     };
 
     /// Initialize the connection pool.
     ///
-    /// Clones string fields from `config` into pool-owned memory so the
-    /// original `config` does not need to outlive the pool.
+    /// Clones the string fields of `config`, as well as the memory held by
+    /// `config.address` (host name or unix socket path), into pool-owned memory
+    /// so the original `config` does not need to outlive the pool.
     /// No connections are created until `acquire` is called.
     pub fn init(allocator: Allocator, config: *const Config, options: Options) !Pool {
         const username = try allocator.dupeSentinel(u8, config.username, 0);
@@ -80,13 +85,32 @@ pub const Pool = struct {
         const database = try allocator.dupeSentinel(u8, config.database, 0);
         errdefer allocator.free(database);
 
+        // A host name or socket path may point into memory owned by the caller,
+        // e.g. the storage of a `Config.fromUrl`, so it is cloned as well
+        var address_data: []u8 = &.{};
+        errdefer allocator.free(address_data);
+
+        var address = config.address;
+        switch (address) {
+            .host => |host| {
+                address_data = try allocator.dupe(u8, host.name.bytes);
+                address = .{ .host = .{ .name = .{ .bytes = address_data }, .port = host.port } };
+            },
+            .unix => |unix| {
+                address_data = try allocator.dupe(u8, unix.path);
+                address = .{ .unix = try std.Io.net.UnixAddress.init(address_data) };
+            },
+            .ip => {},
+        }
+
         const owned_config = OwnedConfig{
             .username = username,
             .password = password,
             .database = database,
+            .address_data = address_data,
             .value = .{
                 .username = username,
-                .address = config.address,
+                .address = address,
                 .password = password,
                 .database = database,
                 .collation = config.collation,
@@ -274,3 +298,45 @@ pub const Pool = struct {
         }
     };
 };
+
+const testing = std.testing;
+
+test "init - clones the config into pool-owned memory" {
+    var pool: Pool = undefined;
+    {
+        var url_config = try Config.fromUrl(testing.allocator, "mysql://alice:secret@localhost:3307/db?multiStatements=true");
+        defer url_config.deinit(testing.allocator);
+
+        pool = try Pool.init(testing.allocator, &url_config.value, .{});
+    }
+    // the pool must not refer to the (now freed) storage of `url_config`
+    defer pool.deinit(testing.io);
+
+    const config = pool.owned_config.value;
+    try testing.expectEqualStrings("alice", config.username);
+    try testing.expectEqualStrings("secret", config.password);
+    try testing.expectEqualStrings("db", config.database);
+    try testing.expectEqualStrings("localhost", config.address.host.name.bytes);
+    try testing.expectEqual(3307, config.address.host.port);
+    try testing.expectEqual(true, config.multi_statements);
+}
+
+test "init - clones the unix socket path into pool-owned memory" {
+    var pool: Pool = undefined;
+    {
+        var url_config = try Config.fromUrl(testing.allocator, "mysql://root:secret@/db?socket=%2Ftmp%2Fmysql.sock");
+        defer url_config.deinit(testing.allocator);
+
+        pool = try Pool.init(testing.allocator, &url_config.value, .{});
+    }
+    // the pool must not refer to the (now freed) storage of `url_config`
+    defer pool.deinit(testing.io);
+
+    const config = pool.owned_config.value;
+    try testing.expectEqualStrings("root", config.username);
+    try testing.expectEqualStrings("db", config.database);
+    switch (config.address) {
+        .unix => |unix| try testing.expectEqualStrings("/tmp/mysql.sock", unix.path),
+        else => return error.TestExpectedUnixAddress,
+    }
+}
