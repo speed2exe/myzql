@@ -7,6 +7,7 @@ const DateTime = @import("../temporal.zig").DateTime;
 const Duration = @import("../temporal.zig").Duration;
 const PacketWriter = @import("./packet_writer.zig").PacketWriter;
 const PacketReader = @import("./packet_reader.zig").PacketReader;
+const logger = @import("../logger.zig");
 const maxInt = std.math.maxInt;
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query.html
@@ -81,7 +82,7 @@ pub const ExecuteRequest = struct {
 
         const col_defs = e.prep_stmt.params;
         if (params.len != col_defs.len) {
-            std.log.err("expected column count: {d}, but got {d}", .{ col_defs.len, params.len });
+            logger.log(e.prep_stmt.config, .err, "expected column count: {d}, but got {d}", .{ col_defs.len, params.len });
             return error.ParamsCountNotMatch;
         }
 

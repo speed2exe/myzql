@@ -12,7 +12,43 @@ const ErrorPacket = protocol.generic_response.ErrorPacket;
 const ColumnDefinition41 = protocol.column_definition.ColumnDefinition41;
 const PacketReader = protocol.packet_reader.PacketReader;
 const Conn = @import("./conn.zig").Conn;
+const Config = @import("./config.zig").Config;
 const conversion = @import("./conversion.zig");
+const logger = @import("./logger.zig");
+
+/// Log messages below describe the value that was returned instead of the one
+/// that was expected. They print the interesting fields explicitly: `{any}` on
+/// these types would follow the `config` pointer and dump the whole config.
+fn logUnexpectedResultSet(config: ?*const Config, col_defs: []const ColumnDefinition41) void {
+    // Unlike the other helpers below, this one formats before calling
+    // `logger.log`, so it has to repeat the "logging is off" test itself:
+    // a config without a logger must not pay for a message that is dropped.
+    const c = config orelse return;
+    if (c.logger == null) return;
+
+    var buffer: [logger.max_message_len]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&buffer);
+    for (col_defs, 0..) |col, i| {
+        if (i > 0) w.writeAll(", ") catch {};
+        w.print("{s}", .{col.name}) catch {};
+    }
+    logger.log(config, .err, "Unexpected ResultSet: (columns: [{s}])", .{w.buffered()});
+}
+
+fn logUnexpectedOkPacket(config: ?*const Config, ok: OkPacket) void {
+    logger.log(config, .err, "Unexpected OkPacket: (affected_rows: {d}, last_insert_id: {d})", .{
+        ok.affected_rows,
+        ok.last_insert_id,
+    });
+}
+
+fn logUnexpectedStmt(config: ?*const Config, stmt: PreparedStatement) void {
+    logger.log(config, .err, "Unexpected PreparedStatement: (statement_id: {d}, num_params: {d}, num_columns: {d})", .{
+        stmt.prep_ok.statement_id,
+        stmt.prep_ok.num_params,
+        stmt.prep_ok.num_columns,
+    });
+}
 
 pub fn QueryResult(comptime T: type) type {
     return union(enum) {
@@ -43,12 +79,12 @@ pub fn QueryResult(comptime T: type) type {
                 else => {
                     return switch (q) {
                         .rows => |rows| {
-                            std.log.err("Unexpected ResultSet: {any}", .{rows});
+                            logUnexpectedResultSet(rows.conn.config, rows.col_defs);
                             return error.UnexpectedResultSet;
                         },
                         .err => |err| return err.asError(),
                         .ok => |ok| {
-                            std.log.err("Unexpected OkPacket: {any}", .{ok});
+                            logUnexpectedOkPacket(ok.config, ok);
                             return error.UnexpectedOk;
                         },
                     };
@@ -71,10 +107,11 @@ pub fn QueryResultRows(comptime T: type) type {
             const packet = try c.readPacket(io);
             return switch (packet.payload[0]) {
                 constants.OK => {
-                    std.log.warn(
-                        \\Unexpected OkPacket: {any}\n,
+                    const ok_packet = OkPacket.init(&packet, c.capabilities);
+                    logger.log(c.config, .warn,
+                        \\Unexpected OkPacket: (affected_rows: {d}, last_insert_id: {d})
                         \\If your query is not expecting a result set, use QueryResult instead.
-                    , .{OkPacket.init(&packet, c.capabilities)});
+                    , .{ ok_packet.affected_rows, ok_packet.last_insert_id });
                     return packet.asError();
                 },
                 constants.ERR => .{ .err = ErrorPacket.init(&packet) },
@@ -101,7 +138,7 @@ pub fn QueryResultRows(comptime T: type) type {
                     return switch (q) {
                         .err => |err| return err.asError(),
                         .rows => |rows| {
-                            std.log.err("Unexpected ResultSet: {any}\n", .{rows});
+                            logUnexpectedResultSet(rows.conn.config, rows.col_defs);
                             return error.UnexpectedResultSet;
                         },
                     };
@@ -188,7 +225,8 @@ pub fn ResultSet(comptime T: type) type {
                     }
 
                     while (true) {
-                        const pkt = try temp_reader.readPacket(io);
+                        var pkt = try temp_reader.readPacket(io);
+                        pkt.config = r.conn.config;
                         switch (pkt.payload[0]) {
                             constants.ERR => return ErrorPacket.init(&pkt).asError(),
                             constants.EOF => break,
@@ -351,11 +389,11 @@ pub fn ResultRow(comptime T: type) type {
                     return switch (r) {
                         .err => |err| return err.asError(),
                         .ok => |ok| {
-                            std.log.err("Unexpected OkPacket: {any}\n", .{ok});
+                            logUnexpectedOkPacket(ok.config, ok);
                             return error.UnexpectedOk;
                         },
                         .row => |data| {
-                            std.log.err("Unexpected Row: {any}\n", .{data});
+                            logger.log(data.packet.config, .err, "Unexpected Row: (payload: {any})", .{data.packet.payload});
                             return error.UnexpectedResultData;
                         },
                     };
@@ -431,7 +469,7 @@ pub const PrepareResult = union(enum) {
                 return switch (p) {
                     .err => |err| return err.asError(),
                     .stmt => |ok| {
-                        std.log.err("Unexpected PreparedStatement: {any}\n", .{ok});
+                        logUnexpectedStmt(ok.config, ok);
                         return error.UnexpectedOk;
                     },
                 };
@@ -445,6 +483,9 @@ pub const PrepareResult = union(enum) {
 /// Resources are freed when `PrepareResult.deinit` is called.
 pub const PreparedStatement = struct {
     prep_ok: PrepareOk,
+    /// Config of the connection the statement was prepared on, used to bind log
+    /// messages.
+    config: ?*const Config = null,
     packets: []const Packet,
     col_defs: []const ColumnDefinition41,
     /// Parameter column definitions (corresponding to `?` placeholders in the query).
@@ -476,6 +517,7 @@ pub const PreparedStatement = struct {
 
         return .{
             .prep_ok = prep_ok,
+            .config = conn.config,
             .packets = packets,
             .col_defs = col_defs,
             .params = col_defs[0..prep_ok.num_params],
@@ -603,4 +645,98 @@ pub fn TableStructs(comptime Struct: type) type {
             }
         }
     };
+}
+
+const testing = std.testing;
+
+const TestCapture = struct {
+    calls: usize = 0,
+    config: ?*const Config = null,
+    message: [256]u8 = undefined,
+    message_len: usize = 0,
+};
+
+fn captureLog(context: ?*anyopaque, config: ?*const Config, level: logger.Level, message: []const u8) void {
+    _ = level;
+    const capture: *TestCapture = @ptrCast(@alignCast(context.?));
+    capture.calls += 1;
+    capture.config = config;
+    capture.message_len = @min(message.len, capture.message.len);
+    @memcpy(capture.message[0..capture.message_len], message[0..capture.message_len]);
+}
+
+test "unexpected result messages name the value without printing the config" {
+    var capture: TestCapture = .{};
+    var config: Config = .{ .logger = .{ .context = &capture, .logFn = captureLog } };
+
+    const col_defs = [_]ColumnDefinition41{.{
+        .catalog = undefined,
+        .schema = undefined,
+        .table = undefined,
+        .org_table = undefined,
+        .name = "id",
+        .org_name = undefined,
+        .fixed_length_fields_length = undefined,
+        .character_set = undefined,
+        .column_length = undefined,
+        .column_type = undefined,
+        .flags = undefined,
+        .decimals = undefined,
+    }};
+    logUnexpectedResultSet(&config, &col_defs);
+
+    try testing.expectEqual(1, capture.calls);
+    try testing.expectEqual(&config, capture.config.?);
+    // the trailing newline is stripped by the logger
+    try testing.expectEqualStrings("Unexpected ResultSet: (columns: [id])", capture.message[0..capture.message_len]);
+
+    const ok: OkPacket = .{
+        .affected_rows = 3,
+        .last_insert_id = 42,
+        .status_flags = undefined,
+        .warnings = undefined,
+        .info = undefined,
+        .session_state_info = undefined,
+    };
+    logUnexpectedOkPacket(&config, ok);
+
+    try testing.expectEqual(2, capture.calls);
+    try testing.expectEqualStrings(
+        "Unexpected OkPacket: (affected_rows: 3, last_insert_id: 42)",
+        capture.message[0..capture.message_len],
+    );
+}
+
+test "unexpected result messages are formatted only when there is a logger" {
+    var capture: TestCapture = .{};
+    var config: Config = .{ .logger = .{ .context = &capture, .logFn = captureLog } };
+
+    // This helper formats the column names itself, before `logger.log` gets the
+    // chance to drop the message, so it is the helper that has to return early.
+    // The name below lives in the first page of memory, which is never mapped:
+    // formatting it crashes the test, formatting nothing leaves it alone.
+    const unreadable_name: []const u8 = @as([*]const u8, @ptrFromInt(1))[0..1];
+    const col_defs = [_]ColumnDefinition41{.{
+        .catalog = undefined,
+        .schema = undefined,
+        .table = undefined,
+        .org_table = undefined,
+        .name = unreadable_name,
+        .org_name = undefined,
+        .fixed_length_fields_length = undefined,
+        .character_set = undefined,
+        .column_length = undefined,
+        .column_type = undefined,
+        .flags = undefined,
+        .decimals = undefined,
+    }};
+
+    // a message without a config has no logger to honour
+    logUnexpectedResultSet(null, &col_defs);
+    try testing.expectEqual(0, capture.calls);
+
+    // `null` is "logging is off", not "use the default logger"
+    config.logger = null;
+    logUnexpectedResultSet(&config, &col_defs);
+    try testing.expectEqual(0, capture.calls);
 }

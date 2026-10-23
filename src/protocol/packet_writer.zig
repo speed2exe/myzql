@@ -132,7 +132,6 @@ pub const PacketWriter = struct {
             try p.writeInt(u8, 0xFE);
             try p.writeInt(u64, v);
         } else {
-            std.log.warn("Invalid length encoded integer: {any}\n", .{v});
             return error.InvalidLengthEncodedInteger;
         }
     }

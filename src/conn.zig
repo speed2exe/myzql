@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const auth = @import("./auth.zig");
+const logger = @import("./logger.zig");
 const Config = @import("./config.zig").Config;
 const constants = @import("./constants.zig");
 const protocol = @import("./protocol.zig");
@@ -48,6 +49,11 @@ pub const Conn = struct {
     capabilities: u32,
     sequence_id: u8,
 
+    /// Config this connection was created from. Every message the connection
+    /// emits is logged through `config.logger` and bound to this config, so the
+    /// config must outlive the connection. See `Config.logger`.
+    config: *const Config,
+
     // Buffer to store metadata of the result set
     result_meta: ResultMeta,
 
@@ -62,7 +68,7 @@ pub const Conn = struct {
         var config = config_in;
         var unix_config: Config = undefined;
         if (config.ssl and std.meta.activeTag(config.address) == .unix) {
-            std.log.warn("TLS is not available on unix sockets, ignoring `ssl`\n", .{});
+            logger.log(config_in, .warn, "TLS is not available on unix sockets, ignoring `ssl`", .{});
             unix_config = config.*;
             unix_config.ssl = false;
             config = &unix_config;
@@ -90,6 +96,7 @@ pub const Conn = struct {
             .writer = PacketWriter.init(allocator, transport),
             .capabilities = undefined, // not known until we get the first packet
             .sequence_id = undefined, // not known until we get the first packet
+            .config = config_in,
 
             .result_meta = ResultMeta.init(),
         };
@@ -107,7 +114,7 @@ pub const Conn = struct {
             conn.capabilities = handshake_v10.capability_flags() & config.capability_flags();
 
             if (conn.capabilities & constants.CLIENT_PROTOCOL_41 == 0) {
-                std.log.err("protocol older than 4.1 is not supported\n", .{});
+                logger.log(conn.config, .err, "protocol older than 4.1 is not supported", .{});
                 return error.UnsupportedProtocol;
             }
 
@@ -127,7 +134,7 @@ pub const Conn = struct {
             .mysql_native_password => try conn.auth_mysql_native_password(allocator, io, &auth_data, config, false),
             .sha256_password => try conn.auth_sha256_password(allocator, io, &auth_data, config, false),
             else => {
-                std.log.warn("Unsupported auth plugin: {any}\n", .{auth_plugin});
+                logger.log(conn.config, .warn, "Unsupported auth plugin: {any}", .{auth_plugin});
                 return error.UnsupportedAuthPlugin;
             },
         }
@@ -142,7 +149,7 @@ pub const Conn = struct {
     /// Sends a COM_QUIT packet to the server before closing.
     pub fn deinit(c: *Conn, allocator: Allocator, io: Io) void {
         c.quit(io) catch |err| {
-            std.log.err("Failed to quit: {any}\n", .{err});
+            logger.log(c.config, .err, "Failed to quit: {any}", .{err});
         };
         c.destroy(allocator, io);
     }
@@ -237,7 +244,7 @@ pub const Conn = struct {
     fn startTls(c: *Conn, io: std.Io, config: *const Config) !void {
         if (c.capabilities & constants.CLIENT_SSL == 0) {
             // the error is returned to the caller, no need to log an error
-            std.log.warn("server does not support TLS\n", .{});
+            logger.log(c.config, .warn, "server does not support TLS", .{});
             return error.ServerDoesNotSupportTls;
         }
 
@@ -316,7 +323,7 @@ pub const Conn = struct {
                 try c.auth_sha256_password(allocator, io, plugin_data[0..20], config, true);
             },
             else => {
-                std.log.warn("Unsupported auth switch plugin: {s}\n", .{plugin_name});
+                logger.log(c.config, .warn, "Unsupported auth switch plugin: {s}", .{plugin_name});
                 return error.UnsupportedAuthPlugin;
             },
         }
@@ -480,7 +487,10 @@ pub const Conn = struct {
     }
 
     pub inline fn readPacket(c: *Conn, io: std.Io) !Packet {
-        const packet = try c.reader.readPacket(io);
+        var packet = try c.reader.readPacket(io);
+        // bind the packet (and everything derived from it, e.g. error packets
+        // and result rows) to the config of this connection for logging
+        packet.config = c.config;
         c.sequence_id = packet.sequence_id +% 1;
         return packet;
     }

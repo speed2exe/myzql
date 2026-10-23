@@ -24,6 +24,7 @@
 - Data insertion
 - MySQL DateTime and Time support
 - Thread-safe connection pool
+- Custom log handler per config, every message bound to the config that emitted it
 
 ## Requirements
 - MySQL/MariaDB 5.7.5 and up
@@ -578,6 +579,103 @@ pub fn main() !void {
     _ = try result.expect(.rows);
 }
 ```
+
+## Logging
+- The logger is a field of `Config`, so logging is configured per config rather
+  than per connection: every message the library emits on behalf of a connection
+  is handed to the logger of the config that connection was created with,
+  together with that config.
+- If you do not set a logger, `myzql.logger.default_logger` is used, which writes
+  every message with `std.log`, so nothing changes if you do not opt in.
+- Set `logger` to `null` (`myzql.logger.silent`) to turn logging off: nothing is
+  emitted for connections created from that config, and messages are not even
+  formatted.
+- Set `logger` to route the messages of a config somewhere else. The handler
+  receives the config that emitted the message, so messages of configs sharing
+  one sink can still be told apart.
+```zig
+const std = @import("std");
+const myzql = @import("myzql");
+const Conn = myzql.conn.Conn;
+const Config = myzql.config.Config;
+
+const LogSink = struct {
+    messages: std.atomic.Value(usize) = .init(0),
+
+    fn logFn(
+        context: ?*anyopaque,
+        config: ?*const Config,
+        level: std.log.Level,
+        message: []const u8,
+    ) void {
+        const sink: *LogSink = @ptrCast(@alignCast(context.?));
+        _ = sink.messages.fetchAdd(1, .monotonic);
+
+        // `config` is the config the message was emitted for. Its fields (e.g.
+        // the database) tell the clients apart, so one sink serves many of them.
+        // It is null only for a message that has no config behind it, e.g. one
+        // emitted by a value that was built by hand.
+        const database = if (config) |c| c.database else "";
+
+        switch (level) {
+            .err => std.log.scoped(.myzql).err("[{s}] {s}", .{ database, message }),
+            .warn => std.log.scoped(.myzql).warn("[{s}] {s}", .{ database, message }),
+            .info => std.log.scoped(.myzql).info("[{s}] {s}", .{ database, message }),
+            .debug => std.log.scoped(.myzql).debug("[{s}] {s}", .{ database, message }),
+        }
+    }
+};
+
+pub fn main() !void {
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
+    const allocator = std.heap.page_allocator;
+
+    var sink: LogSink = .{};
+
+    var config: Config = .{
+        .database = "customers",
+        .password = "password123",
+        .logger = .{ .context = &sink, .logFn = LogSink.logFn },
+    };
+
+    // messages of this connection go to `sink`
+    var client = try Conn.init(allocator, io, &config);
+    defer client.deinit(allocator, io);
+
+    // a copy of the config with logging turned off: connections created from it
+    // stay quiet
+    var quiet_config = config;
+    quiet_config.logger = myzql.logger.silent;
+    var quiet_client = try Conn.init(allocator, io, &quiet_config);
+    defer quiet_client.deinit(allocator, io);
+}
+```
+- The handler type is `myzql.logger.Logger`:
+  - `logFn: fn (context: ?*anyopaque, config: ?*const Config, level: std.log.Level, message: []const u8) void`.
+  - `context` is passed back unchanged, which is how one sink serves many configs.
+  - `config` is the config the message belongs to, so its fields identify the
+    client that emitted it. It is `null` only when a message has no config behind
+    it, e.g. one emitted by a value that was built by hand.
+  - `logFn` defaults to `myzql.logger.defaultLogFn`, so `logger = .{}` (a
+    `Logger` with only a `context`, or with no fields at all) still writes with
+    `std.log`. Leaving the field alone already gives you
+    `myzql.logger.default_logger`, i.e. `Config{}.logger.?.logFn == myzql.logger.defaultLogFn`.
+- `null` is not "unset", it is the way to disable logging; leaving the field out
+  is "unset" and keeps the default logger.
+- `message` is already formatted and has no trailing newline.
+- Messages are formatted in a fixed stack buffer: anything longer than
+  `myzql.logger.max_message_len` (1024 bytes) is truncated, never dropped.
+- The handler is called synchronously on the thread that emitted the message,
+  so it must be thread-safe when connections are shared (see
+  [Connection Pool](#connection-pool)).
+- The config must outlive the connections created from it, since a connection
+  logs through the config it was created with.
+- Connections created by a `Pool` log through the pool's own copy of the config,
+  so `config` is the copy owned by the pool, not the one passed to `Pool.init`.
+- Only the messages of this library are routed, `std.log` calls of your own code
+  are untouched; the default handler (`std.log`) keeps the previous behavior.
 
 ## Unit Tests
 - `zig build unit_test`

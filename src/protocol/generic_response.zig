@@ -2,6 +2,8 @@ const std = @import("std");
 const constants = @import("../constants.zig");
 const Packet = @import("./packet.zig").Packet;
 const PacketReader = @import("./packet_reader.zig").PacketReader;
+const Config = @import("../config.zig").Config;
+const logger = @import("../logger.zig");
 
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_err_packet.html
 pub const ErrorPacket = struct {
@@ -9,6 +11,9 @@ pub const ErrorPacket = struct {
     sql_state_marker: u8,
     sql_state: *const [5]u8,
     error_message: []const u8,
+    /// Config of the connection the packet was read from, used to bind
+    /// `asError` to the connection that got the error.
+    config: ?*const Config = null,
 
     pub fn initFirst(packet: *const Packet) ErrorPacket {
         var reader = packet.reader();
@@ -16,6 +21,7 @@ pub const ErrorPacket = struct {
         std.debug.assert(header == constants.ERR);
 
         var error_packet: ErrorPacket = undefined;
+        error_packet.config = packet.config;
         error_packet.error_code = reader.readInt(u16);
         error_packet.error_message = reader.readRefRemaining();
         return error_packet;
@@ -27,6 +33,7 @@ pub const ErrorPacket = struct {
         std.debug.assert(header == constants.ERR);
 
         var error_packet: ErrorPacket = undefined;
+        error_packet.config = packet.config;
         error_packet.error_code = reader.readInt(u16);
 
         // CLIENT_PROTOCOL_41
@@ -39,10 +46,7 @@ pub const ErrorPacket = struct {
 
     pub fn asError(err: *const ErrorPacket) error{ErrorPacket} {
         // TODO: better way to do this?
-        std.log.warn(
-            "error packet: (code: {d}, message: {s})",
-            .{ err.error_code, err.error_message },
-        );
+        logger.log(err.config, .warn, "error packet: (code: {d}, message: {s})", .{ err.error_code, err.error_message });
         return error.ErrorPacket;
     }
 };
@@ -55,9 +59,13 @@ pub const OkPacket = struct {
     warnings: ?u16,
     info: ?[]const u8,
     session_state_info: ?[]const u8,
+    /// Config of the connection the packet was read from, used to bind log
+    /// messages.
+    config: ?*const Config = null,
 
     pub fn init(packet: *const Packet, capabilities: u32) OkPacket {
         var ok_packet: OkPacket = undefined;
+        ok_packet.config = packet.config;
 
         var reader = packet.reader();
         const header = reader.readByte();
