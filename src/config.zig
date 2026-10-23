@@ -1,5 +1,6 @@
 const std = @import("std");
 const constants = @import("./constants.zig");
+const logger = @import("./logger.zig");
 
 /// Port used by a connection URL that does not specify one.
 pub const default_port: u16 = 3306;
@@ -38,6 +39,16 @@ pub const Config = struct {
     ssl_ca: ?[]const u8 = null,
     /// Allow multiple statements in a single query. Default: false
     multi_statements: bool = false,
+
+    /// Handler for the log messages emitted by the connections created with
+    /// this config. The logger is tied to this config, not to a connection:
+    /// every message is handed to `logFn` together with this config, so one
+    /// handler serves all connections sharing it.
+    ///
+    /// Set to `null` (`myzql.logger.silent`) to turn logging off. See
+    /// `myzql.logger`.
+    /// Default: `myzql.logger.default_logger`, which writes with `std.log`
+    logger: ?logger.Logger = logger.default_logger,
 
     pub fn capability_flags(config: *const Config) u32 {
         // zig fmt: off

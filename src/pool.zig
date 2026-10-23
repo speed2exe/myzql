@@ -4,6 +4,7 @@ const Io = std.Io;
 
 const Config = @import("./config.zig").Config;
 const Conn = @import("./conn.zig").Conn;
+const logger = @import("./logger.zig");
 const result = @import("./result.zig");
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
@@ -129,6 +130,7 @@ pub const Pool = struct {
                 .ssl_verify = config.ssl_verify,
                 .ssl_ca = if (config.ssl_ca != null) ssl_ca_data else null,
                 .multi_statements = config.multi_statements,
+                .logger = config.logger,
             },
         };
 
@@ -159,7 +161,14 @@ pub const Pool = struct {
         p.idle.deinit(p.allocator);
 
         if (p.total_count > 0) {
-            std.log.warn("pool deinit with {d} outstanding connection(s) still in use", .{p.total_count});
+            // the connections still in use are not owned by this call, so the
+            // message is bound to the pool's config instead of one of them
+            logger.log(
+                &p.owned_config.value,
+                .warn,
+                "pool deinit with {d} outstanding connection(s) still in use",
+                .{p.total_count},
+            );
         }
 
         p.owned_config.deinit(p.allocator);

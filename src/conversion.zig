@@ -6,6 +6,8 @@ const DateTime = @import("./temporal.zig").DateTime;
 const Duration = @import("./temporal.zig").Duration;
 const EnumFieldType = @import("./constants.zig").EnumFieldType;
 const Packet = @import("./protocol/packet.zig").Packet;
+const Config = @import("./config.zig").Config;
+const logger = @import("./logger.zig");
 
 // dest is a pointer to a struct
 pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const ColumnDefinition41, allocator: ?std.mem.Allocator) !void {
@@ -24,7 +26,7 @@ pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const 
     if (struct_field_names.len != col_defs.len) {
         //left always is `false` and struct_field_names.len always equals struct_field_types.len
         //if (struct_field_names.len != struct_field_types.len and (struct_field_names != col_defs.len)) {
-        std.log.err("received {d} columns from mysql, but given {d} fields for struct", .{ col_defs.len, struct_field_names.len });
+        logger.log(reader.config, .err, "received {d} columns from mysql, but given {d} fields for struct", .{ col_defs.len, struct_field_names.len });
         return error.ColumnAndFieldCountMismatch;
     }
 
@@ -42,7 +44,7 @@ pub fn scanBinResultRow(dest: anytype, packet: *const Packet, col_defs: []const 
             },
             else => {
                 if (isNull) {
-                    std.log.err("column: {s} value is null, but field: {s} is not nullable\n", .{ col_def.name, field_name });
+                    logger.log(reader.config, .err, "column: {s} value is null, but field: {s} is not nullable", .{ col_def.name, field_name });
                     return error.UnexpectedNullMySQLValue;
                 }
                 @field(dest, field_name) = try binElemToValue(field_type, field_name, &col_def, &reader, allocator);
@@ -108,13 +110,16 @@ fn decodeDuration(reader: *PayloadReader) Duration {
 }
 
 inline fn logConversionError(
+    config: ?*const Config,
     comptime FieldType: type,
     comptime field_name: []const u8,
     col_name: []const u8,
     col_type: EnumFieldType,
 ) void {
-    std.log.err(
-        "Conversion Error: MySQL Column: (name: {s}, type: {any}), Zig Value: (name: {s}, type: {any})\n",
+    logger.log(
+        config,
+        .err,
+        "Conversion Error: MySQL Column: (name: {s}, type: {any}), Zig Value: (name: {s}, type: {any})",
         .{ col_name, col_type, field_name, FieldType },
     );
 }
@@ -206,8 +211,10 @@ inline fn binElemToValue(
                             return @field(FieldType, f);
                         }
                     }
-                    std.log.err(
-                        "received string: {s} from mysql, but could not find tag from enum: {s}, field name: {s}\n",
+                    logger.log(
+                        reader.config,
+                        .err,
+                        "received string: {s} from mysql, but could not find tag from enum: {s}, field name: {s}",
                         .{ str, @typeName(FieldType), field_name },
                     );
                 },
@@ -309,7 +316,7 @@ inline fn binElemToValue(
         else => {},
     }
 
-    logConversionError(FieldType, field_name, col_def.name, col_type);
+    logConversionError(reader.config, FieldType, field_name, col_def.name, col_type);
     return error.IncompatibleBinaryConversion;
 }
 
