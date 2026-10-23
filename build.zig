@@ -33,9 +33,18 @@ pub fn build(b: *std.Build) void {
     const unix_socket_path = b.option([]const u8, "unix-socket-path", "Path to MySQL Unix domain socket for integration tests");
     // -Dskip-stress=true (skip 16M-row stress test, useful for CI)
     const skip_stress = b.option(bool, "skip-stress", "Skip the stress test (heavy, 16M rows)") orelse false;
+    // -Dtls-ca-path="/path/to/ca.pem" (CA certificate of the TLS test server)
+    const tls_ca_path = b.option([]const u8, "tls-ca-path", "Path to the CA certificate (PEM) that signed the certificate of the TLS test server");
+    // -Dtls-wrong-host-port=3308 (TLS server with a certificate for another host)
+    const tls_wrong_host_port = b.option(u16, "tls-wrong-host-port", "Port of a TLS MySQL server whose certificate is not valid for 127.0.0.1");
+    // -Dnotls-port=3307 (MySQL/MariaDB server without TLS support)
+    const notls_port = b.option(u16, "notls-port", "Port of a MySQL server without TLS support");
     const integration_test_opts = b.addOptions();
     integration_test_opts.addOption(?[]const u8, "unix_socket_path", unix_socket_path);
     integration_test_opts.addOption(bool, "skip_stress", skip_stress);
+    integration_test_opts.addOption(?[]const u8, "tls_ca_path", tls_ca_path);
+    integration_test_opts.addOption(?u16, "tls_wrong_host_port", tls_wrong_host_port);
+    integration_test_opts.addOption(?u16, "notls_port", notls_port);
 
     // zig build -Dtest-filter="..." integration_test
     const integration_tests = b.addTest(.{

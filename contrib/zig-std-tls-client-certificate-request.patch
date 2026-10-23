@@ -1,0 +1,102 @@
+# Lets the TLS client of the Zig standard library handle the TLS 1.3
+# `certificate_request` message that MySQL and MariaDB send during the
+# handshake.
+#
+# Without it every TLS connection to MySQL/MariaDB fails with
+# `error.TlsUnexpectedMessage`, because the server always asks for a client
+# certificate (with an empty list of acceptable CA names) and the client does
+# not know how to answer. This patch parses the request, adds it to the
+# transcript, answers with an empty `Certificate` message, and derives the
+# application traffic secrets at the right point of the transcript, as
+# described in RFC 8446 section 7.1.
+#
+# Apply it to the Zig source tree and rebuild, e.g. for a local checkout:
+#
+#     patch -p1 -d /path/to/zig --input zig-std-tls-client-certificate-request.patch
+#
+# The patch was written against the standard library of Zig 0.17.0 and can be
+# removed once Zig ships an equivalent fix.
+#
+# This file is 0.17.0 specific in hunk 1 only: on newer checkouts
+# `options.realtime_now.toSeconds()` became `options.realtime_now_seconds`, so
+# the `var client_auth_requested = false;` line has to be moved by hand.
+--- a/lib/std/crypto/tls/Client.zig
++++ b/lib/std/crypto/tls/Client.zig
+@@ -332,6 +332,7 @@
+     var handshake_cipher: tls.HandshakeCipher = undefined;
+     var main_cert_pub_key: CertificatePublicKey = undefined;
+     var tls12_negotiated_group: ?tls.NamedGroup = null;
++    var client_auth_requested = false;
+     const now_sec = options.realtime_now.toSeconds();
+ 
+     var cleartext_fragment_start: usize = 0;
+@@ -852,6 +853,35 @@
+                                     try hsd.ensure(P.Hmac.mac_length);
+                                     const finished_digest = p.transcript_hash.peek();
+                                     p.transcript_hash.update(wrapped_handshake);
++                                    // RFC 8446 section 7.1: application traffic secrets are
++                                    // derived from the transcript up to and including the
++                                    // server's Finished, before any client authentication
++                                    // messages are added to the transcript.
++                                    const app_traffic_hash = p.transcript_hash.peek();
++                                    if (client_auth_requested) {
++                                        const empty_certificate: [9]u8 = .{
++                                            @backingInt(tls.HandshakeType.certificate),
++                                            0, 0, 4, // length
++                                            0, // empty certificate_request_context
++                                            0, 0, 0, // empty certificate_list
++                                            @backingInt(tls.ContentType.handshake),
++                                        };
++                                        p.transcript_hash.update(empty_certificate[0..8]);
++                                        const cert_wrapped_len = empty_certificate.len + P.AEAD.tag_length;
++                                        var cert_msg = .{@backingInt(tls.ContentType.application_data)} ++
++                                            int(u16, @backingInt(tls.ProtocolVersion.tls_1_2)) ++
++                                            array(u16, u8, @as([cert_wrapped_len]u8, undefined));
++                                        P.AEAD.encrypt(
++                                            cert_msg[tls.record_header_len..][0..empty_certificate.len],
++                                            cert_msg[cert_msg.len - P.AEAD.tag_length ..],
++                                            &empty_certificate,
++                                            cert_msg[0..tls.record_header_len],
++                                            pv.client_handshake_iv,
++                                            pv.client_handshake_key,
++                                        );
++                                        var cert_vec: [1][]const u8 = .{&cert_msg};
++                                        try output.writeVecAll(&cert_vec);
++                                    }
+                                     const expected_server_verify_data = tls.hmac(P.Hmac, &finished_digest, pv.server_finished_key);
+                                     if (!std.crypto.timing_safe.eql([P.Hmac.mac_length]u8, expected_server_verify_data, hsd.array(P.Hmac.mac_length).*)) return error.TlsDecryptError;
+                                     const handshake_hash = p.transcript_hash.finalResult();
+@@ -869,7 +899,8 @@
+                                     const ad = finished_msg[0..tls.record_header_len];
+                                     const ciphertext = finished_msg[tls.record_header_len..][0..out_cleartext.len];
+                                     const auth_tag = finished_msg[finished_msg.len - P.AEAD.tag_length ..];
+-                                    const nonce = pv.client_handshake_iv;
++                                    var nonce = pv.client_handshake_iv;
++                                    if (client_auth_requested) nonce[nonce.len - 1] ^= 1;
+                                     P.AEAD.encrypt(ciphertext, auth_tag, &out_cleartext, ad, nonce, pv.client_handshake_key);
+ 
+                                     var all_msgs_vec: [2][]const u8 = .{
+@@ -879,8 +910,8 @@
+                                     try output.writeVecAll(&all_msgs_vec);
+                                     try output.flush();
+ 
+-                                    const client_secret = hkdfExpandLabel(P.Hkdf, pv.master_secret, "c ap traffic", &handshake_hash, P.Hash.digest_length);
+-                                    const server_secret = hkdfExpandLabel(P.Hkdf, pv.master_secret, "s ap traffic", &handshake_hash, P.Hash.digest_length);
++                                    const client_secret = hkdfExpandLabel(P.Hkdf, pv.master_secret, "c ap traffic", &app_traffic_hash, P.Hash.digest_length);
++                                    const server_secret = hkdfExpandLabel(P.Hkdf, pv.master_secret, "s ap traffic", &app_traffic_hash, P.Hash.digest_length);
+                                     if (options.ssl_key_log) |key_log| logSecrets(key_log.writer, .{
+                                         .counter = key_seq,
+                                         .client_random = &client_hello_rand,
+@@ -949,6 +980,12 @@
+                             .application_cipher = app_cipher,
+                             .ssl_key_log = options.ssl_key_log,
+                         };
++                    },
++                    .certificate_request => {
++                        client_auth_requested = true;
++                        switch (handshake_cipher) {
++                            inline else => |*p| p.transcript_hash.update(wrapped_handshake),
++                        }
+                     },
+                     else => return error.TlsUnexpectedMessage,
+                 }

@@ -18,6 +18,7 @@
 ## Features
 - Native Zig code, no external dependencies
 - TCP and Unix socket connections
+- TLS for TCP connections
 - Prepared Statement
 - Structs from query result
 - Data insertion
@@ -26,9 +27,13 @@
 
 ## Requirements
 - MySQL/MariaDB 5.7.5 and up
-
-## TODOs
-- TLS support
+- A Zig standard library whose TLS client handles the `certificate_request`
+  message: MySQL and MariaDB always ask for a client certificate, which the
+  standard library of Zig 0.17.0 and current master answer with
+  `error.TlsUnexpectedMessage`. Apply
+  [`contrib/zig-std-tls-client-certificate-request.patch`](contrib/zig-std-tls-client-certificate-request.patch)
+  until the fix is released upstream. TLS connections are not affected by
+  anything else, all other features work with an unpatched Zig.
 
 ## Add as dependency to your Zig project
 ### Fetch dependency
@@ -157,11 +162,22 @@ var url_config = try Config.fromUrl(allocator, "mysql://root:password123@/custom
 | `clientFoundRows`, `client_found_rows` | `client_found_rows` | `true`, `false`, `1` or `0` |
 | `multiStatements`, `multi_statements` | `multi_statements` | `true`, `false`, `1` or `0` |
 | `ssl`, `tls` | `ssl` | `true`, `false`, `1` or `0` |
+| `sslVerify`, `ssl_verify` | `ssl_verify` | `true`, `false`, `1` or `0` |
+| `sslCa`, `ssl_ca` | `ssl_ca` | path to a PEM file with CA certificates |
 
 - A parameter with an empty value keeps the default, so `?charset=` placeholders can be left in URL templates.
 - Unknown parameters and invalid values are rejected (`error.UnknownUrlParameter`,
 `error.InvalidUrlParameterValue`, `error.UnknownCharset`) instead of being silently ignored.
-- Note that TLS is not implemented yet, so `ssl=true` only requests the flag from the server.
+- `ssl=true` establishes the connection over TLS, e.g.
+`mysql://user:password123@db.example.com/customers?ssl=true`. The server must
+support TLS, otherwise the connection fails with `error.ServerDoesNotSupportTls`.
+- Unix domain sockets are already a local channel, so `ssl` is ignored for them.
+- When TLS is used, the server certificate is verified (signed by a trusted CA
+and issued for the host that was connected to) against the CA certificates
+installed on the system. Point `sslCa` at a PEM file to use a different CA, or
+set `sslVerify=false` to disable verification. Disabling verification still
+encrypts the traffic, but the server is not authenticated, which makes the
+connection vulnerable to man-in-the-middle attacks.
 
 ## Querying
 ```zig
@@ -539,6 +555,16 @@ zig build integration_test -Dunix-socket-path=/tmp/mysql/mysqld.sock -Dtest-filt
 ```bash
 zig build integration_test -Dskip-stress=true --summary all
 ```
+- Run the TLS tests, which start their own servers (MySQL with TLS, MySQL with a
+  certificate for another host name and MariaDB without TLS) and generate the
+  certificates into a temporary directory:
+```bash
+./integration_tests/tls/docker-test.sh --summary all
+```
+The three ports can be changed with `MYZQL_TLS_PORT` (default `3306`),
+`MYZQL_WRONG_HOST_PORT` (default `3308`) and `MYZQL_NOTLS_PORT` (default
+`3307`). The tests are skipped when `-Dtls-ca-path` is not given, so the TLS
+servers are only needed for the command above.
 
 ## Philosophy
 ### Correctness

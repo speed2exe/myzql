@@ -173,9 +173,9 @@ pub fn ResultSet(comptime T: type) type {
 
                     // Drain remaining rows from the stream through a temporary
                     // reader so conn.reader's buffer is never expanded or moved.
-                    var temp_reader = try PacketReader.init(
+                    var temp_reader = PacketReader.init(
                         reader.allocator,
-                        reader.stream,
+                        reader.transport,
                     );
                     defer temp_reader.deinit();
 
