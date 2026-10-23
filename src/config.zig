@@ -33,8 +33,8 @@ pub const Config = struct {
     /// man-in-the-middle attacks.
     ssl_verify: bool = true,
     /// PEM file with the CA certificates used to verify the server when `ssl`
-    /// is true. Default: null, which uses the CA certificates installed on the
-    /// system
+    /// is true, instead of the CA certificates installed on the system.
+    /// Default: null
     ssl_ca: ?[]const u8 = null,
     /// Allow multiple statements in a single query. Default: false
     multi_statements: bool = false,

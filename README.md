@@ -18,7 +18,7 @@
 ## Features
 - Native Zig code, no external dependencies
 - TCP and Unix socket connections
-- TLS for TCP connections
+- TLS for TCP connections (server certificate verification, custom CA)
 - Prepared Statement
 - Structs from query result
 - Data insertion
@@ -27,13 +27,17 @@
 
 ## Requirements
 - MySQL/MariaDB 5.7.5 and up
-- A Zig standard library whose TLS client handles the `certificate_request`
-  message: MySQL and MariaDB always ask for a client certificate, which the
-  standard library of Zig 0.17.0 and current master answer with
-  `error.TlsUnexpectedMessage`. Apply
+- For TLS connections only: a Zig standard library whose TLS client handles the
+  `certificate_request` message. MySQL and MariaDB always ask for a client
+  certificate (with an empty list of acceptable CA names), which the standard
+  library of Zig 0.17.0 and the current master answer with
+  `error.TlsUnexpectedMessage`. Until a fix is released upstream, apply
   [`contrib/zig-std-tls-client-certificate-request.patch`](contrib/zig-std-tls-client-certificate-request.patch)
-  until the fix is released upstream. TLS connections are not affected by
-  anything else, all other features work with an unpatched Zig.
+  to the source tree of your Zig installation and rebuild:
+```bash
+patch -p1 -d /path/to/zig --input path/to/myzql/contrib/zig-std-tls-client-certificate-request.patch
+```
+- Connections without TLS, and every other feature, work with an unpatched Zig.
 
 ## Add as dependency to your Zig project
 ### Fetch dependency
@@ -94,7 +98,7 @@ pub fn main() !void {
     );
     defer client.deinit(allocator, io);
 
-    try client.ping();
+    try client.ping(io);
 }
 ```
 
@@ -116,9 +120,69 @@ pub fn main() !void {
     );
     defer client.deinit(allocator, io);
 
-    try client.ping();
+    try client.ping(io);
 }
 ```
+
+### TLS Connection
+- TLS encrypts TCP connections. Enable it with `ssl` on the config, or with the
+`ssl=true` (`tls=true`) URL parameter, see [Connection from URL](#connection-from-url).
+- The standard library of Zig 0.17.0 and of the current master cannot answer
+the `certificate_request` message that MySQL and MariaDB send during the TLS
+handshake, so TLS needs the patch of [Requirements](#requirements).
+```zig
+pub fn main() !void {
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io: std.Io = threaded.io();
+    const allocator = std.heap.page_allocator;
+
+    var client = try Conn.init(
+        allocator,
+        io,
+        &.{
+            .username = "some-user",
+            .password = "password123",
+            .database = "customers",
+            .address = .{ .host = .{ .name = try std.Io.net.HostName.init("db.example.com"), .port = 3306 } },
+
+            .ssl = true,                          // default: false
+            .ssl_verify = true,                   // default: true
+            .ssl_ca = "/etc/ssl/certs/db-ca.pem", // default: null (CA certificates of the system)
+        },
+    );
+    defer client.deinit(allocator, io);
+
+    try client.ping(io);
+}
+```
+- The same connection as a URL:
+```zig
+var url_config = try Config.fromUrl(allocator, "mysql://some-user:password123@db.example.com:3306/customers?ssl=true&sslCa=%2Fetc%2Fssl%2Fcerts%2Fdb-ca.pem");
+```
+- A connection is either encrypted from the start or not encrypted at all:
+`ssl=true` never falls back to cleartext, a server without TLS support fails the
+connection with `error.ServerDoesNotSupportTls`.
+- With `ssl_verify` enabled (the default) the certificate must be signed by a
+trusted CA and be issued for the host name or IP address of the connection
+(the same name is sent as SNI). `ssl_ca` replaces the CA certificates of the
+system with the certificates of a PEM file, which is what self-signed servers
+need.
+- `ssl_verify=false` still encrypts the traffic, but the server is not
+authenticated, which makes the connection vulnerable to man-in-the-middle
+attacks. It is meant for servers whose certificate cannot be fixed, not for
+production.
+- Unix domain sockets are already a local channel, so `ssl` is ignored for them
+(a warning is logged) and the connection stays unencrypted.
+- Accounts with `REQUIRE SSL` work, and authentication works with every
+supported auth plugin: over a secure channel `caching_sha2_password` and
+`sha256_password` send the password instead of requesting the RSA public key of
+the server, and `mysql_native_password` works unchanged.
+- Closing a connection sends the TLS `close_notify` alert before the socket is
+closed.
+- Connections of a pool are established and reused like plain ones; the pool
+copies `ssl_ca` into memory owned by the pool, so it does not need to outlive
+`Pool.init`.
 
 ### Connection from URL
 - `Config.fromUrl` parses a MySQL connection URL and returns a `UrlConfig`.
@@ -168,16 +232,10 @@ var url_config = try Config.fromUrl(allocator, "mysql://root:password123@/custom
 - A parameter with an empty value keeps the default, so `?charset=` placeholders can be left in URL templates.
 - Unknown parameters and invalid values are rejected (`error.UnknownUrlParameter`,
 `error.InvalidUrlParameterValue`, `error.UnknownCharset`) instead of being silently ignored.
-- `ssl=true` establishes the connection over TLS, e.g.
-`mysql://user:password123@db.example.com/customers?ssl=true`. The server must
-support TLS, otherwise the connection fails with `error.ServerDoesNotSupportTls`.
-- Unix domain sockets are already a local channel, so `ssl` is ignored for them.
-- When TLS is used, the server certificate is verified (signed by a trusted CA
-and issued for the host that was connected to) against the CA certificates
-installed on the system. Point `sslCa` at a PEM file to use a different CA, or
-set `sslVerify=false` to disable verification. Disabling verification still
-encrypts the traffic, but the server is not authenticated, which makes the
-connection vulnerable to man-in-the-middle attacks.
+- TLS is enabled with `ssl=true` (or `tls=true`), e.g.
+`mysql://user:password123@db.example.com/customers?ssl=true`. Verification,
+`sslCa` and the other parameters are described in
+[TLS Connection](#tls-connection).
 
 ## Querying
 ```zig
@@ -555,16 +613,31 @@ zig build integration_test -Dunix-socket-path=/tmp/mysql/mysqld.sock -Dtest-filt
 ```bash
 zig build integration_test -Dskip-stress=true --summary all
 ```
-- Run the TLS tests, which start their own servers (MySQL with TLS, MySQL with a
-  certificate for another host name and MariaDB without TLS) and generate the
-  certificates into a temporary directory:
+- Run the TLS tests. The script needs `docker` and `openssl`: it generates a CA
+  and the server certificates into a temporary directory, builds the image of
+  `integration_tests/tls/Dockerfile` and starts three servers (MySQL with TLS,
+  MySQL with a certificate for another host name and MariaDB without TLS):
 ```bash
 ./integration_tests/tls/docker-test.sh --summary all
 ```
-The three ports can be changed with `MYZQL_TLS_PORT` (default `3306`),
+The ports of the servers can be changed with `MYZQL_TLS_PORT` (default `3306`),
 `MYZQL_WRONG_HOST_PORT` (default `3308`) and `MYZQL_NOTLS_PORT` (default
-`3307`). The tests are skipped when `-Dtls-ca-path` is not given, so the TLS
-servers are only needed for the command above.
+`3307`). With an unpatched Zig the TLS connections fail with
+`error.TlsUnexpectedMessage`, see [Requirements](#requirements).
+- To run the TLS tests against servers that are already running:
+```bash
+zig build integration_test -Dskip-stress=true \
+    -Dtls-ca-path=/path/to/ca.pem \
+    -Dtls-wrong-host-port=3308 \
+    -Dnotls-port=3307 \
+    -Dtest-filter="tls - " --summary all
+```
+`-Dtls-ca-path` is the CA that signed the certificate of the server on `3306`,
+`-Dtls-wrong-host-port` is a TLS server whose certificate is not valid for
+`127.0.0.1` and `-Dnotls-port` is a server without TLS support. Without
+`-Dtls-ca-path` the TLS tests are skipped, so the servers are only needed for
+the two commands above. The test of the unix socket behaviour additionally
+needs `-Dunix-socket-path`.
 
 ## Philosophy
 ### Correctness

@@ -26,9 +26,9 @@ pub const TlsOptions = struct {
     /// authenticated, which makes the connection vulnerable to
     /// man-in-the-middle attacks.
     verify: bool = true,
-    /// PEM file holding the CA certificates used to verify the server.
-    /// Default: null, which uses the CA certificates installed on the system.
-    /// Ignored when `verify` is false.
+    /// PEM file holding the CA certificates used to verify the server, instead
+    /// of the CA certificates installed on the system.
+    /// Default: null. Ignored when `verify` is false.
     ca_file: ?[]const u8 = null,
 };
 
