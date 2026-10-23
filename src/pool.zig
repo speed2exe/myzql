@@ -59,6 +59,9 @@ pub const Pool = struct {
         /// Copy of the string `Config.address` refers to, either a host name or
         /// a unix socket path. Empty for `.ip`, which owns no memory.
         address_data: []u8,
+        /// Copy of the string `Config.ssl_ca` refers to, empty when no CA file
+        /// is configured.
+        ssl_ca_data: []u8,
         value: Config,
 
         fn deinit(oc: *OwnedConfig, allocator: Allocator) void {
@@ -66,6 +69,7 @@ pub const Pool = struct {
             allocator.free(oc.password);
             allocator.free(oc.database);
             allocator.free(oc.address_data);
+            allocator.free(oc.ssl_ca_data);
         }
     };
 
@@ -103,11 +107,17 @@ pub const Pool = struct {
             .ip => {},
         }
 
+        // The path of the CA file may point into caller-owned memory as well
+        var ssl_ca_data: []u8 = &.{};
+        errdefer allocator.free(ssl_ca_data);
+        if (config.ssl_ca) |path| ssl_ca_data = try allocator.dupe(u8, path);
+
         const owned_config = OwnedConfig{
             .username = username,
             .password = password,
             .database = database,
             .address_data = address_data,
+            .ssl_ca_data = ssl_ca_data,
             .value = .{
                 .username = username,
                 .address = address,
@@ -116,6 +126,8 @@ pub const Pool = struct {
                 .collation = config.collation,
                 .client_found_rows = config.client_found_rows,
                 .ssl = config.ssl,
+                .ssl_verify = config.ssl_verify,
+                .ssl_ca = if (config.ssl_ca != null) ssl_ca_data else null,
                 .multi_statements = config.multi_statements,
             },
         };
@@ -339,4 +351,42 @@ test "init - clones the unix socket path into pool-owned memory" {
         .unix => |unix| try testing.expectEqualStrings("/tmp/mysql.sock", unix.path),
         else => return error.TestExpectedUnixAddress,
     }
+}
+
+test "init - clones the tls config into pool-owned memory" {
+    var pool: Pool = undefined;
+    var url_ca_pointer: [*]const u8 = undefined;
+    {
+        var url_config = try Config.fromUrl(testing.allocator, "mysql://root:secret@localhost/db" ++
+            "?ssl=true&sslVerify=false&sslCa=%2Ftmp%2Fca.pem");
+        defer url_config.deinit(testing.allocator);
+        url_ca_pointer = url_config.value.ssl_ca.?.ptr;
+
+        pool = try Pool.init(testing.allocator, &url_config.value, .{});
+    }
+    // the pool must not refer to the (now freed) storage of `url_config`
+    defer pool.deinit(testing.io);
+
+    const config = pool.owned_config.value;
+    try testing.expectEqual(true, config.ssl);
+    try testing.expectEqual(false, config.ssl_verify);
+    try testing.expectEqualStrings("/tmp/ca.pem", config.ssl_ca.?);
+    try testing.expectEqual(false, config.ssl_ca.?.ptr == url_ca_pointer);
+}
+
+test "init - no CA file configured" {
+    var pool: Pool = undefined;
+    {
+        var url_config = try Config.fromUrl(testing.allocator, "mysql://root@localhost/db?ssl=1");
+        defer url_config.deinit(testing.allocator);
+
+        pool = try Pool.init(testing.allocator, &url_config.value, .{});
+    }
+    defer pool.deinit(testing.io);
+
+    const config = pool.owned_config.value;
+    try testing.expectEqual(true, config.ssl);
+    // verification is on by default and falls back to the system CA bundle
+    try testing.expectEqual(true, config.ssl_verify);
+    try testing.expectEqual(null, config.ssl_ca);
 }

@@ -11,6 +11,7 @@ const HandshakeV10 = protocol.handshake_v10.HandshakeV10;
 const ErrorPacket = protocol.generic_response.ErrorPacket;
 const OkPacket = protocol.generic_response.OkPacket;
 const HandshakeResponse41 = protocol.handshake_response.HandshakeResponse41;
+const SslRequest = protocol.handshake_response.SslRequest;
 const QueryRequest = protocol.text_command.QueryRequest;
 const prepared_statements = protocol.prepared_statements;
 const PrepareRequest = prepared_statements.PrepareRequest;
@@ -27,6 +28,7 @@ const PreparedStatement = result.PreparedStatement;
 const TextResultRow = result.TextResultRow;
 const BinaryResultRow = result.BinaryResultRow;
 const ResultMeta = @import("./result_meta.zig").ResultMeta;
+const Transport = @import("./transport.zig").Transport;
 
 // Maximum allowed MySQL packet size (16MB - 1 bytes)
 const max_packet_size = (1 << 24) - 1;
@@ -40,7 +42,7 @@ const buffer_size: usize = 4096;
 pub const Conn = struct {
     allocator: Allocator,
     connected: bool,
-    stream: Io.net.Stream,
+    transport: *Transport,
     reader: PacketReader,
     writer: PacketWriter,
     capabilities: u32,
@@ -54,27 +56,46 @@ pub const Conn = struct {
     /// Performs the TCP connection and authentication handshake.
     /// Caller must call `deinit` when done.
     /// Lifetime of `Conn` must be within the lifetime of `config` since some fields in `config` are referenced directly.
-    pub fn init(allocator: Allocator, io: Io, config: *const Config) !Conn {
-        var conn: Conn = blk: {
+    pub fn init(allocator: Allocator, io: Io, config_in: *const Config) !Conn {
+        // A unix socket is already a secure channel, the server has no TLS
+        // endpoint for it, so `ssl` is ignored instead of failing the connection
+        var config = config_in;
+        var unix_config: Config = undefined;
+        if (config.ssl and std.meta.activeTag(config.address) == .unix) {
+            std.log.warn("TLS is not available on unix sockets, ignoring `ssl`\n", .{});
+            unix_config = config.*;
+            unix_config.ssl = false;
+            config = &unix_config;
+        }
+
+        const transport: *Transport = blk: {
             const stream = switch (config.address) {
                 .ip => |ip| try ip.connect(io, .{ .mode = .stream }),
                 .host => |host| try host.name.connect(io, host.port, .{ .mode = .stream }),
                 .unix => |unix| try unix.connect(io),
             };
+            errdefer stream.close(io);
 
-            break :blk .{
-                .allocator = allocator,
-                .connected = true,
-                .stream = stream,
-                .reader = try PacketReader.init(allocator, stream),
-                .writer = try PacketWriter.init(allocator, stream),
-                .capabilities = undefined, // not known until we get the first packet
-                .sequence_id = undefined, // not known until we get the first packet
-
-                .result_meta = ResultMeta.init(),
-            };
+            const transport = try allocator.create(Transport);
+            errdefer allocator.destroy(transport);
+            transport.* = Transport.init(allocator, stream);
+            break :blk transport;
         };
-        errdefer conn.deinit(allocator, io);
+
+        var conn: Conn = .{
+            .allocator = allocator,
+            .connected = true,
+            .transport = transport,
+            .reader = PacketReader.init(allocator, transport),
+            .writer = PacketWriter.init(allocator, transport),
+            .capabilities = undefined, // not known until we get the first packet
+            .sequence_id = undefined, // not known until we get the first packet
+
+            .result_meta = ResultMeta.init(),
+        };
+        // the connection cannot be used, so it is torn down without sending
+        // `COM_QUIT`: the server may not even have completed the handshake
+        errdefer conn.destroy(allocator, io);
 
         const auth_plugin, const auth_data = blk: {
             const packet = try conn.readPacket(io);
@@ -93,7 +114,11 @@ pub const Conn = struct {
             break :blk .{ handshake_v10.get_auth_plugin(), handshake_v10.get_auth_data() };
         };
 
-        // TODO: TLS handshake if enabled
+        // the TLS handshake happens after the server's handshake packet and
+        // before the client's handshake response, which is sent encrypted
+        if (config.ssl) {
+            try conn.startTls(io, config);
+        }
 
         // more auth exchange based on auth_method
         // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_authentication_methods.html
@@ -119,7 +144,17 @@ pub const Conn = struct {
         c.quit(io) catch |err| {
             std.log.err("Failed to quit: {any}\n", .{err});
         };
-        c.stream.close(io);
+        c.destroy(allocator, io);
+    }
+
+    /// Close the socket and free all resources, without notifying the server.
+    /// Used by `deinit` and when `init` fails, in which case sending
+    /// `COM_QUIT` would either be a protocol error or fail on its own.
+    fn destroy(c: *Conn, allocator: Allocator, io: Io) void {
+        // sends a TLS `close_notify` if the connection is encrypted, then
+        // closes the socket
+        c.transport.close(io);
+        allocator.destroy(c.transport);
         c.reader.deinit();
         c.writer.deinit();
         c.result_meta.deinit(allocator);
@@ -197,12 +232,41 @@ pub const Conn = struct {
         return QueryResultRows(BinaryResultRow).init(c, io);
     }
 
+    /// Send the `SSLRequest` packet and upgrade the connection to TLS.
+    /// https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_ssl_request.html
+    fn startTls(c: *Conn, io: std.Io, config: *const Config) !void {
+        if (c.capabilities & constants.CLIENT_SSL == 0) {
+            // the error is returned to the caller, no need to log an error
+            std.log.warn("server does not support TLS\n", .{});
+            return error.ServerDoesNotSupportTls;
+        }
+
+        // The server needs the first 32 bytes of the handshake response in
+        // cleartext to know that the TLS handshake starts next, the rest of the
+        // handshake response is sent through the encrypted connection
+        const ssl_request: SslRequest = .init(config);
+        try c.writePacket(ssl_request);
+        try c.writer.flush(io);
+        c.sequence_id +%= 1; // the handshake response is the next packet
+
+        var host_buffer: [std.Io.net.HostName.max_len]u8 = undefined;
+        try c.transport.startTls(io, .{
+            .host = try config.address.hostName(&host_buffer),
+            .verify = config.ssl_verify,
+            .ca_file = config.ssl_ca,
+        });
+    }
+
     fn quit(c: *Conn, io: std.Io) !void {
         c.ready();
         try c.writeBytesAsPacket(&[_]u8{constants.COM_QUIT});
         try c.writer.flush(io);
         const packet = c.readPacket(io) catch |err| switch (err) {
-            error.UnexpectedEndOfStream => {
+            // the server closes the connection after a COM_QUIT, either
+            // cleanly or, over TLS, without sending a `close_notify` first
+            error.UnexpectedEndOfStream,
+            error.TlsConnectionTruncated,
+            => {
                 c.connected = false;
                 return;
             },
@@ -291,6 +355,28 @@ pub const Conn = struct {
         config: *const Config,
         comptime is_auth_switch: bool,
     ) !void {
+        if (c.transport.isTls()) {
+            // TLS is a secure channel: the password is sent in cleartext
+            // instead of exchanging an RSA public key
+            const password = try passwordWithNullTerminator(allocator, config.password);
+            defer allocator.free(password);
+
+            if (is_auth_switch) {
+                try c.writeBytesAsPacket(password);
+            } else {
+                const response = HandshakeResponse41.init(.sha256_password, config, password);
+                try c.writePacket(&response);
+            }
+            try c.writer.flush(io);
+
+            const packet = try c.readPacket(io);
+            return switch (packet.payload[0]) {
+                constants.OK => {},
+                constants.AUTH_SWITCH => c.authSwitch(allocator, io, &packet, config),
+                else => packet.asError(),
+            };
+        }
+
         // TODO: if there is already a pub key, skip requesting it
         if (is_auth_switch) {
             try c.writeBytesAsPacket(&[_]u8{auth.sha256_password_public_key_request});
@@ -346,26 +432,36 @@ pub const Conn = struct {
                     switch (more_data[0]) {
                         auth.caching_sha2_password_fast_auth_success => {}, // success (do nothing, wait for next packet)
                         auth.caching_sha2_password_full_authentication_start => {
-                            // Request RSA public key from server.
-                            // On unix socket (secure channel), MySQL responds with OK directly instead
-                            // of sending an RSA key — the connection is already trusted.
-                            try c.writeBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
-                            try c.writer.flush(io);
-                            const pk_packet = try c.readPacket(io);
+                            if (c.transport.isTls()) {
+                                // TLS is a secure channel: the password is sent in
+                                // cleartext instead of being encrypted with the
+                                // server's public key
+                                const password = try passwordWithNullTerminator(allocator, config.password);
+                                defer allocator.free(password);
 
-                            // Unix socket / secure channel: server sends OK directly
-                            if (pk_packet.payload[0] == constants.OK) return;
-                            if (pk_packet.payload[0] == constants.ERR) return pk_packet.asError();
+                                try c.writeBytesAsPacket(password);
+                                try c.writer.flush(io);
+                            } else {
+                                // Request RSA public key from server.
+                                // On unix socket (secure channel), MySQL responds with OK directly instead
+                                // of sending an RSA key — the connection is already trusted.
+                                try c.writeBytesAsPacket(&[_]u8{auth.caching_sha2_password_public_key_request});
+                                try c.writer.flush(io);
+                                const pk_packet = try c.readPacket(io);
 
-                            // TODO: support TLS (send plain text over TLS instead of RSA)
-                            const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
-                            defer decoded_pk.deinit(allocator);
+                                // Unix socket / secure channel: server sends OK directly
+                                if (pk_packet.payload[0] == constants.OK) return;
+                                if (pk_packet.payload[0] == constants.ERR) return pk_packet.asError();
 
-                            const enc_pw = try auth.encryptPassword(allocator, config.password, auth_data, &decoded_pk.value);
-                            defer allocator.free(enc_pw);
+                                const decoded_pk = try auth.decodePublicKey(pk_packet.payload, allocator);
+                                defer decoded_pk.deinit(allocator);
 
-                            try c.writeBytesAsPacket(enc_pw);
-                            try c.writer.flush(io);
+                                const enc_pw = try auth.encryptPassword(allocator, config.password, auth_data, &decoded_pk.value);
+                                defer allocator.free(enc_pw);
+
+                                try c.writeBytesAsPacket(enc_pw);
+                                try c.writer.flush(io);
+                            }
                         },
                         else => return error.UnsupportedCachingSha2PasswordMoreData,
                     }
@@ -416,3 +512,11 @@ pub const Conn = struct {
         c.sequence_id = 0;
     }
 };
+
+/// Passwords sent in cleartext over a secure channel are `string[NUL]`.
+fn passwordWithNullTerminator(allocator: Allocator, password: []const u8) ![]u8 {
+    const buffer = try allocator.alloc(u8, password.len + 1);
+    @memcpy(buffer[0..password.len], password);
+    buffer[password.len] = 0;
+    return buffer;
+}

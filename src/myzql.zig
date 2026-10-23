@@ -4,6 +4,7 @@ pub const conn = @import("./conn.zig");
 pub const pool = @import("./pool.zig");
 pub const protocol = @import("./protocol.zig");
 pub const temporal = @import("./temporal.zig");
+pub const transport = @import("./transport.zig");
 pub const result = @import("./result.zig");
 
 test {

@@ -7,6 +7,31 @@ const Config = @import("../config.zig").Config;
 const AuthPlugin = @import("../auth.zig").AuthPlugin;
 const PacketWriter = @import("./packet_writer.zig").PacketWriter;
 
+// https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_ssl_request.html
+/// Sent instead of the `HandshakeResponse41` when the client wants TLS: it
+/// carries the first 32 bytes of the handshake response and nothing else, so
+/// that the server knows to start the TLS handshake before the remaining
+/// handshake response is sent (encrypted).
+pub const SslRequest = struct {
+    client_flag: u32, // capabilities, must include CLIENT_SSL
+    max_packet_size: u32 = 0, // TODO: support configurable max packet size
+    character_set: u8,
+
+    pub fn init(config: *const Config) SslRequest {
+        return .{
+            .client_flag = config.capability_flags(),
+            .character_set = config.collation,
+        };
+    }
+
+    pub fn write(s: *const SslRequest, writer: *PacketWriter) !void {
+        try writer.writeInt(u32, s.client_flag);
+        try writer.writeInt(u32, s.max_packet_size);
+        try writer.writeInt(u8, s.character_set);
+        try writer.write(&(@as([23]u8, @splat(0)))); // filler
+    }
+};
+
 pub const HandshakeResponse41 = struct {
     client_flag: u32, // capabilities
     max_packet_size: u32 = 0, // TODO: support configurable max packet size
@@ -65,3 +90,26 @@ pub const HandshakeResponse41 = struct {
         }
     }
 };
+
+const testing = std.testing;
+
+const ssl_request_filler: [23]u8 = @splat(0);
+
+test "SslRequest - wire format" {
+    const config: Config = .{ .database = "db", .ssl = true, .collation = constants.utf8mb4_bin };
+
+    var writer = PacketWriter.init(testing.allocator, undefined);
+    defer writer.deinit();
+
+    // The transport is only used by `flush`, so it can stay undefined here
+    try SslRequest.init(&config).write(&writer);
+
+    // capabilites, max packet size, collation, 23 byte filler
+    try testing.expectEqual(32, writer.pos);
+    const client_flag = std.mem.readInt(u32, writer.buf[0..4], .little);
+    try testing.expectEqual(config.capability_flags(), client_flag);
+    try testing.expect(client_flag & constants.CLIENT_SSL != 0);
+    try testing.expectEqual(0, std.mem.readInt(u32, writer.buf[4..8], .little));
+    try testing.expectEqual(constants.utf8mb4_bin, writer.buf[8]);
+    try testing.expectEqualSlices(u8, &ssl_request_filler, writer.buf[9..32]);
+}

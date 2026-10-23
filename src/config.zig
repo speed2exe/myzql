@@ -19,7 +19,23 @@ pub const Config = struct {
     /// Return number of matching rows instead of rows changed. Default: false
     client_found_rows: bool = false,
     /// Enable SSL. Default: false
+    ///
+    /// The connection is only established over TLS; an error is returned if the
+    /// server does not support TLS. Unix sockets are already a secure channel,
+    /// so this option is ignored for them.
     ssl: bool = false,
+    /// Verify the server's certificate, i.e. that it is signed by a trusted CA
+    /// and issued for the host that was connected to. Only used when `ssl` is
+    /// true. Default: true
+    ///
+    /// Disabling verification still encrypts the connection, but the server is
+    /// not authenticated, which makes the connection vulnerable to
+    /// man-in-the-middle attacks.
+    ssl_verify: bool = true,
+    /// PEM file with the CA certificates used to verify the server when `ssl`
+    /// is true, instead of the CA certificates installed on the system.
+    /// Default: null
+    ssl_ca: ?[]const u8 = null,
     /// Allow multiple statements in a single query. Default: false
     multi_statements: bool = false,
 
@@ -62,6 +78,8 @@ pub const Config = struct {
     /// - `clientFoundRows=<bool>`: see `client_found_rows`
     /// - `multiStatements=<bool>`: see `multi_statements`
     /// - `ssl=<bool>` / `tls=<bool>`: see `ssl`
+    /// - `sslVerify=<bool>` / `ssl_verify=<bool>`: see `ssl_verify`
+    /// - `sslCa=<path>` / `ssl_ca=<path>`: see `ssl_ca`
     ///
     /// Booleans accept `true`, `false`, `1` and `0`. A parameter with an empty
     /// value keeps the default, which allows leaving placeholders like
@@ -90,6 +108,29 @@ pub const Address = union(enum) {
         name: std.Io.net.HostName,
         port: u16 = default_port,
     };
+
+    /// Return the host name or IP address literal of the address, without the
+    /// port and without the brackets of IPv6 literals. This is the name used
+    /// for TLS (SNI and certificate verification).
+    /// The returned slice points into `buffer` when the address is an IP
+    /// address, and into the address itself when it is a host name.
+    pub fn hostName(a: Address, buffer: *[std.Io.net.HostName.max_len]u8) ![]const u8 {
+        return switch (a) {
+            .host => |host| host.name.bytes,
+            .ip => |ip| switch (ip) {
+                .ip4 => |ip4| std.fmt.bufPrint(buffer, "{d}.{d}.{d}.{d}", .{
+                    ip4.bytes[0], ip4.bytes[1], ip4.bytes[2], ip4.bytes[3],
+                }),
+                .ip6 => |ip6| std.fmt.bufPrint(buffer, "{f}", .{
+                    std.Io.net.Ip6Address.Unresolved{
+                        .bytes = ip6.bytes,
+                        .interface_name = null,
+                    },
+                }),
+            },
+            .unix => error.UnixSocketHasNoHostName,
+        };
+    }
 };
 
 /// A `Config` together with the memory backing its decoded strings.
@@ -158,7 +199,11 @@ pub const UrlConfig = struct {
                     std.ascii.eqlIgnoreCase(key, "multiStatements") or
                     std.ascii.eqlIgnoreCase(key, "multi_statements") or
                     std.ascii.eqlIgnoreCase(key, "ssl") or
-                    std.ascii.eqlIgnoreCase(key, "tls");
+                    std.ascii.eqlIgnoreCase(key, "tls") or
+                    std.ascii.eqlIgnoreCase(key, "sslVerify") or
+                    std.ascii.eqlIgnoreCase(key, "ssl_verify") or
+                    std.ascii.eqlIgnoreCase(key, "sslCa") or
+                    std.ascii.eqlIgnoreCase(key, "ssl_ca");
                 if (!is_known) return error.UnknownUrlParameter;
 
                 // An empty value is treated as an absent parameter, so that
@@ -179,6 +224,12 @@ pub const UrlConfig = struct {
                     config.multi_statements = try parseBool(value);
                 } else if (std.ascii.eqlIgnoreCase(key, "ssl") or std.ascii.eqlIgnoreCase(key, "tls")) {
                     config.ssl = try parseBool(value);
+                } else if (std.ascii.eqlIgnoreCase(key, "sslVerify") or
+                    std.ascii.eqlIgnoreCase(key, "ssl_verify"))
+                {
+                    config.ssl_verify = try parseBool(value);
+                } else if (std.ascii.eqlIgnoreCase(key, "sslCa") or std.ascii.eqlIgnoreCase(key, "ssl_ca")) {
+                    config.ssl_ca = value;
                 }
             }
         }
@@ -496,4 +547,61 @@ test "fromUrl - separators between parameters are optional" {
     defer url_config.deinit(testing.allocator);
 
     try testing.expectEqual(constants.utf8mb4_general_ci, url_config.value.collation);
+}
+
+test "fromUrl - tls parameters" {
+    var url_config = try Config.fromUrl(testing.allocator, "mysql://localhost/db?ssl=1&sslVerify=false&sslCa=%2Fetc%2Fssl%2Fca.pem");
+    defer url_config.deinit(testing.allocator);
+    const config = url_config.value;
+
+    try testing.expectEqual(true, config.ssl);
+    try testing.expectEqual(false, config.ssl_verify);
+    try testing.expectEqualStrings("/etc/ssl/ca.pem", config.ssl_ca.?);
+}
+
+test "fromUrl - tls parameter aliases" {
+    var url_config = try Config.fromUrl(testing.allocator, "mysql://localhost/db?tls=1&ssl_verify=true&ssl_ca=/tmp/ca.pem");
+    defer url_config.deinit(testing.allocator);
+    const config = url_config.value;
+
+    try testing.expectEqual(true, config.ssl);
+    try testing.expectEqual(true, config.ssl_verify);
+    try testing.expectEqualStrings("/tmp/ca.pem", config.ssl_ca.?);
+}
+
+test "tls defaults" {
+    const config: Config = .{};
+
+    try testing.expectEqual(false, config.ssl);
+    // Server verification is on by default and the CA file is optional
+    try testing.expectEqual(true, config.ssl_verify);
+    try testing.expectEqual(null, config.ssl_ca);
+}
+
+test "capability_flags - CLIENT_SSL is only set when ssl is enabled" {
+    var config: Config = .{};
+    try testing.expectEqual(0, config.capability_flags() & constants.CLIENT_SSL);
+
+    config.ssl = true;
+    try testing.expectEqual(constants.CLIENT_SSL, config.capability_flags() & constants.CLIENT_SSL);
+}
+
+test "Address.hostName" {
+    var buffer: [std.Io.net.HostName.max_len]u8 = undefined;
+
+    const host: Address = .{ .host = .{
+        .name = std.Io.net.HostName.init("db.example.com") catch unreachable,
+        .port = 3306,
+    } };
+    try testing.expectEqualStrings("db.example.com", try host.hostName(&buffer));
+
+    const ip4: Address = .{ .ip = std.Io.net.IpAddress.parseLiteral("192.168.1.2:3306") catch unreachable };
+    try testing.expectEqualStrings("192.168.1.2", try ip4.hostName(&buffer));
+
+    // IPv6 literals are returned without the brackets that URLs require
+    const ip6: Address = .{ .ip = std.Io.net.IpAddress.parseLiteral("[2001:db8::1]:3306") catch unreachable };
+    try testing.expectEqualStrings("2001:db8::1", try ip6.hostName(&buffer));
+
+    const unix: Address = .{ .unix = std.Io.net.UnixAddress.init("/tmp/mysql.sock") catch unreachable };
+    try testing.expectError(error.UnixSocketHasNoHostName, unix.hostName(&buffer));
 }
