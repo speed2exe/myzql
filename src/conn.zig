@@ -309,18 +309,26 @@ pub const Conn = struct {
         }
 
         const new_plugin = auth.AuthPlugin.fromName(plugin_name);
+        // plugin_data points into the reader's buffer, which the next
+        // readPacket call reuses (e.g. the sha256/caching_sha2 RSA
+        // public-key exchange happens after this point and overwrites the
+        // salt). Copy the salt to a stack buffer that outlives the exchange.
+        var salt: [20]u8 = undefined;
         switch (new_plugin) {
             .mysql_native_password => {
                 if (plugin_data.len != 20) return error.MalformedAuthSwitchRequest;
-                try c.auth_mysql_native_password(allocator, io, plugin_data[0..20], config, true);
+                salt = plugin_data[0..20].*;
+                try c.auth_mysql_native_password(allocator, io, &salt, config, true);
             },
             .caching_sha2_password => {
                 if (plugin_data.len != 20) return error.MalformedAuthSwitchRequest;
-                try c.auth_caching_sha2_password(allocator, io, plugin_data[0..20], config, true);
+                salt = plugin_data[0..20].*;
+                try c.auth_caching_sha2_password(allocator, io, &salt, config, true);
             },
             .sha256_password => {
                 if (plugin_data.len != 20) return error.MalformedAuthSwitchRequest;
-                try c.auth_sha256_password(allocator, io, plugin_data[0..20], config, true);
+                salt = plugin_data[0..20].*;
+                try c.auth_sha256_password(allocator, io, &salt, config, true);
             },
             else => {
                 logger.log(c.config, .warn, "Unsupported auth switch plugin: {s}", .{plugin_name});
