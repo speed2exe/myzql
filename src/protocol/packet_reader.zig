@@ -46,6 +46,48 @@ pub const PacketReader = struct {
             }
         }
 
+        // A payload_length of 0xFFFFFF means the logical packet is split into
+        // multiple packets on the wire. Append continuation payloads until one
+        // is shorter than 0xFFFFFF; 0 terminates (payload is a multiple of
+        // 0xFFFFFF - 1... i.e. 0xFFFFFF - 1 + 0). The first frame's sequence id
+        // is reported; the continuation frames' sequence ids are only used to
+        // keep the wire in sync and are not exposed to the caller.
+        if (payload_length == 0xFFFFFF) {
+            // Keep the invariant p.len - p.pos == total: p.pos stays at the
+            // start of the first payload so expandBufIfNeeded's move preserves
+            // the already-assembled data.
+            var total: usize = 0xFFFFFF;
+            while (true) {
+                // Continuation headers go into a stack temp (not p.buf),
+                // otherwise they would land in the middle of the payload.
+                var hdr: [4]u8 = undefined;
+                var done: usize = 0;
+                while (done < 4) {
+                    const n = try p.transport.read(io, hdr[done..]);
+                    if (n == 0) return error.UnexpectedEndOfStream;
+                    done += n;
+                }
+                const cont_len = std.mem.readInt(u24, hdr[0..3], .little);
+                if (cont_len == 0) break;
+
+                try p.expandBufIfNeeded(cont_len);
+                const n = try p.readAtLeast(io, cont_len);
+                if (n == 0) return error.UnexpectedEndOfStream;
+                if (n < cont_len) return error.ShortRead;
+                p.len += n;
+                total += cont_len;
+
+                if (cont_len < 0xFFFFFF) break;
+            }
+
+            const payload = p.buf[p.pos .. p.pos + total];
+            p.pos += total;
+            return .{
+                .sequence_id = sequence_id,
+                .payload = payload,
+            };
+        }
+
         // Packet payload
         const payload = p.buf[p.pos .. p.pos + payload_length];
         p.pos += payload_length;
@@ -76,7 +118,11 @@ pub const PacketReader = struct {
     fn readAtLeast(p: *PacketReader, io: std.Io, at_least: usize) !usize {
         var total_read: usize = 0;
         while (total_read < at_least) {
-            const result = try p.transport.read(io, p.buf[p.len + total_read ..]);
+            // Never read more than requested: callers (especially the
+            // >16MB reassembly path in readPacket) rely on buf[p.len..] being
+            // the exact bytes still missing for the current packet.
+            const dest = p.buf[p.len + total_read ..][0 .. at_least - total_read];
+            const result = try p.transport.read(io, dest);
             if (result == 0) break;
             total_read += result;
         }
