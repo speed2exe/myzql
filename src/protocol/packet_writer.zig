@@ -55,15 +55,39 @@ pub const PacketWriter = struct {
         return res;
     }
 
-    // flush the buffer to the transport
+    // flush the buffer to the transport, splitting payloads larger than
+    // 0xFFFFFF into multiple wire packets (each continuation fragment gets
+    // the next sequence id, and a payload that is an exact multiple of
+    // 0xFFFFFF is terminated with an extra empty packet, per the protocol).
     pub inline fn flush(p: *PacketWriter, io: std.Io) !void {
-        try p.transport.writeAll(io, p.buf[0..p.pos]);
+        if (p.pos == 0) return;
+
+        // buf[0..pos] was built by writeBytesAsPacket/writePacketInner:
+        // buf[0..3] is a placeholder length, buf[3] is the first sequence id,
+        // buf[4..pos] is the payload.
+        const payload = p.buf[4..p.pos];
+        var seq = p.buf[3];
+        var off: usize = 0;
+        while (true) {
+            const chunk = @min(payload.len - off, 0xFFFFFF);
+            var hdr: [4]u8 = undefined;
+            std.mem.writeInt(u24, hdr[0..3], @intCast(chunk), .little);
+            hdr[3] = seq;
+            try p.transport.writeAll(io, &hdr);
+            if (chunk > 0) try p.transport.writeAll(io, payload[off .. off + chunk]);
+            off += chunk;
+            seq +%= 1;
+            if (chunk < 0xFFFFFF) break;
+        }
+
         p.pos = 0;
     }
 
     pub fn writeBytesAsPacket(p: *PacketWriter, sequence_id: u8, buffer: []const u8) !void {
-        try p.writeInt(u24, @intCast(buffer.len));
-        try p.writeInt(u8, sequence_id);
+        // the real length is computed by flush(), which fragments payloads
+        // larger than 0xFFFFFF; only the sequence id is stored in the header
+        try p.skip(4);
+        p.buf[p.pos - 1] = sequence_id;
         try p.write(buffer);
     }
 
@@ -95,9 +119,7 @@ pub const PacketWriter = struct {
             try packet.write(p);
         }
 
-        const written = p.pos - start - 4;
-        const written_buf = p.buf[start..][0..3];
-        std.mem.writeInt(u24, written_buf, @intCast(written), .little);
+        // the real payload length is computed by flush(); see writeBytesAsPacket
         p.buf[start + 3] = sequence_id;
     }
 
