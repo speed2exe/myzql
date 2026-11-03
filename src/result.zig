@@ -50,6 +50,14 @@ fn logUnexpectedStmt(config: ?*const Config, stmt: PreparedStatement) void {
     });
 }
 
+/// Tells a result-set row terminator (EOF/OK-shaped, first byte 0xFE) apart
+/// from a row whose first field is a length-encoded integer >= 2^24 (which
+/// also starts with 0xFE followed by an 8-byte length). EOF packets are small
+/// (< 9 bytes); long packets cannot be one (same rule as go-sql-driver).
+fn isEofPacket(payload: []const u8) bool {
+    return payload[0] == constants.EOF and payload.len < 9;
+}
+
 pub fn QueryResult(comptime T: type) type {
     return union(enum) {
         ok: OkPacket,
@@ -201,11 +209,10 @@ pub fn ResultSet(comptime T: type) type {
                         if (reader.pos + 4 + payload_len > reader.len) break :drain_buffered;
                         const pkt_type = hdr[4];
                         reader.pos += 4 + payload_len;
-                        switch (pkt_type) {
-                            constants.ERR => return error.ErrorPacket,
-                            constants.EOF => break :blk row,
-                            else => continue :drain_buffered,
-                        }
+                        if (pkt_type == constants.ERR) return error.ErrorPacket;
+                        // a 0xFE-prefixed row with a >= 2^24-byte first field
+                        // is not an EOF terminator (see isEofPacket)
+                        if (pkt_type == constants.EOF and payload_len < 9) break :blk row;
                     }
 
                     // Drain remaining rows from the stream through a temporary
@@ -227,11 +234,8 @@ pub fn ResultSet(comptime T: type) type {
                     while (true) {
                         var pkt = try temp_reader.readPacket(io);
                         pkt.config = r.conn.config;
-                        switch (pkt.payload[0]) {
-                            constants.ERR => return ErrorPacket.init(&pkt).asError(),
-                            constants.EOF => break,
-                            else => continue,
-                        }
+                        if (pkt.payload[0] == constants.ERR) return ErrorPacket.init(&pkt).asError();
+                        if (isEofPacket(pkt.payload)) break;
                     }
                     break :blk row;
                 },
@@ -372,11 +376,10 @@ pub fn ResultRow(comptime T: type) type {
 
         fn init(conn: *Conn, io: std.Io, col_defs: []const ColumnDefinition41) !ResultRow(T) {
             const packet = try conn.readPacket(io);
-            return switch (packet.payload[0]) {
-                constants.ERR => .{ .err = ErrorPacket.init(&packet) },
-                constants.EOF => .{ .ok = OkPacket.init(&packet, conn.capabilities) },
-                else => .{ .row = .{ .packet = packet, .col_defs = col_defs } },
-            };
+            const payload = packet.payload;
+            if (payload[0] == constants.ERR) return .{ .err = ErrorPacket.init(&packet) };
+            if (isEofPacket(payload)) return .{ .ok = OkPacket.init(&packet, conn.capabilities) };
+            return .{ .row = .{ .packet = packet, .col_defs = col_defs } };
         }
 
         pub fn expect(
@@ -417,18 +420,13 @@ fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: Allocator, io: std.Io) !
     // Accumulate all packets until EOF
     while (true) {
         const packet = try conn.readPacket(io);
-        return switch (packet.payload[0]) {
-            constants.ERR => ErrorPacket.init(&packet).asError(),
-            constants.EOF => {
-                _ = OkPacket.init(&packet, conn.capabilities);
-                return packet_list;
-            },
-            else => {
-                const owned_packet = try packet.cloneAlloc(allocator);
-                try packet_list.append(allocator, owned_packet);
-                continue;
-            },
-        };
+        if (packet.payload[0] == constants.ERR) return ErrorPacket.init(&packet).asError();
+        if (isEofPacket(packet.payload)) {
+            _ = OkPacket.init(&packet, conn.capabilities);
+            return packet_list;
+        }
+        const owned_packet = try packet.cloneAlloc(allocator);
+        try packet_list.append(allocator, owned_packet);
     }
 }
 
