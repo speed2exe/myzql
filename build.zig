@@ -31,6 +31,8 @@ pub fn build(b: *std.Build) void {
 
     // -Dunix-socket-path="/path/to/mysqld.sock"
     const unix_socket_path = b.option([]const u8, "unix-socket-path", "Path to MySQL Unix domain socket for integration tests");
+    // -Dmysql-port=3306
+    const mysql_port = b.option(u16, "mysql-port", "MySQL port for integration tests") orelse 3306;
     // -Dskip-stress=true (skip 16M-row stress test, useful for CI)
     const skip_stress = b.option(bool, "skip-stress", "Skip the stress test (heavy, 16M rows)") orelse false;
     // -Dtls-ca-path="/path/to/ca.pem" (CA certificate of the TLS test server)
@@ -41,6 +43,7 @@ pub fn build(b: *std.Build) void {
     const notls_port = b.option(u16, "notls-port", "Port of a MySQL server without TLS support");
     const integration_test_opts = b.addOptions();
     integration_test_opts.addOption(?[]const u8, "unix_socket_path", unix_socket_path);
+    integration_test_opts.addOption(u16, "mysql_port", mysql_port);
     integration_test_opts.addOption(bool, "skip_stress", skip_stress);
     integration_test_opts.addOption(?[]const u8, "tls_ca_path", tls_ca_path);
     integration_test_opts.addOption(?u16, "tls_wrong_host_port", tls_wrong_host_port);

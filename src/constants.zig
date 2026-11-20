@@ -66,6 +66,7 @@ pub const COM_QUERY:        u8 = 0x03;
 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_command_phase_ps.html
 pub const COM_STMT_PREPARE: u8 = 0x16;
 pub const COM_STMT_EXECUTE: u8 = 0x17;
+pub const COM_STMT_CLOSE:   u8 = 0x19;
 
 pub const BINARY_PROTOCOL_RESULTSET_ROW_HEADER: u8 = 0x00;
 

@@ -40,6 +40,7 @@ test "auth switch: caching_sha2_password server switches to mysql_native_passwor
     const switch_config: Config = .{
         .username = "authswitch",
         .password = "password",
+        .address = test_config.address,
     };
     var c = try Conn.init(allocator, io, &switch_config);
     defer c.deinit(allocator, io);
