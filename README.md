@@ -13,7 +13,8 @@
 | 0.15.1      | 0.15.1                    |
 | 0.16.1      | 0.16.0                    |
 | 0.17.0      | 0.17.0                    |
-| main        | 0.17.0                    |
+| 0.17.1      | 0.17.0, 0.17.1            |
+| main        | 0.17.0, 0.17.1            |
 
 ## Features
 - Native Zig code, no external dependencies
@@ -31,7 +32,7 @@
 - For TLS connections only: a Zig standard library whose TLS client handles the
   `certificate_request` message. MySQL and MariaDB always ask for a client
   certificate (with an empty list of acceptable CA names), which the standard
-  library of Zig 0.17.0 and the current master answer with
+  library of Zig 0.17.0, 0.17.1 and the current master answer with
   `error.TlsUnexpectedMessage`. Until a fix is released upstream, apply
   [`contrib/zig-std-tls-client-certificate-request.patch`](contrib/zig-std-tls-client-certificate-request.patch)
   to the source tree of your Zig installation and rebuild:
@@ -43,7 +44,7 @@ patch -p1 -d /path/to/zig --input path/to/myzql/contrib/zig-std-tls-client-certi
 ## Add as dependency to your Zig project
 ### Fetch dependency
 ```bash
-zig fetch --save git+https://github.com/speed2exe/myzql#0.16.1
+zig fetch --save git+https://github.com/speed2exe/myzql#0.17.1
 ```
 or
 - `build.zig.zon`
@@ -52,8 +53,8 @@ or
     .dependencies = .{
       .myzql = .{
         // choose a tag according to "Version Compatibility" table
-        .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.16.1.tar.gz",
-        .hash = "1220582ea45580eec6b16aa93d2a9404467db8bc1d911806d367513aa40f3817f84c",
+        .url = "https://github.com/speed2exe/myzql/archive/refs/tags/0.17.1.tar.gz",
+        .hash = "myzql-0.0.0-XU5aADXNBQC6nnZbXda4_p9Li19m_MENYfDw7j1iChXy",
       }
     },
     // ...
@@ -128,7 +129,7 @@ pub fn main() !void {
 ### TLS Connection
 - TLS encrypts TCP connections. Enable it with `ssl` on the config, or with the
 `ssl=true` (`tls=true`) URL parameter, see [Connection from URL](#connection-from-url).
-- The standard library of Zig 0.17.0 and of the current master cannot answer
+- The standard library of Zig 0.17.0, 0.17.1 and of the current master cannot answer
 the `certificate_request` message that MySQL and MariaDB send during the TLS
 handshake, so TLS needs the patch of [Requirements](#requirements).
 ```zig
