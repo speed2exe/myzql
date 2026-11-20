@@ -11,12 +11,15 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        zig: [master, "0.17.1"]
     steps:
       - uses: actions/checkout@v4
       - name: install zig
         uses: mlugg/setup-zig@v2
         with:
-          version: master
+          version: ${{ matrix.zig }}
       - name: run unit tests
         run: |
           zig build unit_test

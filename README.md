@@ -13,7 +13,7 @@
 | 0.15.1      | 0.15.1                    |
 | 0.16.1      | 0.16.0                    |
 | 0.17.0      | 0.17.0                    |
-| main        | 0.17.0                    |
+| main        | 0.17.0, 0.17.1            |
 
 ## Features
 - Native Zig code, no external dependencies
@@ -31,7 +31,7 @@
 - For TLS connections only: a Zig standard library whose TLS client handles the
   `certificate_request` message. MySQL and MariaDB always ask for a client
   certificate (with an empty list of acceptable CA names), which the standard
-  library of Zig 0.17.0 and the current master answer with
+  library of Zig 0.17.0, 0.17.1 and the current master answer with
   `error.TlsUnexpectedMessage`. Until a fix is released upstream, apply
   [`contrib/zig-std-tls-client-certificate-request.patch`](contrib/zig-std-tls-client-certificate-request.patch)
   to the source tree of your Zig installation and rebuild:

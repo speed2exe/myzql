@@ -14,10 +14,10 @@
 #
 #     patch -p1 -d /path/to/zig --input zig-std-tls-client-certificate-request.patch
 #
-# The patch was written against the standard library of Zig 0.17.0 and can be
-# removed once Zig ships an equivalent fix.
+# The patch applies to the standard libraries of Zig 0.17.0 and 0.17.1 and can
+# be removed once Zig ships an equivalent fix.
 #
-# This file is 0.17.0 specific in hunk 1 only: on newer checkouts
+# This file is specific to these releases in hunk 1 only: on newer checkouts
 # `options.realtime_now.toSeconds()` became `options.realtime_now_seconds`, so
 # the `var client_auth_requested = false;` line has to be moved by hand.
 --- a/lib/std/crypto/tls/Client.zig

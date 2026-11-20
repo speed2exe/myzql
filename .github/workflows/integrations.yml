@@ -11,13 +11,16 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        zig: [master, "0.17.1"]
     steps:
       - uses: actions/checkout@v4
 
       - name: Install zig
         uses: mlugg/setup-zig@v2
         with:
-          version: master
+          version: ${{ matrix.zig }}
 
       - name: Run Integration Tests - MySQL
         run: |
@@ -49,13 +52,16 @@ jobs:
     # mysql_native_password forces the server to send an AuthSwitchRequest (0xFE),
     # which unfixed myzql mishandles (error.UnexpectedPacket / packets out of order).
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        zig: [master, "0.17.1"]
     steps:
       - uses: actions/checkout@v4
 
       - name: Install zig
         uses: mlugg/setup-zig@v2
         with:
-          version: master
+          version: ${{ matrix.zig }}
 
       - name: Run Auth Switch Repro - MySQL (default caching_sha2_password)
         run: |
