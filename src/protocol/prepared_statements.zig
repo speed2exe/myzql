@@ -20,6 +20,15 @@ pub const PrepareRequest = struct {
     }
 };
 
+pub const CloseRequest = struct {
+    statement_id: u32,
+
+    pub fn write(c: *const CloseRequest, writer: *PacketWriter) !void {
+        try writer.writeInt(u8, constants.COM_STMT_CLOSE);
+        try writer.writeInt(u32, c.statement_id);
+    }
+};
+
 pub const PrepareOk = struct {
     status: u8,
     statement_id: u32,
@@ -469,6 +478,16 @@ fn nullBinaryParam() BinaryParam {
         .name = "hello",
         .raw = null,
     };
+}
+
+test "close request encodes statement id" {
+    var transport: @import("../transport.zig").Transport = undefined;
+    var writer = PacketWriter.init(std.testing.allocator, &transport);
+    defer writer.deinit();
+
+    try writer.writePacket(0, CloseRequest{ .statement_id = 0x12345678 });
+    try std.testing.expectEqualSlices(u8, &.{ 0x19, 0x78, 0x56, 0x34, 0x12 }, writer.buf[4..writer.pos]);
+    try std.testing.expectEqual(@as(u8, 0), writer.buf[3]);
 }
 
 test "writeNullBitmap" {

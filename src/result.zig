@@ -432,7 +432,8 @@ fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: Allocator, io: std.Io) !
 
 /// Result of `Conn.prepare`. Use `.expect(.stmt)` to get the `PreparedStatement`,
 /// or `.expect(.err)` to get the `ErrorPacket`.
-/// The caller must call `deinit` to free resources associated with a successful prepare.
+/// Call `deinit` before closing or releasing the connection. Consume all result
+/// rows before deinitializing a statement.
 pub const PrepareResult = union(enum) {
     err: ErrorPacket,
     stmt: PreparedStatement,
@@ -441,16 +442,21 @@ pub const PrepareResult = union(enum) {
         const response_packet = try c.readPacket(io);
         return switch (response_packet.payload[0]) {
             constants.ERR => .{ .err = ErrorPacket.init(&response_packet) },
-            constants.OK => .{ .stmt = try PreparedStatement.init(&response_packet, c, allocator, io) },
+            constants.OK => blk: {
+                // The server owns the statement even if reading its metadata
+                // fails. Unread metadata makes this connection unsafe to reuse.
+                errdefer c.connected = false;
+                break :blk .{ .stmt = try PreparedStatement.init(&response_packet, c, allocator, io) };
+            },
             else => return response_packet.asError(),
         };
     }
 
-    /// Free resources held by this `PrepareResult`.
-    /// Must be called when the prepare result is no longer needed.
-    pub fn deinit(p: *const PrepareResult, allocator: Allocator) void {
+    /// Close the server-side statement and free its client-side resources.
+    /// On a close failure, log the error and mark the connection unusable.
+    pub fn deinit(p: *const PrepareResult, allocator: Allocator, io: Io) void {
         switch (p.*) {
-            .stmt => |prep_stmt| prep_stmt.deinit(allocator),
+            .stmt => |prep_stmt| prep_stmt.deinit(allocator, io),
             else => {},
         }
     }
@@ -481,6 +487,7 @@ pub const PrepareResult = union(enum) {
 /// Resources are freed when `PrepareResult.deinit` is called.
 pub const PreparedStatement = struct {
     prep_ok: PrepareOk,
+    conn: *Conn,
     /// Config of the connection the statement was prepared on, used to bind log
     /// messages.
     config: ?*const Config = null,
@@ -515,6 +522,7 @@ pub const PreparedStatement = struct {
 
         return .{
             .prep_ok = prep_ok,
+            .conn = conn,
             .config = conn.config,
             .packets = packets,
             .col_defs = col_defs,
@@ -523,7 +531,12 @@ pub const PreparedStatement = struct {
         };
     }
 
-    fn deinit(prep_stmt: *const PreparedStatement, allocator: Allocator) void {
+    fn deinit(prep_stmt: *const PreparedStatement, allocator: Allocator, io: Io) void {
+        if (prep_stmt.conn.connected) {
+            prep_stmt.conn.closeStatement(io, prep_stmt.prep_ok.statement_id) catch |err| {
+                logger.log(prep_stmt.config, .err, "Failed to close prepared statement: {any}", .{err});
+            };
+        }
         allocator.free(prep_stmt.col_defs);
         for (prep_stmt.packets) |packet| {
             packet.deinit(allocator);

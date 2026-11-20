@@ -16,6 +16,7 @@ const SslRequest = protocol.handshake_response.SslRequest;
 const QueryRequest = protocol.text_command.QueryRequest;
 const prepared_statements = protocol.prepared_statements;
 const PrepareRequest = prepared_statements.PrepareRequest;
+const CloseRequest = prepared_statements.CloseRequest;
 const ExecuteRequest = prepared_statements.ExecuteRequest;
 const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
@@ -148,9 +149,11 @@ pub const Conn = struct {
     /// Close the connection and free resources.
     /// Sends a COM_QUIT packet to the server before closing.
     pub fn deinit(c: *Conn, allocator: Allocator, io: Io) void {
-        c.quit(io) catch |err| {
-            logger.log(c.config, .err, "Failed to quit: {any}", .{err});
-        };
+        if (c.connected) {
+            c.quit(io) catch |err| {
+                logger.log(c.config, .err, "Failed to quit: {any}", .{err});
+            };
+        }
         c.destroy(allocator, io);
     }
 
@@ -195,13 +198,25 @@ pub const Conn = struct {
 
     /// Prepare a SQL statement for execution.
     /// Returns `PrepareResult` which is either `.stmt` (PreparedStatement) or `.err` (ErrorPacket).
-    /// The caller must call `deinit` on the returned `PrepareResult` to free resources.
+    /// Call `deinit` on the returned `PrepareResult` before closing or releasing
+    /// this connection. The connection must not move while the result is alive.
     pub fn prepare(c: *Conn, allocator: Allocator, io: std.Io, query_string: []const u8) !PrepareResult {
         c.ready();
+        errdefer c.connected = false;
         const prepare_request: PrepareRequest = .{ .query = query_string };
         try c.writePacket(prepare_request);
         try c.writer.flush(io);
         return PrepareResult.init(c, allocator, io);
+    }
+
+    /// Close a server-side prepared statement. No response is sent by the server.
+    pub fn closeStatement(c: *Conn, io: Io, statement_id: u32) !void {
+        if (!c.connected) return error.ConnectionClosed;
+        errdefer c.connected = false;
+        if (c.writer.pos != 0 or c.reader.pos != c.reader.len) return error.ConnectionNotReady;
+        c.ready();
+        try c.writePacket(CloseRequest{ .statement_id = statement_id });
+        try c.writer.flush(io);
     }
 
     /// Execute a prepared statement that does not return rows (e.g. INSERT, UPDATE, DELETE).

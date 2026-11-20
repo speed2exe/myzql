@@ -3,7 +3,7 @@
 //! A TLS capable MySQL server has to be provided by the caller, otherwise all
 //! tests of this file are skipped:
 //! - `-Dtls-ca-path=/path/to/ca.pem`: CA certificate of the TLS server that
-//!   listens on 127.0.0.1:3306 and uses a certificate issued for `localhost`
+//!   listens on the test MySQL port and uses a certificate issued for `localhost`
 //!   and `127.0.0.1`
 //! - `-Dtls-wrong-host-port=3308`: TLS server whose certificate is issued for
 //!   another host, used to test host name verification
@@ -35,6 +35,7 @@ fn tlsConfig() Config {
     return .{
         .username = test_config.username,
         .password = test_config.password,
+        .address = test_config.address,
         .ssl = true,
         .ssl_ca = build_options.tls_ca_path,
     };
@@ -177,7 +178,7 @@ test "tls - prepared statement" {
     defer c.deinit(allocator, io);
 
     const prep_res = try c.prepare(allocator, io, "SELECT ? + 1");
-    defer prep_res.deinit(allocator);
+    defer prep_res.deinit(allocator, io);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
     const exec_res = try c.execute(io, &prep_stmt, .{41});
@@ -187,6 +188,28 @@ test "tls - prepared statement" {
     var dest: Dest = undefined;
     try row.scan(&dest);
     try std.testing.expectEqual(42, dest.value);
+}
+
+test "tls - prepared statement close" {
+    if (build_options.tls_ca_path == null) return error.SkipZigTest;
+
+    var config = tlsConfig();
+    config.ssl_verify = false;
+    var c = try Conn.init(allocator, io, &config);
+    defer c.deinit(allocator, io);
+
+    for (0..64) |_| {
+        const prep_res = try c.prepare(allocator, io, "SELECT ?");
+        defer prep_res.deinit(allocator, io);
+        _ = try prep_res.expect(.stmt);
+    }
+
+    const query_res = try c.query(io, "SHOW SESSION STATUS LIKE 'Com_stmt_close'");
+    var rows = try query_res.expect(.rows);
+    var table = try rows.tableTexts(allocator, io);
+    defer table.deinit(allocator);
+    try std.testing.expectEqualStrings("64", table.table[0][1].?);
+    try c.ping(io);
 }
 
 test "tls - pool reuses encrypted connections" {

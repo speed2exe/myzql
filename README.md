@@ -329,6 +329,12 @@ pub fn main() !void {
 ```
 
 ### Data Insertion
+- A prepared statement belongs to its connection. Call
+  `prep_res.deinit(allocator, io)` after consuming its results and before
+  closing or returning that connection to the pool. Do not move the connection
+  while the prepared result is alive. This closes the server-side statement as
+  well as freeing its metadata; a close failure is logged and the connection
+  must not be reused.
 - Let's assume that you have a table of this structure:
 ```sql
 CREATE TABLE test.person (
@@ -352,7 +358,7 @@ pub fn main() !void {
     // In order to do a insertion, you would first need to do a prepared statement.
     // Allocation is required as we need to store metadata of parameters and return type
     const prep_res = try client.prepare(allocator, io, "INSERT INTO test.person (name, age) VALUES (?, ?)");
-    defer prep_res.deinit(allocator);
+    defer prep_res.deinit(allocator, io);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
     // Data to be inserted
@@ -384,7 +390,7 @@ pub fn main() !void {
     const io: std.Io = threaded.io();
     const allocator = std.heap.page_allocator;
     const prep_res = try client.prepare(allocator, io, "SELECT name, age FROM test.person");
-    defer prep_res.deinit(allocator);
+    defer prep_res.deinit(allocator, io);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
     // This is the struct that represents the columns of a single row.
@@ -453,7 +459,7 @@ pub fn main() !void {
     const allocator = std.heap.page_allocator;
     { // Insert
         const prep_res = try client.prepare(allocator, io, "INSERT INTO test.temporal_types_example VALUES (?, ?)");
-        defer prep_res.deinit(allocator);
+        defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
         const my_time: DateTime = .{
@@ -485,7 +491,7 @@ pub fn main() !void {
             duration: Duration,
         };
         const prep_res = try client.prepare(allocator, io, "SELECT * FROM test.temporal_types_example");
-        defer prep_res.deinit(allocator);
+        defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
         const res = try client.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
@@ -516,7 +522,7 @@ pub fn main() !void {
     const allocator = std.heap.page_allocator;
     { // Insert
         const prep_res = try client.prepare(allocator, io, "INSERT INTO test.array_types_example VALUES (?, ?)");
-        defer prep_res.deinit(allocator);
+        defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
         const params = .{
@@ -535,7 +541,7 @@ pub fn main() !void {
             mac_addr: ?[6]u8,
         };
         const prep_res = try client.prepare(allocator, io, "SELECT * FROM test.array_types_example");
-        defer prep_res.deinit(allocator);
+        defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
         const res = try client.execute(io, &prep_stmt, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
