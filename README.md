@@ -331,12 +331,12 @@ pub fn main() !void {
 
 ### Cached prepared statements
 
-`exec` prepares SQL on first use and reuses the statement on that connection.
-It returns the same result variants as `execute`; consume all rows before
-issuing another command or returning the connection to the pool.
+`execute` prepares SQL on first use and reuses the statement on that connection.
+It returns `.ok`, `.err`, or `.rows`; consume all rows before issuing another
+command or returning the connection to the pool.
 
 ```zig
-const result = try client.exec(io, "SELECT name FROM users WHERE id = ?", .{@as(u32, 42)});
+const result = try client.execute(io, "SELECT name FROM users WHERE id = ?", .{@as(u32, 42)});
 const rows = try result.expect(.rows);
 _ = try rows.first(io); // drains remaining rows
 ```
@@ -344,13 +344,13 @@ _ = try rows.first(io); // drains remaining rows
 Each connection caches up to `Config.statement_cache_capacity` statements
 (default 32), evicting the least recently used statement when full. The
 server's prepared-statement limit is shared across all connections and clients,
-so size the cache accordingly. A capacity of zero disables `exec` and returns
+so size the cache accordingly. A capacity of zero disables `execute` and returns
 `error.StatementCacheDisabled`; the explicit `prepare` API remains available.
 
 The cache key is the SQL text. After changing the default database or session
 settings that affect statement preparation (including through stored routines),
 call `try client.clearStatementCache(io)` before the next cached execution.
-`Pool.ManagedConn` provides the same `exec` and `clearStatementCache` methods.
+`Pool.ManagedConn` provides the same `execute` and `clearStatementCache` methods.
 
 ### Data Insertion
 - A prepared statement belongs to its connection. Call
@@ -359,6 +359,8 @@ call `try client.clearStatementCache(io)` before the next cached execution.
   while the prepared result is alive. This closes the server-side statement as
   well as freeing its metadata; a close failure is logged and the connection
   must not be reused.
+- Use `prep_stmt.execute(io, params)` for any result, or
+  `prep_stmt.executeRows(io, params)` when the statement returns rows.
 - Let's assume that you have a table of this structure:
 ```sql
 CREATE TABLE test.person (
@@ -391,7 +393,7 @@ pub fn main() !void {
         .{ "Sam", 24 },
     };
     inline for (params) |param| {
-        const exe_res = try client.execute(io, &prep_stmt, param);
+        const exe_res = try prep_stmt.execute(io, param);
         const ok: OkPacket = try exe_res.expect(.ok); // expecting ok here because there's no rows returned
         const last_insert_id: u64 = ok.last_insert_id;
         std.debug.print("last_insert_id: {any}\n", .{last_insert_id});
@@ -424,7 +426,7 @@ pub fn main() !void {
     };
 
     { // Iterating over rows, scanning into struct or creating struct
-        const query_res = try client.execute(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try prep_stmt.execute(io, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         while (try rows_iter.next(io)) |row| {
@@ -450,7 +452,7 @@ pub fn main() !void {
     }
 
     { // collect all rows into a table ([]const Person)
-        const query_res = try client.execute(io, &prep_stmt, .{}); // no parameters because there's no ? in the query
+        const query_res = try prep_stmt.execute(io, .{}); // no parameters because there's no ? in the query
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
         const person_structs = try rows_iter.tableStructs(Person, allocator, io);
@@ -504,7 +506,7 @@ pub fn main() !void {
         };
         const params = .{.{ my_time, my_duration }};
         inline for (params) |param| {
-            const exe_res = try client.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -517,7 +519,7 @@ pub fn main() !void {
         const prep_res = try client.prepare(allocator, io, "SELECT * FROM test.temporal_types_example");
         defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try client.execute(io, &prep_stmt, .{});
+        const res = try prep_stmt.execute(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -554,7 +556,7 @@ pub fn main() !void {
             .{ "Alice", null }
         };
         inline for (params) |param| {
-            const exe_res = try client.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -567,7 +569,7 @@ pub fn main() !void {
         const prep_res = try client.prepare(allocator, io, "SELECT * FROM test.array_types_example");
         defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const res = try client.execute(io, &prep_stmt, .{});
+        const res = try prep_stmt.execute(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 

@@ -185,14 +185,14 @@ test "cached statements survive pool reuse and honor capacity" {
     for (0..3) |_| {
         var mc = try pool.acquireManaged(io);
         defer mc.deinit(io);
-        const result = try mc.exec(io, "SELECT ? AS a", .{@as(u32, 1)});
+        const result = try mc.execute(io, "SELECT ? AS a", .{@as(u32, 1)});
         const rows = try result.expect(.rows);
         _ = (try rows.first(io)) orelse return error.MissingRow;
     }
 
     var mc = try pool.acquireManaged(io);
     defer mc.deinit(io);
-    const result = try mc.exec(io, "SELECT ? AS b", .{@as(u32, 2)});
+    const result = try mc.execute(io, "SELECT ? AS b", .{@as(u32, 2)});
     const rows = try result.expect(.rows);
     _ = (try rows.first(io)) orelse return error.MissingRow;
 
@@ -211,7 +211,7 @@ test "cached statements are scoped to each pooled connection" {
     defer second.deinit(io);
 
     for ([_]*Pool.ManagedConn{ &first, &second }) |mc| {
-        const result = try mc.exec(io, "SELECT ? AS a", .{@as(u32, 1)});
+        const result = try mc.execute(io, "SELECT ? AS a", .{@as(u32, 1)});
         const rows = try result.expect(.rows);
         _ = (try rows.first(io)) orelse return error.MissingRow;
         const prepares = try sessionCounter(mc.raw(), "Com_stmt_prepare");
@@ -226,7 +226,7 @@ test "pool discards connection with outstanding cached result" {
     {
         var mc = try pool.acquireManaged(io);
         defer mc.deinit(io);
-        const result = try mc.exec(io, "SELECT ? AS a", .{@as(u32, 1)});
+        const result = try mc.execute(io, "SELECT ? AS a", .{@as(u32, 1)});
         _ = try result.expect(.rows);
     }
     try std.testing.expectEqual(@as(usize, 0), pool.totalCount(io));
@@ -261,14 +261,14 @@ test "prepare execute - 1" {
         const prep_res = try mc.prepare(allocator, io, "CREATE DATABASE testdb");
         defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try mc.execute(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.execute(io, .{});
         _ = try query_res.expect(.ok);
     }
     {
         const prep_res = try mc.prepare(allocator, io, "DROP DATABASE testdb");
         defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try mc.execute(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.execute(io, .{});
         _ = try query_res.expect(.ok);
     }
 }
@@ -288,11 +288,11 @@ test "prepare execute - 2" {
     const prep_stmt_2: PreparedStatement = try prep_res_2.expect(.stmt);
 
     {
-        const query_res = try mc.execute(io, &prep_stmt_1, .{});
+        const query_res = try prep_stmt_1.execute(io, .{});
         _ = try query_res.expect(.ok);
     }
     {
-        const query_res = try mc.execute(io, &prep_stmt_2, .{});
+        const query_res = try prep_stmt_2.execute(io, .{});
         _ = try query_res.expect(.ok);
     }
 }
@@ -310,7 +310,7 @@ test "prepare execute with result" {
         const prep_res = try mc.prepare(allocator, io, query);
         defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try mc.execute(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.execute(io, .{});
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
 
         const MyType = struct {
@@ -361,7 +361,7 @@ test "prepare execute with result" {
         const prep_res = try mc.prepare(allocator, io, query);
         defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try mc.execute(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.execute(io, .{});
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -397,7 +397,7 @@ test "prepare execute - first" {
         const prep_res = try mc.prepare(allocator, io, query);
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const query_res = try mc.execute(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.execute(io, .{});
         const rows = try query_res.expect(.rows);
 
         const MyType = struct { a: u8 };
@@ -422,7 +422,7 @@ test "prepare execute - first" {
         const prep_res = try mc.prepare(allocator, io, query);
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const query_res = try mc.execute(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.execute(io, .{});
         const rows = try query_res.expect(.rows);
 
         const first = try rows.first(io);
@@ -476,7 +476,7 @@ test "binary data types - int" {
             .{ @as(?i8, null), @as(?i16, null), @as(?i32, null), @as(?i64, null), @as(?u8, null), @as(?u16, null), @as(?u32, null), @as(?u64, null), @as(?u8, null), @as(?u64, null) },
         };
         inline for (params) |param| {
-            const exe_res = try mc.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -518,7 +518,7 @@ test "binary data types - int" {
         const prep_res = try mc.prepare(allocator, io, "SELECT * FROM test.int_types_example LIMIT 4");
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.execute(io, &prep_stmt, .{});
+        const res = try prep_stmt.execute(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
 
         const expected: []const IntTypesExample = &.{
@@ -611,7 +611,7 @@ test "binary data types - float" {
             .{ @as(?f32, null), @as(?f64, null) },
         };
         inline for (params) |param| {
-            const exe_res = try mc.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -644,7 +644,7 @@ test "binary data types - float" {
         const prep_res = try mc.prepare(allocator, io, "SELECT * FROM test.float_types_example LIMIT 3");
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.execute(io, &prep_stmt, .{});
+        const res = try prep_stmt.execute(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const row_iter = rows.iter();
 
@@ -698,7 +698,7 @@ test "binary data types - string" {
             },
         };
         inline for (params) |param| {
-            const exe_res = try mc.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -732,7 +732,7 @@ test "binary data types - string" {
         );
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.execute(io, &prep_stmt, .{});
+        const res = try prep_stmt.execute(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -798,7 +798,7 @@ test "binary data types - array" {
             .{ "024", "123" },
         };
         inline for (params) |param| {
-            const exe_res = try mc.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
 
@@ -807,7 +807,7 @@ test "binary data types - array" {
             .{ "02468", "12345" },
         };
         inline for (fail_params) |param| {
-            const exe_res = try mc.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.err);
         }
     }
@@ -855,7 +855,7 @@ test "binary data types - array" {
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
         {
-            const res = try mc.execute(io, &prep_stmt, .{});
+            const res = try prep_stmt.execute(io, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -881,7 +881,7 @@ test "binary data types - array" {
         }
 
         {
-            const res = try mc.execute(io, &prep_stmt, .{});
+            const res = try prep_stmt.execute(io, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -907,7 +907,7 @@ test "binary data types - array" {
         }
 
         {
-            const res = try mc.execute(io, &prep_stmt, .{});
+            const res = try prep_stmt.execute(io, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -933,7 +933,7 @@ test "binary data types - array" {
         }
 
         {
-            const res = try mc.execute(io, &prep_stmt, .{});
+            const res = try prep_stmt.execute(io, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -1000,7 +1000,7 @@ test "binary data types - temporal" {
         };
 
         inline for (params) |param| {
-            const exe_res = try mc.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -1033,7 +1033,7 @@ test "binary data types - temporal" {
         const prep_res = try mc.prepare(allocator, io, "SELECT * FROM test.temporal_types_example LIMIT 3");
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.execute(io, &prep_stmt, .{});
+        const res = try prep_stmt.execute(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -1080,7 +1080,7 @@ test "select concat with params" {
         const prep_res = try mc.prepare(allocator, io, "SELECT CONCAT(?, ?) AS col1");
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.execute(io, &prep_stmt, .{ runtimeValue("hello"), runtimeValue("world") });
+        const res = try prep_stmt.execute(io, .{ runtimeValue("hello"), runtimeValue("world") });
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -1162,7 +1162,7 @@ test "stress" {
         ); // https://stackoverflow.com/a/10432083
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try mc.execute(io, &prep_stmt, .{});
+        const res = try prep_stmt.execute(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 

@@ -17,13 +17,11 @@ const QueryRequest = protocol.text_command.QueryRequest;
 const prepared_statements = protocol.prepared_statements;
 const PrepareRequest = prepared_statements.PrepareRequest;
 const CloseRequest = prepared_statements.CloseRequest;
-const ExecuteRequest = prepared_statements.ExecuteRequest;
 const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const PacketReader = protocol.packet_reader.PacketReader;
 const PacketWriter = protocol.packet_writer.PacketWriter;
 const result = @import("./result.zig");
-const QueryResultRows = result.QueryResultRows;
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
 const PreparedStatement = result.PreparedStatement;
@@ -241,14 +239,15 @@ pub const Conn = struct {
     /// Consume all returned rows before issuing another command. Clear the
     /// cache after changing the default database or other session settings
     /// that affect how statements are prepared.
-    pub fn exec(c: *Conn, io: Io, query_string: []const u8, params: anytype) !QueryResult(BinaryResultRow) {
+    pub fn execute(c: *Conn, io: Io, query_string: []const u8, params: anytype) !QueryResult(BinaryResultRow) {
         try c.ensureCommandReady();
         const capacity = c.statement_cache_capacity;
         if (capacity == 0) return error.StatementCacheDisabled;
 
         if (c.statement_cache.getPtr(query_string)) |cached| {
             c.touchCachedStatement(cached);
-            return c.execute(io, &cached.statement, params);
+            cached.statement.conn = c;
+            return cached.statement.execute(io, params);
         }
 
         while (c.statement_cache.count() >= capacity) {
@@ -270,7 +269,8 @@ pub const Conn = struct {
         });
         owned_query = null;
         const cached = c.statement_cache.getPtr(key).?;
-        return c.execute(io, &cached.statement, params);
+        cached.statement.conn = c;
+        return cached.statement.execute(io, params);
     }
 
     /// Close all cached statements. No result set may be outstanding.
@@ -307,43 +307,6 @@ pub const Conn = struct {
         c.allocator.free(removed.key);
         var values = c.statement_cache.valueIterator();
         while (values.next()) |entry| entry.rank -= 1;
-    }
-
-    /// Execute a prepared statement that does not return rows (e.g. INSERT, UPDATE, DELETE).
-    /// `params` must be a tuple whose fields correspond to the `?` placeholders in the query.
-    /// Returns `QueryResult` which is either `.ok` (OkPacket) or `.err` (ErrorPacket).
-    /// Use `executeRows` instead if your query returns a result set.
-    // execute a prepared statement that doesn't return any rows
-    pub fn execute(c: *Conn, io: Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
-        try c.ensureCommandReady();
-        const execute_request: ExecuteRequest = .{
-            .capabilities = c.capabilities,
-            .prep_stmt = prep_stmt,
-        };
-        try c.writePacketWithParam(execute_request, params);
-        errdefer c.connected = false;
-        try c.writer.flush(io);
-        const packet = try c.readPacket(io);
-        return .init(&packet, c, io);
-    }
-
-    /// Execute a prepared statement that returns rows (e.g. SELECT).
-    /// `params` must be a tuple whose fields correspond to the `?` placeholders in the query.
-    /// Returns `QueryResultRows(BinaryResultRow)` which is either `.rows` (ResultSet) or `.err` (ErrorPacket).
-    /// Use `execute` instead if your query does not return a result set.
-    // execute a prepared statement that expect rows, even if it returns 0 rows
-    pub fn executeRows(c: *Conn, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
-        try c.ensureCommandReady();
-        std.debug.assert(prep_stmt.res_cols.len > 0); // executeRows expects rows
-        c.sequence_id = 0;
-        const execute_request: ExecuteRequest = .{
-            .capabilities = c.capabilities,
-            .prep_stmt = prep_stmt,
-        };
-        try c.writePacketWithParam(execute_request, params);
-        errdefer c.connected = false;
-        try c.writer.flush(io);
-        return QueryResultRows(BinaryResultRow).init(c, io);
     }
 
     /// Send the `SSLRequest` packet and upgrade the connection to TLS.
@@ -618,8 +581,12 @@ pub const Conn = struct {
         try c.writer.writePacket(c.generateSequenceId(), packet);
     }
 
-    inline fn writePacketWithParam(c: *Conn, packet: anytype, params: anytype) !void {
+    /// Internal protocol helper for sending a parameterized command.
+    pub fn writeCommandWithParams(c: *Conn, io: Io, packet: anytype, params: anytype) !void {
+        try c.ensureCommandReady();
         try c.writer.writePacketWithParams(c.generateSequenceId(), packet, params);
+        errdefer c.connected = false;
+        try c.writer.flush(io);
     }
 
     inline fn writeBytesAsPacket(c: *Conn, packet: anytype) !void {

@@ -141,8 +141,8 @@ pub fn QueryResultRows(comptime T: type) type {
         ///
         /// Example:
         /// ```zig
-        /// const result: QueryResultRows(TextResultRow) = try conn.execute(&prep_stmt, .{});
-        /// const rows: ResultSet(TextResultRow) = try result.expect(.rows);
+        /// const result = try prep_stmt.executeRows(io, .{});
+        /// const rows: ResultSet(BinaryResultRow) = try result.expect(.rows);
         /// ```
         pub fn expect(
             q: @This(),
@@ -342,7 +342,7 @@ fn scanTextResultRow(dest: []?[]const u8, packet: *const Packet) void {
     }
 }
 
-/// A single row returned by a binary protocol query (via `Conn.execute`).
+/// A single row returned by a binary protocol query (via `Conn.execute` or `PreparedStatement.execute`).
 /// Use `scan` to scan row values into an existing struct,
 /// or `structCreate` to allocate a new struct (must be freed with `structDestroy`).
 pub const BinaryResultRow = struct {
@@ -523,7 +523,7 @@ pub const PrepareResult = union(enum) {
 };
 
 /// A prepared statement returned by `Conn.prepare`.
-/// Pass a pointer to this to `Conn.execute` to run the query.
+/// Use `execute` or `executeRows` to run the statement on its connection.
 /// Resources are freed when `PrepareResult.deinit` is called.
 pub const PreparedStatement = struct {
     prep_ok: PrepareOk,
@@ -569,6 +569,28 @@ pub const PreparedStatement = struct {
             .params = col_defs[0..prep_ok.num_params],
             .res_cols = col_defs[prep_ok.num_params..],
         };
+    }
+
+    /// Execute this statement. `params` is a tuple matching its `?` placeholders.
+    /// Returns `.ok`, `.err`, or `.rows`; all returned rows must be consumed.
+    pub fn execute(prep_stmt: *const PreparedStatement, io: Io, params: anytype) !QueryResult(BinaryResultRow) {
+        const c = prep_stmt.conn;
+        const request: prep_stmts.ExecuteRequest = .{ .capabilities = c.capabilities, .prep_stmt = prep_stmt };
+        try c.writeCommandWithParams(io, request, params);
+        errdefer c.connected = false;
+        const packet = try c.readPacket(io);
+        return .init(&packet, c, io);
+    }
+
+    /// Execute a statement that returns rows. `params` matches its `?` placeholders.
+    /// Returns `.rows` or `.err`; all returned rows must be consumed.
+    pub fn executeRows(prep_stmt: *const PreparedStatement, io: Io, params: anytype) !QueryResultRows(BinaryResultRow) {
+        std.debug.assert(prep_stmt.res_cols.len > 0);
+        const c = prep_stmt.conn;
+        const request: prep_stmts.ExecuteRequest = .{ .capabilities = c.capabilities, .prep_stmt = prep_stmt };
+        try c.writeCommandWithParams(io, request, params);
+        errdefer c.connected = false;
+        return QueryResultRows(BinaryResultRow).init(c, io);
     }
 
     fn deinit(prep_stmt: *const PreparedStatement, allocator: Allocator, io: Io) void {

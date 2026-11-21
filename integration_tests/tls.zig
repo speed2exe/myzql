@@ -181,7 +181,7 @@ test "tls - prepared statement" {
     defer prep_res.deinit(allocator, io);
     const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
 
-    const exec_res = try c.execute(io, &prep_stmt, .{41});
+    const exec_res = try prep_stmt.execute(io, .{41});
     const rows: ResultSet(BinaryResultRow) = try exec_res.expect(.rows);
     const row = (try rows.first(io)) orelse return error.MissingRow;
     const Dest = struct { value: u32 };
@@ -221,7 +221,7 @@ test "tls - cached statements" {
     defer c.deinit(allocator, io);
 
     for (0..3) |_| {
-        const result = try c.exec(io, "SELECT ? + 1", .{@as(u32, 41)});
+        const result = try c.execute(io, "SELECT ? + 1", .{@as(u32, 41)});
         const rows = try result.expect(.rows);
         const row = (try rows.first(io)) orelse return error.MissingRow;
         var dest: struct { value: u64 } = undefined;

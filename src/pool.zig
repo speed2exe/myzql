@@ -8,7 +8,6 @@ const logger = @import("./logger.zig");
 const result = @import("./result.zig");
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
-const PreparedStatement = result.PreparedStatement;
 const TextResultRow = result.TextResultRow;
 const BinaryResultRow = result.BinaryResultRow;
 
@@ -316,14 +315,9 @@ pub const Pool = struct {
             return m.conn.prepare(allocator, io, query_string);
         }
 
-        /// Execute a prepared statement that does not return rows.
-        pub fn execute(m: *ManagedConn, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
-            return m.conn.execute(io, prep_stmt, params);
-        }
-
         /// Execute SQL using the connection's prepared-statement cache.
-        pub fn exec(m: *ManagedConn, io: std.Io, query_string: []const u8, params: anytype) !QueryResult(BinaryResultRow) {
-            return m.conn.exec(io, query_string, params);
+        pub fn execute(m: *ManagedConn, io: std.Io, query_string: []const u8, params: anytype) !QueryResult(BinaryResultRow) {
+            return m.conn.execute(io, query_string, params);
         }
 
         /// Close and remove the connection's cached statements.
