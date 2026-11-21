@@ -8,7 +8,6 @@ const logger = @import("./logger.zig");
 const result = @import("./result.zig");
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
-const PreparedStatement = result.PreparedStatement;
 const TextResultRow = result.TextResultRow;
 const BinaryResultRow = result.BinaryResultRow;
 
@@ -130,6 +129,7 @@ pub const Pool = struct {
                 .ssl_verify = config.ssl_verify,
                 .ssl_ca = if (config.ssl_ca != null) ssl_ca_data else null,
                 .multi_statements = config.multi_statements,
+                .statement_cache_capacity = config.statement_cache_capacity,
                 .logger = config.logger,
             },
         };
@@ -220,15 +220,17 @@ pub const Pool = struct {
     /// Return a connection to the pool.
     ///
     /// Resets the connection's internal state (buffers, sequence id, result
-    /// metadata) so it's ready for the next user. If the connection has died
-    /// (`connected == false`), it is closed and freed instead of being
-    /// returned to the pool.
+    /// metadata) so it's ready for the next user. A dead connection or one
+    /// with an unread result is closed instead of being returned to the pool.
     pub fn release(p: *Pool, conn: *Conn, io: std.Io) void {
         p.mutex.lockUncancelable(io);
         defer p.mutex.unlock(io);
 
-        if (!conn.connected) {
-            // Connection died while in use — close and free
+        if (!conn.connected or conn.result_pending) {
+            if (conn.result_pending) {
+                logger.log(conn.config, .warn, "Discarding connection with an unread result", .{});
+            }
+            conn.connected = false;
             conn.deinit(p.allocator, io);
             p.allocator.destroy(conn);
             p.total_count -= 1;
@@ -313,9 +315,14 @@ pub const Pool = struct {
             return m.conn.prepare(allocator, io, query_string);
         }
 
-        /// Execute a prepared statement that does not return rows.
-        pub fn execute(m: *ManagedConn, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
-            return m.conn.execute(io, prep_stmt, params);
+        /// Execute SQL using the connection's prepared-statement cache.
+        pub fn execute(m: *ManagedConn, io: std.Io, query_string: []const u8, params: anytype) !QueryResult(BinaryResultRow) {
+            return m.conn.execute(io, query_string, params);
+        }
+
+        /// Close and remove the connection's cached statements.
+        pub fn clearStatementCache(m: *ManagedConn, io: std.Io) !void {
+            return m.conn.clearStatementCache(io);
         }
     };
 };

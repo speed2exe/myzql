@@ -17,13 +17,11 @@ const QueryRequest = protocol.text_command.QueryRequest;
 const prepared_statements = protocol.prepared_statements;
 const PrepareRequest = prepared_statements.PrepareRequest;
 const CloseRequest = prepared_statements.CloseRequest;
-const ExecuteRequest = prepared_statements.ExecuteRequest;
 const packet_writer = protocol.packet_writer;
 const Packet = protocol.packet.Packet;
 const PacketReader = protocol.packet_reader.PacketReader;
 const PacketWriter = protocol.packet_writer.PacketWriter;
 const result = @import("./result.zig");
-const QueryResultRows = result.QueryResultRows;
 const QueryResult = result.QueryResult;
 const PrepareResult = result.PrepareResult;
 const PreparedStatement = result.PreparedStatement;
@@ -49,6 +47,10 @@ pub const Conn = struct {
     writer: PacketWriter,
     capabilities: u32,
     sequence_id: u8,
+    result_pending: bool = false,
+
+    statement_cache: std.StringHashMapUnmanaged(CachedStatement) = .empty,
+    statement_cache_capacity: usize,
 
     /// Config this connection was created from. Every message the connection
     /// emits is logged through `config.logger` and bound to this config, so the
@@ -57,6 +59,12 @@ pub const Conn = struct {
 
     // Buffer to store metadata of the result set
     result_meta: ResultMeta,
+
+    const CachedStatement = struct {
+        statement: PreparedStatement,
+        // Contiguous ranks run from least recently used (0) to most recent.
+        rank: usize,
+    };
 
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html
     /// Establish a connection to a MySQL/MariaDB server.
@@ -98,6 +106,7 @@ pub const Conn = struct {
             .capabilities = undefined, // not known until we get the first packet
             .sequence_id = undefined, // not known until we get the first packet
             .config = config_in,
+            .statement_cache_capacity = config_in.statement_cache_capacity,
 
             .result_meta = ResultMeta.init(),
         };
@@ -149,7 +158,7 @@ pub const Conn = struct {
     /// Close the connection and free resources.
     /// Sends a COM_QUIT packet to the server before closing.
     pub fn deinit(c: *Conn, allocator: Allocator, io: Io) void {
-        if (c.connected) {
+        if (c.connected and !c.result_pending) {
             c.quit(io) catch |err| {
                 logger.log(c.config, .err, "Failed to quit: {any}", .{err});
             };
@@ -168,11 +177,18 @@ pub const Conn = struct {
         c.reader.deinit();
         c.writer.deinit();
         c.result_meta.deinit(allocator);
+        var iter = c.statement_cache.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.statement.freeMetadata(c.allocator);
+            c.allocator.free(entry.key_ptr.*);
+        }
+        c.statement_cache.deinit(c.allocator);
     }
 
     /// Send a ping to the server to verify the connection is alive.
     pub fn ping(c: *Conn, io: std.Io) !void {
-        c.ready();
+        try c.ensureCommandReady();
+        errdefer c.connected = false;
         try c.writeBytesAsPacket(&[_]u8{constants.COM_PING});
         try c.writer.flush(io);
         const packet = try c.readPacket(io);
@@ -188,9 +204,10 @@ pub const Conn = struct {
     /// or `.rows` (ResultSet(TextResultRow)) if the query returns a result set.
     /// Use `expect(.rows)` on the result to access the rows.
     pub fn query(c: *Conn, io: std.Io, query_string: []const u8) !QueryResult(TextResultRow) {
-        c.ready();
+        try c.ensureCommandReady();
         const query_req: QueryRequest = .{ .query = query_string };
         try c.writePacket(query_req);
+        errdefer c.connected = false;
         try c.writer.flush(io);
         const packet = try c.readPacket(io);
         return .init(&packet, c, io);
@@ -201,7 +218,7 @@ pub const Conn = struct {
     /// Call `deinit` on the returned `PrepareResult` before closing or releasing
     /// this connection. The connection must not move while the result is alive.
     pub fn prepare(c: *Conn, allocator: Allocator, io: std.Io, query_string: []const u8) !PrepareResult {
-        c.ready();
+        try c.ensureCommandReady();
         errdefer c.connected = false;
         const prepare_request: PrepareRequest = .{ .query = query_string };
         try c.writePacket(prepare_request);
@@ -213,45 +230,83 @@ pub const Conn = struct {
     pub fn closeStatement(c: *Conn, io: Io, statement_id: u32) !void {
         if (!c.connected) return error.ConnectionClosed;
         errdefer c.connected = false;
-        if (c.writer.pos != 0 or c.reader.pos != c.reader.len) return error.ConnectionNotReady;
-        c.ready();
+        try c.ensureCommandReady();
         try c.writePacket(CloseRequest{ .statement_id = statement_id });
         try c.writer.flush(io);
     }
 
-    /// Execute a prepared statement that does not return rows (e.g. INSERT, UPDATE, DELETE).
-    /// `params` must be a tuple whose fields correspond to the `?` placeholders in the query.
-    /// Returns `QueryResult` which is either `.ok` (OkPacket) or `.err` (ErrorPacket).
-    /// Use `executeRows` instead if your query returns a result set.
-    // execute a prepared statement that doesn't return any rows
-    pub fn execute(c: *Conn, io: Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResult(BinaryResultRow) {
-        c.ready();
-        const execute_request: ExecuteRequest = .{
-            .capabilities = c.capabilities,
-            .prep_stmt = prep_stmt,
+    /// Execute SQL with a per-connection prepared-statement cache.
+    /// Consume all returned rows before issuing another command. Clear the
+    /// cache after changing the default database or other session settings
+    /// that affect how statements are prepared.
+    pub fn execute(c: *Conn, io: Io, query_string: []const u8, params: anytype) !QueryResult(BinaryResultRow) {
+        try c.ensureCommandReady();
+        const capacity = c.statement_cache_capacity;
+        if (capacity == 0) return error.StatementCacheDisabled;
+
+        if (c.statement_cache.getPtr(query_string)) |cached| {
+            c.touchCachedStatement(cached);
+            cached.statement.conn = c;
+            return cached.statement.execute(io, params);
+        }
+
+        while (c.statement_cache.count() >= capacity) {
+            try c.evictCachedStatement(io);
+        }
+        try c.statement_cache.ensureUnusedCapacity(c.allocator, 1);
+        var owned_query: ?[]u8 = try c.allocator.dupe(u8, query_string);
+        defer if (owned_query) |owned| c.allocator.free(owned);
+
+        const prepared = try c.prepare(c.allocator, io, query_string);
+        const statement = switch (prepared) {
+            .err => |err| return .{ .err = err },
+            .stmt => |stmt| stmt,
         };
-        try c.writePacketWithParam(execute_request, params);
-        try c.writer.flush(io);
-        const packet = try c.readPacket(io);
-        return .init(&packet, c, io);
+        const key = owned_query.?;
+        c.statement_cache.putAssumeCapacityNoClobber(key, .{
+            .statement = statement,
+            .rank = c.statement_cache.count(),
+        });
+        owned_query = null;
+        const cached = c.statement_cache.getPtr(key).?;
+        cached.statement.conn = c;
+        return cached.statement.execute(io, params);
     }
 
-    /// Execute a prepared statement that returns rows (e.g. SELECT).
-    /// `params` must be a tuple whose fields correspond to the `?` placeholders in the query.
-    /// Returns `QueryResultRows(BinaryResultRow)` which is either `.rows` (ResultSet) or `.err` (ErrorPacket).
-    /// Use `execute` instead if your query does not return a result set.
-    // execute a prepared statement that expect rows, even if it returns 0 rows
-    pub fn executeRows(c: *Conn, io: std.Io, prep_stmt: *const PreparedStatement, params: anytype) !QueryResultRows(BinaryResultRow) {
-        c.ready();
-        std.debug.assert(prep_stmt.res_cols.len > 0); // executeRows expects rows
-        c.sequence_id = 0;
-        const execute_request: ExecuteRequest = .{
-            .capabilities = c.capabilities,
-            .prep_stmt = prep_stmt,
-        };
-        try c.writePacketWithParam(execute_request, params);
-        try c.writer.flush(io);
-        return QueryResultRows(BinaryResultRow).init(c, io);
+    /// Close all cached statements. No result set may be outstanding.
+    pub fn clearStatementCache(c: *Conn, io: Io) !void {
+        try c.ensureCommandReady();
+        while (c.statement_cache.count() > 0) {
+            try c.evictCachedStatement(io);
+        }
+    }
+
+    fn touchCachedStatement(c: *Conn, cached: *CachedStatement) void {
+        const rank = cached.rank;
+        var iter = c.statement_cache.valueIterator();
+        while (iter.next()) |entry| {
+            if (entry.rank > rank) entry.rank -= 1;
+        }
+        cached.rank = c.statement_cache.count() - 1;
+    }
+
+    fn evictCachedStatement(c: *Conn, io: Io) !void {
+        var iter = c.statement_cache.iterator();
+        var oldest: ?[]const u8 = null;
+        while (iter.next()) |entry| {
+            if (entry.value_ptr.rank == 0) {
+                oldest = entry.key_ptr.*;
+                break;
+            }
+        }
+        const key = oldest orelse unreachable;
+        const cached = c.statement_cache.getPtr(key).?;
+        try c.closeStatement(io, cached.statement.prep_ok.statement_id);
+        const removed = c.statement_cache.fetchRemove(key).?;
+        removed.value.statement.freeMetadata(c.allocator);
+        c.allocator.free(removed.key);
+        var values = c.statement_cache.valueIterator();
+        while (values.next()) |entry| entry.rank -= 1;
     }
 
     /// Send the `SSLRequest` packet and upgrade the connection to TLS.
@@ -280,7 +335,7 @@ pub const Conn = struct {
     }
 
     fn quit(c: *Conn, io: std.Io) !void {
-        c.ready();
+        try c.ensureCommandReady();
         try c.writeBytesAsPacket(&[_]u8{constants.COM_QUIT});
         try c.writer.flush(io);
         const packet = c.readPacket(io) catch |err| switch (err) {
@@ -526,8 +581,12 @@ pub const Conn = struct {
         try c.writer.writePacket(c.generateSequenceId(), packet);
     }
 
-    inline fn writePacketWithParam(c: *Conn, packet: anytype, params: anytype) !void {
+    /// Internal protocol helper for sending a parameterized command.
+    pub fn writeCommandWithParams(c: *Conn, io: Io, packet: anytype, params: anytype) !void {
+        try c.ensureCommandReady();
         try c.writer.writePacketWithParams(c.generateSequenceId(), packet, params);
+        errdefer c.connected = false;
+        try c.writer.flush(io);
     }
 
     inline fn writeBytesAsPacket(c: *Conn, packet: anytype) !void {
@@ -538,10 +597,10 @@ pub const Conn = struct {
         return c.sequence_id;
     }
 
-    inline fn ready(c: *Conn) void {
-        std.debug.assert(c.connected);
-        std.debug.assert(c.writer.pos == 0);
-        std.debug.assert(c.reader.pos == c.reader.len);
+    fn ensureCommandReady(c: *Conn) !void {
+        if (!c.connected) return error.ConnectionClosed;
+        if (c.result_pending) return error.ResultNotConsumed;
+        if (c.writer.pos != 0 or c.reader.pos != c.reader.len) return error.ConnectionNotReady;
         c.sequence_id = 0;
     }
 };

@@ -39,6 +39,9 @@ pub const Config = struct {
     ssl_ca: ?[]const u8 = null,
     /// Allow multiple statements in a single query. Default: false
     multi_statements: bool = false,
+    /// Maximum cached statements per connection for `Conn.execute`. Zero disables
+    /// cached execution. The server's statement limit is shared by all clients.
+    statement_cache_capacity: usize = 32,
 
     /// Handler for the log messages emitted by the connections created with
     /// this config. The logger is tied to this config, not to a connection:

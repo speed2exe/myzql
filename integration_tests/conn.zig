@@ -35,6 +35,26 @@ fn queryExpectOkLogError(c: *Conn, query: []const u8) void {
     };
 }
 
+pub fn sessionCounter(c: *Conn, name: []const u8) !u64 {
+    const sql = try std.fmt.allocPrint(allocator, "SHOW SESSION STATUS LIKE '{s}'", .{name});
+    defer allocator.free(sql);
+    const result = try c.query(io, sql);
+    const rows = try result.expect(.rows);
+    const row = (try rows.first(io)) orelse return error.MissingRow;
+    const elems = try row.textElems(allocator);
+    defer elems.deinit(allocator);
+    return std.fmt.parseInt(u64, elems.elems[1] orelse return error.MissingValue, 10);
+}
+
+fn executeCachedU32(c: *Conn, sql: []const u8, value: u32) !u32 {
+    const result = try c.execute(io, sql, .{value});
+    const rows = try result.expect(.rows);
+    const row = (try rows.first(io)) orelse return error.MissingRow;
+    var dest: struct { value: u32 } = undefined;
+    try row.scan(&dest);
+    return dest.value;
+}
+
 // Percent-encode every byte outside the unreserved set, so credentials and
 // paths can be embedded in a URL without changing its structure
 fn appendUrlEncoded(url: *std.ArrayList(u8), raw: []const u8) !void {
@@ -257,6 +277,209 @@ test "prepared statement close" {
     try c.ping(io);
 }
 
+test "cached statements reuse and evict least recently used" {
+    var config = test_config;
+    config.statement_cache_capacity = 2;
+    var c = try Conn.init(allocator, io, &config);
+    defer c.deinit(allocator, io);
+
+    const sql = try allocator.dupe(u8, "SELECT ? AS a");
+    defer allocator.free(sql);
+    try std.testing.expectEqual(@as(u32, 1), try executeCachedU32(&c, sql, 1));
+    @memset(sql, 'x');
+    try std.testing.expectEqual(@as(u32, 2), try executeCachedU32(&c, "SELECT ? AS b", 2));
+    try std.testing.expectEqual(@as(u32, 3), try executeCachedU32(&c, "SELECT ? AS a", 3));
+    try std.testing.expectEqual(@as(u32, 4), try executeCachedU32(&c, "SELECT ? AS c", 4));
+    try std.testing.expectEqual(@as(u32, 5), try executeCachedU32(&c, "SELECT ? AS a", 5));
+    try std.testing.expectEqual(@as(u32, 6), try executeCachedU32(&c, "SELECT ? AS b", 6));
+
+    // MySQL includes automatic server-side reprepares in Com_stmt_prepare.
+    const prepares = try sessionCounter(&c, "Com_stmt_prepare");
+    const reprepares = try sessionCounter(&c, "Com_stmt_reprepare");
+    try std.testing.expectEqual(@as(u64, 4), prepares - reprepares);
+    try std.testing.expectEqual(@as(u64, 2), try sessionCounter(&c, "Com_stmt_close"));
+    try c.clearStatementCache(io);
+    try std.testing.expectEqual(@as(u64, 4), try sessionCounter(&c, "Com_stmt_close"));
+}
+
+test "cached statements remain usable after moving their connection" {
+    const original = try allocator.create(Conn);
+    var moved = blk: {
+        defer allocator.destroy(original);
+        original.* = try Conn.init(allocator, io, &test_config);
+        errdefer original.deinit(allocator, io);
+        try std.testing.expectEqual(@as(u32, 1), try executeCachedU32(original, "SELECT ? AS a", 1));
+        break :blk original.*;
+    };
+    defer moved.deinit(allocator, io);
+
+    try std.testing.expectEqual(@as(u32, 2), try executeCachedU32(&moved, "SELECT ? AS a", 2));
+    try std.testing.expectEqual(@as(u32, 3), try executeCachedU32(&moved, "SELECT ? AS b", 3));
+    try moved.clearStatementCache(io);
+}
+
+test "prepared statement methods validate parameters and outstanding rows" {
+    var config = test_config;
+    config.logger = null;
+    var c = try Conn.init(allocator, io, &config);
+    defer c.deinit(allocator, io);
+    const prep_res = try c.prepare(allocator, io, "SELECT ? AS a");
+    defer prep_res.deinit(allocator, io);
+    const stmt = try prep_res.expect(.stmt);
+
+    try std.testing.expectError(error.ParamsCountNotMatch, stmt.execute(io, .{}));
+    const result = try stmt.execute(io, .{@as(u32, 1)});
+    const rows = try result.expect(.rows);
+    try std.testing.expectError(error.ResultNotConsumed, stmt.executeRows(io, .{@as(u32, 2)}));
+    _ = (try rows.first(io)) orelse return error.MissingRow;
+
+    const result_rows = try stmt.executeRows(io, .{@as(u32, 2)});
+    const next_rows = try result_rows.expect(.rows);
+    const row = (try next_rows.first(io)) orelse return error.MissingRow;
+    var dest: struct { value: u32 } = undefined;
+    try row.scan(&dest);
+    try std.testing.expectEqual(@as(u32, 2), dest.value);
+}
+
+test "cached statements execute writes and preserve server errors" {
+    var c = try Conn.init(allocator, io, &test_config);
+    defer c.deinit(allocator, io);
+    try queryExpectOk(&c, "USE mysql");
+    try queryExpectOk(&c, "CREATE TEMPORARY TABLE myzql_cached_values (id INT PRIMARY KEY)");
+
+    for ([_]u32{ 1, 2 }) |id| {
+        const result = try c.execute(io, "INSERT INTO myzql_cached_values VALUES (?)", .{id});
+        _ = try result.expect(.ok);
+    }
+    const duplicate = try c.execute(io, "INSERT INTO myzql_cached_values VALUES (?)", .{@as(u32, 1)});
+    const err = try duplicate.expect(.err);
+    try std.testing.expectEqual(@as(u16, 1062), err.error_code);
+    const last = try c.execute(io, "INSERT INTO myzql_cached_values VALUES (?)", .{@as(u32, 3)});
+    _ = try last.expect(.ok);
+
+    const prepares = try sessionCounter(&c, "Com_stmt_prepare");
+    const reprepares = try sessionCounter(&c, "Com_stmt_reprepare");
+    try std.testing.expectEqual(@as(u64, 1), prepares - reprepares);
+    const result = try c.query(io, "SELECT COUNT(*) FROM myzql_cached_values");
+    const rows = try result.expect(.rows);
+    const row = (try rows.first(io)) orelse return error.MissingRow;
+    const elems = try row.textElems(allocator);
+    defer elems.deinit(allocator);
+    try std.testing.expectEqualStrings("3", elems.elems[0].?);
+}
+
+test "cached statements remain bounded for many queries" {
+    var config = test_config;
+    config.statement_cache_capacity = 2;
+    var c = try Conn.init(allocator, io, &config);
+    defer c.deinit(allocator, io);
+
+    for (0..64) |i| {
+        var buffer: [32]u8 = undefined;
+        const sql = try std.fmt.bufPrint(&buffer, "SELECT ? AS c{d}", .{i});
+        try std.testing.expectEqual(@as(u32, @intCast(i)), try executeCachedU32(&c, sql, @intCast(i)));
+    }
+    try std.testing.expectEqual(@as(u64, 62), try sessionCounter(&c, "Com_stmt_close"));
+    try c.clearStatementCache(io);
+    try std.testing.expectEqual(@as(u64, 64), try sessionCounter(&c, "Com_stmt_close"));
+}
+
+test "cached statements wait for outstanding rows" {
+    var config = test_config;
+    config.statement_cache_capacity = 1;
+    var c = try Conn.init(allocator, io, &config);
+    defer c.deinit(allocator, io);
+
+    const result = try c.execute(io, "SELECT ? AS a", .{@as(u32, 7)});
+    const rows = try result.expect(.rows);
+    try std.testing.expectError(error.ResultNotConsumed, c.execute(io, "SELECT ? AS b", .{@as(u32, 8)}));
+    try std.testing.expectError(error.ResultNotConsumed, c.clearStatementCache(io));
+    _ = (try rows.first(io)) orelse return error.MissingRow;
+    try std.testing.expectEqual(@as(u32, 8), try executeCachedU32(&c, "SELECT ? AS b", 8));
+    try std.testing.expectEqual(@as(u64, 1), try sessionCounter(&c, "Com_stmt_close"));
+
+    const empty = try c.execute(io, "SELECT ? AS a WHERE 0", .{@as(u32, 1)});
+    const empty_rows = try empty.expect(.rows);
+    try std.testing.expect((try empty_rows.first(io)) == null);
+    try std.testing.expectEqual(@as(u32, 9), try executeCachedU32(&c, "SELECT ? AS b", 9));
+}
+
+test "cached statements reject unfinished multi-statement results" {
+    var config = test_config;
+    config.multi_statements = true;
+    {
+        var c = try Conn.init(allocator, io, &config);
+        defer c.deinit(allocator, io);
+        const result = try c.query(io, "SELECT 1; SELECT 2");
+        const rows = try result.expect(.rows);
+        _ = (try rows.first(io)) orelse return error.MissingRow;
+        try std.testing.expectError(error.ResultNotConsumed, c.execute(io, "SELECT ?", .{@as(u32, 1)}));
+    }
+    {
+        var c = try Conn.init(allocator, io, &config);
+        defer c.deinit(allocator, io);
+        const result = try c.query(io, "SET @myzql_test = 1; SELECT 2");
+        _ = try result.expect(.ok);
+        try std.testing.expectError(error.ResultNotConsumed, c.execute(io, "SELECT ?", .{@as(u32, 1)}));
+    }
+}
+
+test "cached statements handle errors and disabled cache" {
+    var config = test_config;
+    config.logger = null;
+    {
+        var c = try Conn.init(allocator, io, &config);
+        defer c.deinit(allocator, io);
+
+        const bad_sql = try c.execute(io, "this is not valid SQL", .{});
+        _ = try bad_sql.expect(.err);
+        try std.testing.expectError(error.ParamsCountNotMatch, c.execute(io, "SELECT ? AS a", .{}));
+        try std.testing.expectEqual(@as(u32, 9), try executeCachedU32(&c, "SELECT ? AS a", 9));
+        const prepares = try sessionCounter(&c, "Com_stmt_prepare");
+        const reprepares = try sessionCounter(&c, "Com_stmt_reprepare");
+        try std.testing.expectEqual(@as(u64, 2), prepares - reprepares);
+    }
+    config.statement_cache_capacity = 0;
+    var c = try Conn.init(allocator, io, &config);
+    defer c.deinit(allocator, io);
+    try std.testing.expectError(error.StatementCacheDisabled, c.execute(io, "SELECT ?", .{@as(u32, 1)}));
+    try c.clearStatementCache(io);
+    try c.ping(io);
+}
+
+test "cached statements can be cleared after changing databases" {
+    var c = try Conn.init(allocator, io, &test_config);
+    defer c.deinit(allocator, io);
+    try queryExpectOk(&c, "USE mysql");
+
+    const first = try c.execute(io, "SELECT User FROM user LIMIT 1", .{});
+    const rows = try first.expect(.rows);
+    _ = try rows.first(io);
+    try queryExpectOk(&c, "USE performance_schema");
+    try c.clearStatementCache(io);
+
+    const second = try c.execute(io, "SELECT User FROM user LIMIT 1", .{});
+    _ = try second.expect(.err);
+    try c.ping(io);
+}
+
+test "cached statements discard connection on prepare allocation failure" {
+    var failing = std.testing.FailingAllocator.init(allocator, .{});
+    const failing_allocator = failing.allocator();
+    var c = try Conn.init(failing_allocator, io, &test_config);
+    defer c.deinit(failing_allocator, io);
+
+    failing.fail_index = failing.alloc_index;
+    try std.testing.expectError(error.OutOfMemory, c.execute(io, "SELECT ? AS a", .{@as(u32, 1)}));
+    try std.testing.expect(c.connected);
+    failing.fail_index = std.math.maxInt(usize);
+    _ = try executeCachedU32(&c, "SELECT ? AS a", 1);
+    try c.clearStatementCache(io);
+    failing.fail_index = failing.alloc_index + 1;
+    try std.testing.expectError(error.OutOfMemory, c.execute(io, "SELECT ? AS b", .{@as(u32, 2)}));
+    try std.testing.expect(!c.connected);
+}
+
 test "prepare execute - 1" {
     var c = try Conn.init(allocator, io, &test_config);
     defer c.deinit(allocator, io);
@@ -264,14 +487,14 @@ test "prepare execute - 1" {
         const prep_res = try c.prepare(allocator, io, "CREATE DATABASE testdb");
         defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try c.execute(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.execute(io, .{});
         _ = try query_res.expect(.ok);
     }
     {
         const prep_res = try c.prepare(allocator, io, "DROP DATABASE testdb");
         defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try c.execute(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.execute(io, .{});
         _ = try query_res.expect(.ok);
     }
 }
@@ -289,11 +512,11 @@ test "prepare execute - 2" {
     const prep_stmt_2: PreparedStatement = try prep_res_2.expect(.stmt);
 
     {
-        const query_res = try c.execute(io, &prep_stmt_1, .{});
+        const query_res = try prep_stmt_1.execute(io, .{});
         _ = try query_res.expect(.ok);
     }
     {
-        const query_res = try c.execute(io, &prep_stmt_2, .{});
+        const query_res = try prep_stmt_2.execute(io, .{});
         _ = try query_res.expect(.ok);
     }
 }
@@ -309,7 +532,7 @@ test "prepare execute with result" {
         const prep_res = try c.prepare(allocator, io, query);
         defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try c.executeRows(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.executeRows(io, .{});
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
 
         const MyType = struct {
@@ -360,7 +583,7 @@ test "prepare execute with result" {
         const prep_res = try c.prepare(allocator, io, query);
         defer prep_res.deinit(allocator, io);
         const prep_stmt: PreparedStatement = try prep_res.expect(.stmt);
-        const query_res = try c.executeRows(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.executeRows(io, .{});
         const rows: ResultSet(BinaryResultRow) = try query_res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -394,7 +617,7 @@ test "prepare execute - first" {
         const prep_res = try c.prepare(allocator, io, query);
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const query_res = try c.executeRows(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.executeRows(io, .{});
         const rows = try query_res.expect(.rows);
 
         const MyType = struct { a: u8 };
@@ -419,7 +642,7 @@ test "prepare execute - first" {
         const prep_res = try c.prepare(allocator, io, query);
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const query_res = try c.executeRows(io, &prep_stmt, .{});
+        const query_res = try prep_stmt.executeRows(io, .{});
         const rows = try query_res.expect(.rows);
 
         const first = try rows.first(io);
@@ -471,7 +694,7 @@ test "binary data types - int" {
             .{ @as(?i8, null), @as(?i16, null), @as(?i32, null), @as(?i64, null), @as(?u8, null), @as(?u16, null), @as(?u32, null), @as(?u64, null), @as(?u8, null), @as(?u64, null) },
         };
         inline for (params) |param| {
-            const exe_res = try c.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -513,7 +736,7 @@ test "binary data types - int" {
         const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.int_types_example LIMIT 4");
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try c.executeRows(io, &prep_stmt, .{});
+        const res = try prep_stmt.executeRows(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
 
         const expected: []const IntTypesExample = &.{
@@ -604,7 +827,7 @@ test "binary data types - float" {
             .{ @as(?f32, null), @as(?f64, null) },
         };
         inline for (params) |param| {
-            const exe_res = try c.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -637,7 +860,7 @@ test "binary data types - float" {
         const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.float_types_example LIMIT 3");
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try c.executeRows(io, &prep_stmt, .{});
+        const res = try prep_stmt.executeRows(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const row_iter = rows.iter();
 
@@ -689,7 +912,7 @@ test "binary data types - string" {
             },
         };
         inline for (params) |param| {
-            const exe_res = try c.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -723,7 +946,7 @@ test "binary data types - string" {
         );
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try c.executeRows(io, &prep_stmt, .{});
+        const res = try prep_stmt.executeRows(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -787,7 +1010,7 @@ test "binary data types - array" {
             .{ "024", "123" },
         };
         inline for (params) |param| {
-            const exe_res = try c.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
 
@@ -796,7 +1019,7 @@ test "binary data types - array" {
             .{ "02468", "12345" },
         };
         inline for (fail_params) |param| {
-            const exe_res = try c.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.err);
         }
     }
@@ -844,7 +1067,7 @@ test "binary data types - array" {
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
         {
-            const res = try c.executeRows(io, &prep_stmt, .{});
+            const res = try prep_stmt.executeRows(io, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -870,7 +1093,7 @@ test "binary data types - array" {
         }
 
         {
-            const res = try c.executeRows(io, &prep_stmt, .{});
+            const res = try prep_stmt.executeRows(io, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -896,7 +1119,7 @@ test "binary data types - array" {
         }
 
         {
-            const res = try c.executeRows(io, &prep_stmt, .{});
+            const res = try prep_stmt.executeRows(io, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -922,7 +1145,7 @@ test "binary data types - array" {
         }
 
         {
-            const res = try c.executeRows(io, &prep_stmt, .{});
+            const res = try prep_stmt.executeRows(io, .{});
             const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
             const rows_iter = rows.iter();
 
@@ -987,7 +1210,7 @@ test "binary data types - temporal" {
         };
 
         inline for (params) |param| {
-            const exe_res = try c.execute(io, &prep_stmt, param);
+            const exe_res = try prep_stmt.execute(io, param);
             _ = try exe_res.expect(.ok);
         }
     }
@@ -1020,7 +1243,7 @@ test "binary data types - temporal" {
         const prep_res = try c.prepare(allocator, io, "SELECT * FROM test.temporal_types_example LIMIT 3");
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try c.executeRows(io, &prep_stmt, .{});
+        const res = try prep_stmt.executeRows(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -1065,7 +1288,7 @@ test "select concat with params" {
         const prep_res = try c.prepare(allocator, io, "SELECT CONCAT(?, ?) AS col1");
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try c.executeRows(io, &prep_stmt, .{ runtimeValue("hello"), runtimeValue("world") });
+        const res = try prep_stmt.executeRows(io, .{ runtimeValue("hello"), runtimeValue("world") });
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 
@@ -1145,7 +1368,7 @@ test "stress" {
         ); // https://stackoverflow.com/a/10432083
         defer prep_res.deinit(allocator, io);
         const prep_stmt = try prep_res.expect(.stmt);
-        const res = try c.executeRows(io, &prep_stmt, .{});
+        const res = try prep_stmt.executeRows(io, .{});
         const rows: ResultSet(BinaryResultRow) = try res.expect(.rows);
         const rows_iter = rows.iter();
 

@@ -58,6 +58,10 @@ fn isEofPacket(payload: []const u8) bool {
     return payload[0] == constants.EOF and payload.len < 9;
 }
 
+fn finishResult(conn: *Conn, ok: OkPacket) void {
+    conn.result_pending = (ok.status_flags orelse 0) & constants.SERVER_MORE_RESULTS_EXISTS != 0;
+}
+
 pub fn QueryResult(comptime T: type) type {
     return union(enum) {
         ok: OkPacket,
@@ -66,7 +70,11 @@ pub fn QueryResult(comptime T: type) type {
 
         pub fn init(packet: *const Packet, c: *Conn, io: std.Io) !@This() {
             return switch (packet.payload[0]) {
-                constants.OK => .{ .ok = OkPacket.init(packet, c.capabilities) },
+                constants.OK => blk: {
+                    const ok = OkPacket.init(packet, c.capabilities);
+                    finishResult(c, ok);
+                    break :blk .{ .ok = ok };
+                },
                 constants.ERR => .{ .err = ErrorPacket.init(packet) },
                 constants.LOCAL_INFILE_REQUEST => _ = @panic("not implemented"),
                 else => .{ .rows = try ResultSet(T).init(c, io, packet) },
@@ -133,8 +141,8 @@ pub fn QueryResultRows(comptime T: type) type {
         ///
         /// Example:
         /// ```zig
-        /// const result: QueryResultRows(TextResultRow) = try conn.execute(&prep_stmt, .{});
-        /// const rows: ResultSet(TextResultRow) = try result.expect(.rows);
+        /// const result = try prep_stmt.executeRows(io, .{});
+        /// const rows: ResultSet(BinaryResultRow) = try result.expect(.rows);
         /// ```
         pub fn expect(
             q: @This(),
@@ -170,6 +178,8 @@ pub fn ResultSet(comptime T: type) type {
             const n_columns = reader.readLengthEncodedInteger();
             std.debug.assert(reader.finished());
 
+            conn.result_pending = true;
+            errdefer conn.connected = false;
             try conn.readPutResultColumns(io, n_columns);
 
             return .{
@@ -193,6 +203,9 @@ pub fn ResultSet(comptime T: type) type {
         /// Return the first row of the result set, draining remaining rows.
         /// Returns `null` if the result set is empty.
         pub fn first(r: *const ResultSet(T), io: std.Io) !?T {
+            errdefer if (r.conn.result_pending) {
+                r.conn.connected = false;
+            };
             const row_res = try r.readRow(io);
             return switch (row_res) {
                 .ok => null,
@@ -209,10 +222,17 @@ pub fn ResultSet(comptime T: type) type {
                         if (reader.pos + 4 + payload_len > reader.len) break :drain_buffered;
                         const pkt_type = hdr[4];
                         reader.pos += 4 + payload_len;
-                        if (pkt_type == constants.ERR) return error.ErrorPacket;
+                        if (pkt_type == constants.ERR) {
+                            r.conn.result_pending = false;
+                            return error.ErrorPacket;
+                        }
                         // a 0xFE-prefixed row with a >= 2^24-byte first field
                         // is not an EOF terminator (see isEofPacket)
-                        if (pkt_type == constants.EOF and payload_len < 9) break :blk row;
+                        if (pkt_type == constants.EOF and payload_len < 9) {
+                            const pkt = Packet.init(hdr[3], hdr[4 .. 4 + payload_len]);
+                            finishResult(r.conn, OkPacket.init(&pkt, r.conn.capabilities));
+                            break :blk row;
+                        }
                     }
 
                     // Drain remaining rows from the stream through a temporary
@@ -234,8 +254,14 @@ pub fn ResultSet(comptime T: type) type {
                     while (true) {
                         var pkt = try temp_reader.readPacket(io);
                         pkt.config = r.conn.config;
-                        if (pkt.payload[0] == constants.ERR) return ErrorPacket.init(&pkt).asError();
-                        if (isEofPacket(pkt.payload)) break;
+                        if (pkt.payload[0] == constants.ERR) {
+                            r.conn.result_pending = false;
+                            return ErrorPacket.init(&pkt).asError();
+                        }
+                        if (isEofPacket(pkt.payload)) {
+                            finishResult(r.conn, OkPacket.init(&pkt, r.conn.capabilities));
+                            break;
+                        }
                     }
                     break :blk row;
                 },
@@ -316,7 +342,7 @@ fn scanTextResultRow(dest: []?[]const u8, packet: *const Packet) void {
     }
 }
 
-/// A single row returned by a binary protocol query (via `Conn.execute`).
+/// A single row returned by a binary protocol query (via `Conn.execute` or `PreparedStatement.execute`).
 /// Use `scan` to scan row values into an existing struct,
 /// or `structCreate` to allocate a new struct (must be freed with `structDestroy`).
 pub const BinaryResultRow = struct {
@@ -375,10 +401,18 @@ pub fn ResultRow(comptime T: type) type {
         row: T,
 
         fn init(conn: *Conn, io: std.Io, col_defs: []const ColumnDefinition41) !ResultRow(T) {
+            errdefer conn.connected = false;
             const packet = try conn.readPacket(io);
             const payload = packet.payload;
-            if (payload[0] == constants.ERR) return .{ .err = ErrorPacket.init(&packet) };
-            if (isEofPacket(payload)) return .{ .ok = OkPacket.init(&packet, conn.capabilities) };
+            if (payload[0] == constants.ERR) {
+                conn.result_pending = false;
+                return .{ .err = ErrorPacket.init(&packet) };
+            }
+            if (isEofPacket(payload)) {
+                const ok = OkPacket.init(&packet, conn.capabilities);
+                finishResult(conn, ok);
+                return .{ .ok = ok };
+            }
             return .{ .row = .{ .packet = packet, .col_defs = col_defs } };
         }
 
@@ -416,13 +450,19 @@ fn deinitOwnedPacketList(allocator: Allocator, packet_list: *std.ArrayList(Packe
 fn collectAllRowsPacketUntilEof(conn: *Conn, allocator: Allocator, io: std.Io) !std.ArrayList(Packet) {
     var packet_list: std.ArrayList(Packet) = .empty;
     errdefer deinitOwnedPacketList(allocator, &packet_list);
+    errdefer if (conn.result_pending) {
+        conn.connected = false;
+    };
 
     // Accumulate all packets until EOF
     while (true) {
         const packet = try conn.readPacket(io);
-        if (packet.payload[0] == constants.ERR) return ErrorPacket.init(&packet).asError();
+        if (packet.payload[0] == constants.ERR) {
+            conn.result_pending = false;
+            return ErrorPacket.init(&packet).asError();
+        }
         if (isEofPacket(packet.payload)) {
-            _ = OkPacket.init(&packet, conn.capabilities);
+            finishResult(conn, OkPacket.init(&packet, conn.capabilities));
             return packet_list;
         }
         const owned_packet = try packet.cloneAlloc(allocator);
@@ -483,7 +523,7 @@ pub const PrepareResult = union(enum) {
 };
 
 /// A prepared statement returned by `Conn.prepare`.
-/// Pass a pointer to this to `Conn.execute` to run the query.
+/// Use `execute` or `executeRows` to run the statement on its connection.
 /// Resources are freed when `PrepareResult.deinit` is called.
 pub const PreparedStatement = struct {
     prep_ok: PrepareOk,
@@ -531,12 +571,39 @@ pub const PreparedStatement = struct {
         };
     }
 
+    /// Execute this statement. `params` is a tuple matching its `?` placeholders.
+    /// Returns `.ok`, `.err`, or `.rows`; all returned rows must be consumed.
+    pub fn execute(prep_stmt: *const PreparedStatement, io: Io, params: anytype) !QueryResult(BinaryResultRow) {
+        const c = prep_stmt.conn;
+        const request: prep_stmts.ExecuteRequest = .{ .capabilities = c.capabilities, .prep_stmt = prep_stmt };
+        try c.writeCommandWithParams(io, request, params);
+        errdefer c.connected = false;
+        const packet = try c.readPacket(io);
+        return .init(&packet, c, io);
+    }
+
+    /// Execute a statement that returns rows. `params` matches its `?` placeholders.
+    /// Returns `.rows` or `.err`; all returned rows must be consumed.
+    pub fn executeRows(prep_stmt: *const PreparedStatement, io: Io, params: anytype) !QueryResultRows(BinaryResultRow) {
+        std.debug.assert(prep_stmt.res_cols.len > 0);
+        const c = prep_stmt.conn;
+        const request: prep_stmts.ExecuteRequest = .{ .capabilities = c.capabilities, .prep_stmt = prep_stmt };
+        try c.writeCommandWithParams(io, request, params);
+        errdefer c.connected = false;
+        return QueryResultRows(BinaryResultRow).init(c, io);
+    }
+
     fn deinit(prep_stmt: *const PreparedStatement, allocator: Allocator, io: Io) void {
         if (prep_stmt.conn.connected) {
             prep_stmt.conn.closeStatement(io, prep_stmt.prep_ok.statement_id) catch |err| {
                 logger.log(prep_stmt.config, .err, "Failed to close prepared statement: {any}", .{err});
             };
         }
+        prep_stmt.freeMetadata(allocator);
+    }
+
+    /// Free local metadata; the statement must also be closed or the connection discarded.
+    pub fn freeMetadata(prep_stmt: *const PreparedStatement, allocator: Allocator) void {
         allocator.free(prep_stmt.col_defs);
         for (prep_stmt.packets) |packet| {
             packet.deinit(allocator);
