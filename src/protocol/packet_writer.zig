@@ -107,6 +107,7 @@ pub const PacketWriter = struct {
         params: anytype,
     ) !void {
         const start = p.pos;
+        errdefer p.pos = start;
         try p.skip(4);
         // we need to write the payload length and sequence id later
         // after the packet is written

@@ -329,6 +329,29 @@ pub fn main() !void {
     std.debug.print("table: {any}\n", .{table.table});
 ```
 
+### Cached prepared statements
+
+`exec` prepares SQL on first use and reuses the statement on that connection.
+It returns the same result variants as `execute`; consume all rows before
+issuing another command or returning the connection to the pool.
+
+```zig
+const result = try client.exec(io, "SELECT name FROM users WHERE id = ?", .{@as(u32, 42)});
+const rows = try result.expect(.rows);
+_ = try rows.first(io); // drains remaining rows
+```
+
+Each connection caches up to `Config.statement_cache_capacity` statements
+(default 32), evicting the least recently used statement when full. The
+server's prepared-statement limit is shared across all connections and clients,
+so size the cache accordingly. A capacity of zero disables `exec` and returns
+`error.StatementCacheDisabled`; the explicit `prepare` API remains available.
+
+The cache key is the SQL text. After changing the default database or session
+settings that affect statement preparation (including through stored routines),
+call `try client.clearStatementCache(io)` before the next cached execution.
+`Pool.ManagedConn` provides the same `exec` and `clearStatementCache` methods.
+
 ### Data Insertion
 - A prepared statement belongs to its connection. Call
   `prep_res.deinit(allocator, io)` after consuming its results and before

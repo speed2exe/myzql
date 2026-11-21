@@ -35,6 +35,26 @@ fn queryExpectOkLogError(c: *Conn, query: []const u8) void {
     };
 }
 
+pub fn sessionCounter(c: *Conn, name: []const u8) !u64 {
+    const sql = try std.fmt.allocPrint(allocator, "SHOW SESSION STATUS LIKE '{s}'", .{name});
+    defer allocator.free(sql);
+    const result = try c.query(io, sql);
+    const rows = try result.expect(.rows);
+    const row = (try rows.first(io)) orelse return error.MissingRow;
+    const elems = try row.textElems(allocator);
+    defer elems.deinit(allocator);
+    return std.fmt.parseInt(u64, elems.elems[1] orelse return error.MissingValue, 10);
+}
+
+fn execCachedU32(c: *Conn, sql: []const u8, value: u32) !u32 {
+    const result = try c.exec(io, sql, .{value});
+    const rows = try result.expect(.rows);
+    const row = (try rows.first(io)) orelse return error.MissingRow;
+    var dest: struct { value: u32 } = undefined;
+    try row.scan(&dest);
+    return dest.value;
+}
+
 // Percent-encode every byte outside the unreserved set, so credentials and
 // paths can be embedded in a URL without changing its structure
 fn appendUrlEncoded(url: *std.ArrayList(u8), raw: []const u8) !void {
@@ -255,6 +275,170 @@ test "prepared statement close" {
     try std.testing.expectEqual(@as(usize, 1), table.table.len);
     try std.testing.expectEqualStrings("64", table.table[0][1].?);
     try c.ping(io);
+}
+
+test "cached statements reuse and evict least recently used" {
+    var config = test_config;
+    config.statement_cache_capacity = 2;
+    var c = try Conn.init(allocator, io, &config);
+    defer c.deinit(allocator, io);
+
+    const sql = try allocator.dupe(u8, "SELECT ? AS a");
+    defer allocator.free(sql);
+    try std.testing.expectEqual(@as(u32, 1), try execCachedU32(&c, sql, 1));
+    @memset(sql, 'x');
+    try std.testing.expectEqual(@as(u32, 2), try execCachedU32(&c, "SELECT ? AS b", 2));
+    try std.testing.expectEqual(@as(u32, 3), try execCachedU32(&c, "SELECT ? AS a", 3));
+    try std.testing.expectEqual(@as(u32, 4), try execCachedU32(&c, "SELECT ? AS c", 4));
+    try std.testing.expectEqual(@as(u32, 5), try execCachedU32(&c, "SELECT ? AS a", 5));
+    try std.testing.expectEqual(@as(u32, 6), try execCachedU32(&c, "SELECT ? AS b", 6));
+
+    // MySQL includes automatic server-side reprepares in Com_stmt_prepare.
+    const prepares = try sessionCounter(&c, "Com_stmt_prepare");
+    const reprepares = try sessionCounter(&c, "Com_stmt_reprepare");
+    try std.testing.expectEqual(@as(u64, 4), prepares - reprepares);
+    try std.testing.expectEqual(@as(u64, 2), try sessionCounter(&c, "Com_stmt_close"));
+    try c.clearStatementCache(io);
+    try std.testing.expectEqual(@as(u64, 4), try sessionCounter(&c, "Com_stmt_close"));
+}
+
+test "cached statements execute writes and preserve server errors" {
+    var c = try Conn.init(allocator, io, &test_config);
+    defer c.deinit(allocator, io);
+    try queryExpectOk(&c, "USE mysql");
+    try queryExpectOk(&c, "CREATE TEMPORARY TABLE myzql_cached_values (id INT PRIMARY KEY)");
+
+    for ([_]u32{ 1, 2 }) |id| {
+        const result = try c.exec(io, "INSERT INTO myzql_cached_values VALUES (?)", .{id});
+        _ = try result.expect(.ok);
+    }
+    const duplicate = try c.exec(io, "INSERT INTO myzql_cached_values VALUES (?)", .{@as(u32, 1)});
+    const err = try duplicate.expect(.err);
+    try std.testing.expectEqual(@as(u16, 1062), err.error_code);
+    const last = try c.exec(io, "INSERT INTO myzql_cached_values VALUES (?)", .{@as(u32, 3)});
+    _ = try last.expect(.ok);
+
+    const prepares = try sessionCounter(&c, "Com_stmt_prepare");
+    const reprepares = try sessionCounter(&c, "Com_stmt_reprepare");
+    try std.testing.expectEqual(@as(u64, 1), prepares - reprepares);
+    const result = try c.query(io, "SELECT COUNT(*) FROM myzql_cached_values");
+    const rows = try result.expect(.rows);
+    const row = (try rows.first(io)) orelse return error.MissingRow;
+    const elems = try row.textElems(allocator);
+    defer elems.deinit(allocator);
+    try std.testing.expectEqualStrings("3", elems.elems[0].?);
+}
+
+test "cached statements remain bounded for many queries" {
+    var config = test_config;
+    config.statement_cache_capacity = 2;
+    var c = try Conn.init(allocator, io, &config);
+    defer c.deinit(allocator, io);
+
+    for (0..64) |i| {
+        var buffer: [32]u8 = undefined;
+        const sql = try std.fmt.bufPrint(&buffer, "SELECT ? AS c{d}", .{i});
+        try std.testing.expectEqual(@as(u32, @intCast(i)), try execCachedU32(&c, sql, @intCast(i)));
+    }
+    try std.testing.expectEqual(@as(u64, 62), try sessionCounter(&c, "Com_stmt_close"));
+    try c.clearStatementCache(io);
+    try std.testing.expectEqual(@as(u64, 64), try sessionCounter(&c, "Com_stmt_close"));
+}
+
+test "cached statements wait for outstanding rows" {
+    var config = test_config;
+    config.statement_cache_capacity = 1;
+    var c = try Conn.init(allocator, io, &config);
+    defer c.deinit(allocator, io);
+
+    const result = try c.exec(io, "SELECT ? AS a", .{@as(u32, 7)});
+    const rows = try result.expect(.rows);
+    try std.testing.expectError(error.ResultNotConsumed, c.exec(io, "SELECT ? AS b", .{@as(u32, 8)}));
+    try std.testing.expectError(error.ResultNotConsumed, c.clearStatementCache(io));
+    _ = (try rows.first(io)) orelse return error.MissingRow;
+    try std.testing.expectEqual(@as(u32, 8), try execCachedU32(&c, "SELECT ? AS b", 8));
+    try std.testing.expectEqual(@as(u64, 1), try sessionCounter(&c, "Com_stmt_close"));
+
+    const empty = try c.exec(io, "SELECT ? AS a WHERE 0", .{@as(u32, 1)});
+    const empty_rows = try empty.expect(.rows);
+    try std.testing.expect((try empty_rows.first(io)) == null);
+    try std.testing.expectEqual(@as(u32, 9), try execCachedU32(&c, "SELECT ? AS b", 9));
+}
+
+test "cached statements reject unfinished multi-statement results" {
+    var config = test_config;
+    config.multi_statements = true;
+    {
+        var c = try Conn.init(allocator, io, &config);
+        defer c.deinit(allocator, io);
+        const result = try c.query(io, "SELECT 1; SELECT 2");
+        const rows = try result.expect(.rows);
+        _ = (try rows.first(io)) orelse return error.MissingRow;
+        try std.testing.expectError(error.ResultNotConsumed, c.exec(io, "SELECT ?", .{@as(u32, 1)}));
+    }
+    {
+        var c = try Conn.init(allocator, io, &config);
+        defer c.deinit(allocator, io);
+        const result = try c.query(io, "SET @myzql_test = 1; SELECT 2");
+        _ = try result.expect(.ok);
+        try std.testing.expectError(error.ResultNotConsumed, c.exec(io, "SELECT ?", .{@as(u32, 1)}));
+    }
+}
+
+test "cached statements handle errors and disabled cache" {
+    var config = test_config;
+    config.logger = null;
+    {
+        var c = try Conn.init(allocator, io, &config);
+        defer c.deinit(allocator, io);
+
+        const bad_sql = try c.exec(io, "this is not valid SQL", .{});
+        _ = try bad_sql.expect(.err);
+        try std.testing.expectError(error.ParamsCountNotMatch, c.exec(io, "SELECT ? AS a", .{}));
+        try std.testing.expectEqual(@as(u32, 9), try execCachedU32(&c, "SELECT ? AS a", 9));
+        const prepares = try sessionCounter(&c, "Com_stmt_prepare");
+        const reprepares = try sessionCounter(&c, "Com_stmt_reprepare");
+        try std.testing.expectEqual(@as(u64, 2), prepares - reprepares);
+    }
+    config.statement_cache_capacity = 0;
+    var c = try Conn.init(allocator, io, &config);
+    defer c.deinit(allocator, io);
+    try std.testing.expectError(error.StatementCacheDisabled, c.exec(io, "SELECT ?", .{@as(u32, 1)}));
+    try c.clearStatementCache(io);
+    try c.ping(io);
+}
+
+test "cached statements can be cleared after changing databases" {
+    var c = try Conn.init(allocator, io, &test_config);
+    defer c.deinit(allocator, io);
+    try queryExpectOk(&c, "USE mysql");
+
+    const first = try c.exec(io, "SELECT User FROM user LIMIT 1", .{});
+    const rows = try first.expect(.rows);
+    _ = try rows.first(io);
+    try queryExpectOk(&c, "USE performance_schema");
+    try c.clearStatementCache(io);
+
+    const second = try c.exec(io, "SELECT User FROM user LIMIT 1", .{});
+    _ = try second.expect(.err);
+    try c.ping(io);
+}
+
+test "cached statements discard connection on prepare allocation failure" {
+    var failing = std.testing.FailingAllocator.init(allocator, .{});
+    const failing_allocator = failing.allocator();
+    var c = try Conn.init(failing_allocator, io, &test_config);
+    defer c.deinit(failing_allocator, io);
+
+    failing.fail_index = failing.alloc_index;
+    try std.testing.expectError(error.OutOfMemory, c.exec(io, "SELECT ? AS a", .{@as(u32, 1)}));
+    try std.testing.expect(c.connected);
+    failing.fail_index = std.math.maxInt(usize);
+    _ = try execCachedU32(&c, "SELECT ? AS a", 1);
+    try c.clearStatementCache(io);
+    failing.fail_index = failing.alloc_index + 1;
+    try std.testing.expectError(error.OutOfMemory, c.exec(io, "SELECT ? AS b", .{@as(u32, 2)}));
+    try std.testing.expect(!c.connected);
 }
 
 test "prepare execute - 1" {

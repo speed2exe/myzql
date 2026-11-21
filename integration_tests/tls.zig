@@ -212,6 +212,26 @@ test "tls - prepared statement close" {
     try c.ping(io);
 }
 
+test "tls - cached statements" {
+    if (build_options.tls_ca_path == null) return error.SkipZigTest;
+
+    var config = tlsConfig();
+    config.ssl_verify = false;
+    var c = try Conn.init(allocator, io, &config);
+    defer c.deinit(allocator, io);
+
+    for (0..3) |_| {
+        const result = try c.exec(io, "SELECT ? + 1", .{@as(u32, 41)});
+        const rows = try result.expect(.rows);
+        const row = (try rows.first(io)) orelse return error.MissingRow;
+        var dest: struct { value: u64 } = undefined;
+        try row.scan(&dest);
+        try std.testing.expectEqual(@as(u64, 42), dest.value);
+    }
+    try c.clearStatementCache(io);
+    try c.ping(io);
+}
+
 test "tls - pool reuses encrypted connections" {
     if (build_options.tls_ca_path == null) return error.SkipZigTest;
 

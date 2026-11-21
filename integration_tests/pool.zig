@@ -18,6 +18,7 @@ const TextResultRow = myzql.result.TextResultRow;
 const TextElemIter = myzql.result.TextElemIter;
 const TextElems = myzql.result.TextElems;
 const PreparedStatement = myzql.result.PreparedStatement;
+const sessionCounter = @import("./conn.zig").sessionCounter;
 
 const io = std.testing.io;
 const allocator = std.testing.allocator;
@@ -172,6 +173,65 @@ test "prepared statement close across pool reuse" {
     defer table.deinit(allocator);
     try std.testing.expectEqual(@as(usize, 1), table.table.len);
     try std.testing.expectEqualStrings("64", table.table[0][1].?);
+    try mc.ping(io);
+}
+
+test "cached statements survive pool reuse and honor capacity" {
+    var config = test_config;
+    config.statement_cache_capacity = 1;
+    var pool = try Pool.init(allocator, &config, .{ .max_size = 1 });
+    defer pool.deinit(io);
+
+    for (0..3) |_| {
+        var mc = try pool.acquireManaged(io);
+        defer mc.deinit(io);
+        const result = try mc.exec(io, "SELECT ? AS a", .{@as(u32, 1)});
+        const rows = try result.expect(.rows);
+        _ = (try rows.first(io)) orelse return error.MissingRow;
+    }
+
+    var mc = try pool.acquireManaged(io);
+    defer mc.deinit(io);
+    const result = try mc.exec(io, "SELECT ? AS b", .{@as(u32, 2)});
+    const rows = try result.expect(.rows);
+    _ = (try rows.first(io)) orelse return error.MissingRow;
+
+    const prepares = try sessionCounter(mc.raw(), "Com_stmt_prepare");
+    const reprepares = try sessionCounter(mc.raw(), "Com_stmt_reprepare");
+    try std.testing.expectEqual(@as(u64, 2), prepares - reprepares);
+    try std.testing.expectEqual(@as(u64, 1), try sessionCounter(mc.raw(), "Com_stmt_close"));
+}
+
+test "cached statements are scoped to each pooled connection" {
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 2 });
+    defer pool.deinit(io);
+    var first = try pool.acquireManaged(io);
+    defer first.deinit(io);
+    var second = try pool.acquireManaged(io);
+    defer second.deinit(io);
+
+    for ([_]*Pool.ManagedConn{ &first, &second }) |mc| {
+        const result = try mc.exec(io, "SELECT ? AS a", .{@as(u32, 1)});
+        const rows = try result.expect(.rows);
+        _ = (try rows.first(io)) orelse return error.MissingRow;
+        const prepares = try sessionCounter(mc.raw(), "Com_stmt_prepare");
+        const reprepares = try sessionCounter(mc.raw(), "Com_stmt_reprepare");
+        try std.testing.expectEqual(@as(u64, 1), prepares - reprepares);
+    }
+}
+
+test "pool discards connection with outstanding cached result" {
+    var pool = try Pool.init(allocator, &test_config, .{ .max_size = 1 });
+    defer pool.deinit(io);
+    {
+        var mc = try pool.acquireManaged(io);
+        defer mc.deinit(io);
+        const result = try mc.exec(io, "SELECT ? AS a", .{@as(u32, 1)});
+        _ = try result.expect(.rows);
+    }
+    try std.testing.expectEqual(@as(usize, 0), pool.totalCount(io));
+    var mc = try pool.acquireManaged(io);
+    defer mc.deinit(io);
     try mc.ping(io);
 }
 

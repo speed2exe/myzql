@@ -16,7 +16,7 @@ pub const TEXT_RESULT_ROW_NULL: u8 = 0xFB;
 // https://dev.mysql.com/doc/dev/mysql-server/latest/mysql__com_8h.html
 pub const SERVER_STATUS_IN_TRANS:             u16 = 1 << 0;
 pub const SERVER_STATUS_AUTOCOMMIT:           u16 = 1 << 1;
-pub const SERVER_MORE_RESULTS_EXISTS:         u16 = 1 << 2;
+pub const SERVER_MORE_RESULTS_EXISTS:         u16 = 1 << 3;
 pub const SERVER_QUERY_NO_GOOD_INDEX_USED:    u16 = 1 << 3;
 pub const SERVER_STATUS_CURSOR_EXISTS:        u16 = 1 << 4;
 pub const SERVER_STATUS_LAST_ROW_SENT:        u16 = 1 << 5;
